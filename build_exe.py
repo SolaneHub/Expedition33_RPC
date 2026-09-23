@@ -16,6 +16,8 @@ def build():
         "src/expedition33_rpc/assets/icon.ico",
         "--add-data",
         "src/expedition33_rpc/assets/icon.png;expedition33_rpc/assets",
+        "--add-data",
+        "src/expedition33_rpc/assets/bridge.zip;expedition33_rpc/assets",
         "--paths",
         "src",
         "--clean",

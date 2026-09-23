@@ -10,7 +10,7 @@ from PIL import Image
 from pystray import Menu
 from pystray import MenuItem as item
 
-from expedition33_rpc import startup
+from expedition33_rpc import bridge_installer, startup
 from expedition33_rpc.detector import GameDetector, GameState
 from expedition33_rpc.discord_rpc import DiscordRPCManager
 
@@ -52,6 +52,21 @@ class ExpeditionTrayApp:
         self.running = True
         self.icon = None
         self.worker_thread = None
+        self.bridge_auto_installed = False
+
+        # Attempt automatic combat bridge installation on startup if game folder exists
+        self.check_and_auto_install_bridge()
+
+    def check_and_auto_install_bridge(self):
+        try:
+            game_dir = bridge_installer.find_game_win64_directory()
+            if game_dir and not bridge_installer.is_bridge_installed(game_dir):
+                success, msg = bridge_installer.install_bridge(game_dir)
+                if success:
+                    self.bridge_auto_installed = True
+                    print(f"[TrayApp] Automatically deployed Combat Bridge to: {game_dir}")
+        except Exception as e:
+            print(f"[TrayApp] Bridge auto-install check failed: {e}")
 
     def get_icon_image(self) -> Image.Image:
         icon_path = get_resource_path("icon.png")
@@ -75,6 +90,14 @@ class ExpeditionTrayApp:
                 state = self.detector.get_game_state()
                 self.current_state = state
                 self.rpc_manager.update(state)
+
+                # Periodic auto-install check while game is running
+                if (
+                    state.is_running
+                    and not self.bridge_auto_installed
+                    and not bridge_installer.is_bridge_installed()
+                ):
+                    self.check_and_auto_install_bridge()
 
                 if self.icon is not None:
                     if state.is_running:
@@ -109,6 +132,17 @@ class ExpeditionTrayApp:
             return "🟢 Discord: Connected"
         return "⚪ Discord: Standby (Listening)"
 
+    def menu_bridge_toggle(self, item) -> str:
+        if bridge_installer.is_bridge_installed():
+            return "⚔️ Combat Bridge  [✓ Installed]"
+        return "⚔️ Combat Bridge  [Install Now]"
+
+    def action_toggle_bridge(self, icon, item):
+        if bridge_installer.is_bridge_installed():
+            bridge_installer.uninstall_bridge()
+        else:
+            bridge_installer.install_bridge()
+
     def menu_startup_toggle(self, item) -> str:
         if startup.is_startup_enabled():
             return "🚀 Start with Windows  [✓]"
@@ -132,6 +166,7 @@ class ExpeditionTrayApp:
             item(self.menu_combat_status, lambda icon, item: None, enabled=False),
             item(self.menu_discord_status, lambda icon, item: None, enabled=False),
             Menu.SEPARATOR,
+            item(self.menu_bridge_toggle, self.action_toggle_bridge),
             item(self.menu_startup_toggle, self.action_toggle_startup),
             Menu.SEPARATOR,
             item("❌ Exit", self.action_exit),

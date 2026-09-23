@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.0] - 2026-09-24
+
+### Added
+- **Real-Time Combat Bridge**:
+  - Headless, non-intrusive Lua bridge powered by UE4SS interfacing directly with `AC_jRPG_BattleManager_C`.
+  - Instant real-time detection of turn-based battle initiation and conclusion without CPU-intensive memory scanning.
+  - Silent headless configuration with zero overlays, debug consoles, or gameplay interference.
+- **Automatic Bridge Deployment**:
+  - Embedded `bridge.zip` bundled directly within the executable.
+  - Automatic Steam library discovery (`libraryfolders.vdf`) to detect and deploy into `Sandfall/Binaries/Win64` upon application startup.
+  - Context menu toggle in the system tray (`⚔️ Combat Bridge`) for instant verification, installation, or uninstallation.
+
 ## [v1.0.0] - 2026-09-23
 
 ### Added
