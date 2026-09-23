@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.2.0] - 2026-09-24
+
+### Added
+- **Enemy Combat Name Extraction**:
+  - Real-time extraction of enemy and boss names during turn-based encounters (e.g., `⚔️ Combattendo: Francois`, `⚔️ Battling: Goblu x2`).
+  - Resilient multi-tier extraction pipeline querying localized `CharacterName`, `EnemyName`, battle stats components, and cleaned Blueprint actor identifiers.
+  - Multi-target grouping with count badges (`x2`, `x3`) and length formatting for Discord Rich Presence.
+- **Unified Anti-Spoiler Mode**:
+  - Interactive toggle button in the tray context menu (`🛡️ Anti-Spoiler Mode  [✓ Enabled] / [ ]`).
+  - Concurrently obscures both enemy names and location zones to prevent story spoilers:
+    - Encounters masked to generic `⚔️ In Combattimento` (`⚔️ In Combat`).
+    - Locations masked to `📍 Posizione Riservata` (`📍 Hidden Location`).
+  - Seamless persistence across restarts via Windows Registry (`HKCU\Software\Expedition33_RPC\AntiSpoiler`).
+  - Immediate Rich Presence state synchronization on toggle without restarting the app.
+
 ## [v1.1.0] - 2026-09-24
 
 ### Added

@@ -2,5 +2,5 @@
 
 from expedition33_rpc.app import main
 
-__version__ = "v1.1.0"
+__version__ = "v1.2.0"
 __all__ = ["main"]

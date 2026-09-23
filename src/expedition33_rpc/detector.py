@@ -32,6 +32,7 @@ class GameState:
     raw_zone: str = ""
     zone_name: str = "In esplorazione"
     in_combat: bool = False
+    enemy_name: str = ""
     game_language: str = "it"
 
 
@@ -174,11 +175,13 @@ class GameDetector:
 
         raw_zone = ""
         in_combat = False
+        enemy_name = ""
 
         bridge = self.read_bridge_status()
         if bridge:
             raw_zone = bridge.get("zone", "")
             in_combat = bridge.get("in_combat", False)
+            enemy_name = bridge.get("enemy_name", "")
 
         if not raw_zone:
             save_dir = self.get_latest_save_dir()
@@ -199,5 +202,6 @@ class GameDetector:
             raw_zone=raw_zone,
             zone_name=zone_display,
             in_combat=in_combat,
+            enemy_name=enemy_name,
             game_language=lang,
         )

@@ -8,7 +8,8 @@ A lightweight, autonomous Windows Discord Rich Presence (RPC) application design
 
 - 🎮 **Continuous Autonomous Detection**: Runs quietly in the background and automatically establishes a Discord Rich Presence connection whenever the game process (`SandFall-Win64-Shipping.exe`) starts, cleanly releasing the session upon game exit.
 - 📍 **Real-Time Location Tracking**: Automatically reads current zone information from save data and translates area names to match your game's active language setting (e.g., *Vero Cugino di Esquie*, *Verso's Draft*, *World Map*).
-- ⚔️ **Live Combat vs. Exploration Detection**: Accurately switches between `⚔️ In Combattimento` (`In Combat`) and `🧭 In Esplorazione` (`Exploring`) the exact moment you enter or exit turn-based battles.
+- ⚔️ **Live Combat & Enemy Extraction**: Accurately switches between exploration and combat encounters, revealing enemy names and boss titles in real time (e.g., `⚔️ Combattendo: Francois`, `⚔️ Battling: Goblu x2`).
+- 🛡️ **Unified Anti-Spoiler Mode**: Dedicated system tray toggle (`🛡️ Anti-Spoiler Mode [✓]`) that simultaneously obscures both active enemy names and location zones into generic place-holders (`📍 Posizione Riservata`, `⚔️ In Combattimento`).
 - ⏱️ **Live Session Timer**: Tracks elapsed gameplay duration in the current session.
 - 🚀 **Windows Startup Integration**: Toggle automatic launch on Windows startup directly from the system tray context menu (`HKEY_CURRENT_USER\...\Run`).
 - 🔕 **Minimal System Tray Presence**: Lives discreetly near the Windows taskbar clock with an official stylized "33" golden brush icon and an intuitive right-click context menu.
@@ -62,6 +63,7 @@ If you prefer to inspect or manage files manually:
 │       ├── bridge_installer.py   # Steam library detector & automatic bridge deployment
 │       ├── detector.py           # Process detector, save parser & zone translator
 │       ├── discord_rpc.py        # Discord Rich Presence IPC client (pypresence)
+│       ├── settings.py           # Persistent settings & Anti-Spoiler manager (Registry)
 │       ├── startup.py            # Windows Registry startup manager (HKCU Run key)
 │       ├── tray_app.py           # System tray icon, polling loop & context menu
 │       └── assets/               # Embedded application assets

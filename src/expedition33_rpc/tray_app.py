@@ -10,7 +10,7 @@ from PIL import Image
 from pystray import Menu
 from pystray import MenuItem as item
 
-from expedition33_rpc import bridge_installer, startup
+from expedition33_rpc import bridge_installer, settings, startup
 from expedition33_rpc.detector import GameDetector, GameState
 from expedition33_rpc.discord_rpc import DiscordRPCManager
 
@@ -87,9 +87,10 @@ class ExpeditionTrayApp:
     def update_loop(self):
         while self.running:
             try:
+                anti_spoiler = settings.is_anti_spoiler_enabled()
                 state = self.detector.get_game_state()
                 self.current_state = state
-                self.rpc_manager.update(state)
+                self.rpc_manager.update(state, anti_spoiler=anti_spoiler)
 
                 # Periodic auto-install check while game is running
                 if (
@@ -101,8 +102,15 @@ class ExpeditionTrayApp:
 
                 if self.icon is not None:
                     if state.is_running:
-                        mode = "In Combat" if state.in_combat else "Exploring"
-                        self.icon.title = f"Expedition 33: {state.zone_name} ({mode})"
+                        if anti_spoiler:
+                            mode = "In Combat" if state.in_combat else "Exploring"
+                            self.icon.title = f"Expedition 33: [Protected] ({mode})"
+                        else:
+                            if state.in_combat and state.enemy_name:
+                                mode = f"In Combat vs {state.enemy_name}"
+                            else:
+                                mode = "In Combat" if state.in_combat else "Exploring"
+                            self.icon.title = f"Expedition 33: {state.zone_name} ({mode})"
                     else:
                         self.icon.title = "Expedition 33 RPC (Waiting for game...)"
             except Exception as e:
@@ -116,21 +124,37 @@ class ExpeditionTrayApp:
         return "🎮 Game: Not running"
 
     def menu_zone_status(self, item) -> str:
-        if self.current_state.is_running:
-            return f"📍 Location: {self.current_state.zone_name}"
-        return "📍 Location: --"
+        if not self.current_state.is_running:
+            return "📍 Location: --"
+        if settings.is_anti_spoiler_enabled():
+            return "📍 Location: [Hidden - Anti-Spoiler]"
+        return f"📍 Location: {self.current_state.zone_name}"
 
     def menu_combat_status(self, item) -> str:
-        if self.current_state.is_running:
-            if self.current_state.in_combat:
-                return "⚔️ Status: In Combat"
-            return "🧭 Status: Exploring"
-        return "⚔️ Status: --"
+        if not self.current_state.is_running:
+            return "⚔️ Status: --"
+        anti_spoiler = settings.is_anti_spoiler_enabled()
+        if self.current_state.in_combat:
+            if not anti_spoiler and self.current_state.enemy_name:
+                return f"⚔️ Combat: vs {self.current_state.enemy_name}"
+            return "⚔️ Status: In Combat"
+        return "🧭 Status: Exploring"
 
     def menu_discord_status(self, item) -> str:
         if self.rpc_manager.is_connected:
             return "🟢 Discord: Connected"
         return "⚪ Discord: Standby (Listening)"
+
+    def menu_anti_spoiler_toggle(self, item) -> str:
+        if settings.is_anti_spoiler_enabled():
+            return "🛡️ Anti-Spoiler Mode  [✓ Enabled]"
+        return "🛡️ Anti-Spoiler Mode  [ ]"
+
+    def action_toggle_anti_spoiler(self, icon, item):
+        new_val = settings.toggle_anti_spoiler()
+        print(f"[TrayApp] Anti-Spoiler toggled to: {new_val}")
+        self.rpc_manager.last_update_state = None
+        self.rpc_manager.update(self.current_state, anti_spoiler=new_val)
 
     def menu_bridge_toggle(self, item) -> str:
         if bridge_installer.is_bridge_installed():
@@ -166,6 +190,7 @@ class ExpeditionTrayApp:
             item(self.menu_combat_status, lambda icon, item: None, enabled=False),
             item(self.menu_discord_status, lambda icon, item: None, enabled=False),
             Menu.SEPARATOR,
+            item(self.menu_anti_spoiler_toggle, self.action_toggle_anti_spoiler),
             item(self.menu_bridge_toggle, self.action_toggle_bridge),
             item(self.menu_startup_toggle, self.action_toggle_startup),
             Menu.SEPARATOR,
