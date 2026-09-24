@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "expedition33-discord-rpc"
-version = "v1.3.0"
+version = "v1.4.0"
 description = "Discord Rich Presence for Clair Obscur: Expedition 33"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,7 +32,7 @@ dependencies = [
     "psutil>=5.9.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pyinstaller>=6.0.0",
     "ruff>=0.9.0",
@@ -42,11 +42,8 @@ dev = [
 [project.scripts]
 expedition33-rpc = "expedition33_rpc.app:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-expedition33_rpc = ["assets/*"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/expedition33_rpc"]
 
 [tool.ruff]
 target-version = "py310"
@@ -58,8 +55,6 @@ exclude = [
     "build",
     "dist",
     ".venv",
-    "venv",
-    ".mypy_cache",
     ".ruff_cache",
 ]
 
@@ -72,6 +67,7 @@ select = [
     "B",   # flake8-bugbear
     "UP",  # pyupgrade
     "SIM", # flake8-simplify
+    "ARG", # flake8-unused-arguments
 ]
 ignore = [
     "E501", # Line length (handled by formatter)
@@ -89,13 +85,15 @@ exclude = [
     "build",
     "dist",
     ".venv",
-    "venv",
 ]
 pythonVersion = "3.10"
 pythonPlatform = "Windows"
+venvPath = "."
+venv = ".venv"
 typeCheckingMode = "standard"
 reportMissingImports = true
 reportMissingTypeStubs = false
 reportUnknownMemberType = false
 reportUnknownArgumentType = false
 reportUnknownVariableType = false
+

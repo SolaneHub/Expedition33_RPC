@@ -13,6 +13,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build-and-release:
@@ -22,28 +24,72 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .[dev]
+        run: uv sync --frozen
 
       - name: Verify Code Quality (Ruff & Pyright)
         run: |
-          ruff check
-          ruff format --check
+          uv run ruff check
+          uv run ruff format --check
+          uv run pyright
 
       - name: Build Standalone Executable
-        run: python build_exe.py
+        run: uv run python build_exe.py
+
+      - name: Generate SHA-256 Checksums
+        shell: python
+        run: |
+          import hashlib
+          from pathlib import Path
+
+          files_to_hash = [
+              Path("dist/Expedition33_RPC.exe"),
+              Path("src/expedition33_rpc/assets/bridge.zip"),
+          ]
+
+          lines = []
+          for p in files_to_hash:
+              if p.exists():
+                  h = hashlib.sha256(p.read_bytes()).hexdigest()
+                  lines.append(f"{h}  {p.name}")
+                  print(f"{h}  {p.name}")
+
+          with open("dist/SHA256SUMS.txt", "w", encoding="utf-8") as f:
+              f.write("\n".join(lines) + "\n")
+
+      - name: Generate Artifact Attestation
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
+        with:
+          subject-path: "dist/Expedition33_RPC.exe"
+
+      - name: Scan with VirusTotal
+        id: virustotal
+        if: env.VT_API_KEY != ''
+        continue-on-error: true
+        uses: crazy-max/ghaction-virustotal@v4
+        with:
+          vt_api_key: ${{ secrets.VT_API_KEY }}
+          files: |
+            dist/Expedition33_RPC.exe
+            src/expedition33_rpc/assets/bridge.zip
+          request_rate: 4
+        env:
+          VT_API_KEY: ${{ secrets.VT_API_KEY }}
 
       - name: Extract Changelog Section
         id: extract_changelog
         shell: python
+        env:
+          VT_ANALYSIS: ${{ steps.virustotal.outputs.analysis }}
         run: |
           import os
           import re
@@ -74,6 +120,25 @@ jobs:
               match = re.search(r"## \[[^\]]+\][^\n]*\n(.*?)(?=\n## \[|\Z)", content, re.DOTALL)
 
           release_notes = match.group(1).strip() if match else content
+
+          # Append verification and security section
+          sec_lines = ["\n\n## Verification & Security\n\n"]
+          if os.path.exists("dist/SHA256SUMS.txt"):
+              with open("dist/SHA256SUMS.txt", "r", encoding="utf-8") as sf:
+                  checksums = sf.read().strip()
+              sec_lines.append(f"### SHA-256 Checksums\n```text\n{checksums}\n```\n\n")
+
+          vt_analysis = os.environ.get("VT_ANALYSIS", "").strip()
+          if vt_analysis:
+              sec_lines.append("### VirusTotal Analysis Reports\n")
+              for item in vt_analysis.split(","):
+                  item = item.strip()
+                  if "=" in item:
+                      fname, url = item.split("=", 1)
+                      sec_lines.append(f"- **{fname}**: [VirusTotal Report]({url})\n")
+
+          release_notes += "".join(sec_lines)
+
           with open("RELEASE_NOTES.md", "w", encoding="utf-8") as out:
               out.write(release_notes)
 
@@ -85,7 +150,9 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Expedition33_RPC.exe
+          files: |
+            dist/Expedition33_RPC.exe
+            dist/SHA256SUMS.txt
           body_path: RELEASE_NOTES.md
           tag_name: ${{ steps.extract_changelog.outputs.version || 'v1.1.0' }}
           name: ${{ steps.extract_changelog.outputs.version || 'v1.1.0' }}

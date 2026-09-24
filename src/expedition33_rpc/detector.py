@@ -19,17 +19,17 @@ class GameState:
     process_pid: int | None = None
     start_time: float | None = None
     raw_zone: str = ""
-    zone_name: str = "In esplorazione"
+    zone_name: str = "Exploring"
     in_combat: bool = False
     enemy_name: str = ""
-    game_language: str = "it"
+    game_language: str = "en"
 
 
 class GameDetector:
     def __init__(self):
         self.cached_pid: int | None = None
         self.game_start_time: float | None = None
-        self.last_zone: str = "In esplorazione"
+        self.last_zone: str = "Exploring"
 
     def get_game_language(self) -> str:
         ini_path = os.path.expandvars(
@@ -44,7 +44,7 @@ class GameDetector:
                             return line.split("=", 1)[1].lower().strip()
             except Exception:
                 pass
-        return "it"
+        return "en"
 
     def find_game_process(self) -> psutil.Process | None:
         if self.cached_pid is not None:
@@ -124,9 +124,9 @@ class GameDetector:
                     pass
         return None
 
-    def format_zone_name(self, raw_name: str, lang: str = "it") -> str:
+    def format_zone_name(self, raw_name: str, lang: str = "en") -> str:
         if not raw_name:
-            return "In esplorazione"
+            return "In esplorazione" if lang.startswith("it") else "Exploring"
 
         menu_names = {
             "Main Menu",

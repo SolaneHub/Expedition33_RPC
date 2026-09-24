@@ -1,3 +1,4 @@
+import contextlib
 import ctypes
 import os
 import sys
@@ -27,6 +28,13 @@ def main():
     """Application entry point."""
     if sys.platform == "win32" and is_already_running():
         sys.exit(0)
+
+    # Clean up leftover .old binary from a previous self-update
+    if getattr(sys, "frozen", False):
+        old_binary = sys.executable + ".old"
+        if os.path.exists(old_binary):
+            with contextlib.suppress(OSError):
+                os.remove(old_binary)
 
     base_dir = get_base_dir()
 

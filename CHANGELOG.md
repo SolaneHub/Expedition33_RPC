@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.4.0] - 2026-09-24
+
+### Added
+- **Modern Packaging & Environment Architecture**:
+  - Migrated build backend from legacy `setuptools` to `hatchling` (PEP 517/518/621/660), eliminating `*.egg-info` workspace pollution.
+  - Adopted `uv` as the project package manager, featuring deterministic dependency resolution via `uv.lock` and Python version pinning to 3.10 via `.python-version`.
+  - Adopted PEP 735 `[dependency-groups]` for development tooling (`pyinstaller`, `ruff`, `pyright`), enabling single-command `uv sync`.
+- **Release Security & Cryptographic Verification**:
+  - Automated SHA-256 checksum generation (`SHA256SUMS.txt`) included with all release artifacts and release notes.
+  - GitHub Artifact Attestation (`actions/attest-build-provenance@v2` / Sigstore) for verifiable supply-chain security and build provenance.
+  - Automated multi-engine antivirus scanning via VirusTotal (`crazy-max/ghaction-virustotal@v4`) integrated into the release pipeline.
+- **Natural Bilingual Presence Phrasing**:
+  - Refined combat status to natural gaming conventions:
+    - English: `Fighting: <Enemy>` (in encounter) and `In Combat` (generic / anti-spoiler).
+    - Italian: `In combattimento con: <Enemy>` (in encounter) and `In combattimento` (generic / anti-spoiler).
+  - Enhanced tray status indicators to match the standardized combat phrasing.
+- **Semi-Automatic In-App Auto-Updater**:
+  - Implemented native `AppUpdater` communicating directly with GitHub Releases API with zero external dependencies.
+  - Silent background check on startup with tray toast notification when a newer release is published.
+  - Dynamic tray menu item: shows `Check for Updates` or `Update to vX.X.X [Install Now]` with live progress percentage.
+  - Cryptographic integrity: verifies SHA-256 hash against `SHA256SUMS.txt` before applying the update.
+  - Seamless Windows trampoline: safely replaces running `.exe` via detached switch script and restarts the app automatically.
+
+### Changed
+- **CI/CD Pipeline Modernization**:
+  - Upgraded GitHub Actions release workflow to use `astral-sh/setup-uv@v5` with `--frozen` lockfile installation and automated pyright type validation.
+- **Emoji Removal**:
+  - Removed all emojis across application code, Discord presence strings, system tray labels, and documentation to ensure clean display and avoid Windows console encoding conflicts.
+- **Code Quality & Linter Enforcement**:
+  - Enabled Ruff `ARG` rule (`flake8-unused-arguments`) and VS Code `reportUnusedParameter` severity override to automatically flag unused parameters as warnings.
+  - Standardized all `pystray` system tray callbacks, actions, and lambdas to use the catch-all `*_` signature, and replaced the `MenuItem as item` import alias with direct `MenuItem` usage, completely eliminating unused parameter and import warnings across both Pylance and Ruff.
+- **Documentation & Configuration Cleanup**:
+  - Completely restructured `README.md` with focused installation, security transparency, and tray controls reference.
+  - Streamlined `.gitignore` and `pyproject.toml` exclude rules, removing legacy virtualenv, setuptools, and unused cache patterns while tracking `.vscode/settings.json`.
+
 ## [v1.3.0] - 2026-09-24
 
 ### Added
@@ -18,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Multi-target grouping with count badges (`Barbasucette, Licorne x2`) and length formatting for Discord Rich Presence.
   - Periodically re-checks enemies every 3 seconds during combat to reflect defeated enemies in real time.
 - **Unified Anti-Spoiler Mode**:
-  - Interactive toggle button in the tray context menu (`🛡️ Anti-Spoiler Mode`).
+  - Interactive toggle button in the tray context menu (`Anti-Spoiler Mode`).
   - Concurrently obscures both enemy names and location zones to prevent story spoilers.
   - Seamless persistence across restarts via Windows Registry (`HKCU\Software\Expedition33_RPC\AntiSpoiler`).
 
@@ -38,14 +73,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Enemy Combat Name Extraction**:
-  - Real-time extraction of enemy and boss names during turn-based encounters (e.g., `⚔️ Combattendo: Francois`, `⚔️ Battling: Goblu x2`).
+  - Real-time extraction of enemy and boss names during turn-based encounters (e.g., `Fighting: Francois`, `Fighting: Goblu x2`).
   - Resilient multi-tier extraction pipeline querying localized `CharacterName`, `EnemyName`, battle stats components, and cleaned Blueprint actor identifiers.
   - Multi-target grouping with count badges (`x2`, `x3`) and length formatting for Discord Rich Presence.
 - **Unified Anti-Spoiler Mode**:
-  - Interactive toggle button in the tray context menu (`🛡️ Anti-Spoiler Mode  [✓ Enabled] / [ ]`).
+  - Interactive toggle button in the tray context menu (`Anti-Spoiler Mode  [Enabled] / [Disabled]`).
   - Concurrently obscures both enemy names and location zones to prevent story spoilers:
-    - Encounters masked to generic `⚔️ In Combattimento` (`⚔️ In Combat`).
-    - Locations masked to `📍 Posizione Riservata` (`📍 Hidden Location`).
+    - Encounters masked to generic `In Combat` (`In combattimento`).
+    - Locations masked to `Hidden Location` (`Posizione riservata`).
   - Seamless persistence across restarts via Windows Registry (`HKCU\Software\Expedition33_RPC\AntiSpoiler`).
   - Immediate Rich Presence state synchronization on toggle without restarting the app.
 
@@ -59,7 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Automatic Bridge Deployment**:
   - Embedded `bridge.zip` bundled directly within the executable.
   - Automatic Steam library discovery (`libraryfolders.vdf`) to detect and deploy into `Sandfall/Binaries/Win64` upon application startup.
-  - Context menu toggle in the system tray (`⚔️ Combat Bridge`) for instant verification, installation, or uninstallation.
+  - Context menu toggle in the system tray (`Combat Bridge`) for instant verification, installation, or uninstallation.
 
 ## [v1.0.0] - 2026-09-23
 
@@ -67,7 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Autonomous Game Detection**: Automatic detection of *Clair Obscur: Expedition 33* (`SandFall-Win64-Shipping.exe`) process with continuous background polling.
 - **Dynamic Discord Rich Presence**:
   - Live zone & location tracking extracted in real time from `SavesContainer.sav`.
-  - Automatic game language detection (`GameUserSettings.ini`) and localized area name formatting (e.g., Italian, English).
+  - Automatic game language detection (`GameUserSettings.ini`) and localized area name formatting.
   - Combat encounter vs. exploration state tracking.
   - Live session duration timer.
   - Autonomous connection management with clean presence release upon game exit.

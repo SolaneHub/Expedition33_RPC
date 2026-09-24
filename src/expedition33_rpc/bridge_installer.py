@@ -126,25 +126,25 @@ def install_bridge(win64_dir: str | None = None) -> tuple[bool, str]:
     """Extracts and configures the embedded UE4SS real-time combat bridge into the game directory."""
     target_dir = win64_dir or find_game_win64_directory()
     if not target_dir or not os.path.isdir(target_dir):
-        return False, "Directory di gioco non trovata. Avvia il gioco una volta per rilevarla."
+        return False, "Game directory not found. Please launch the game once to detect it."
 
     zip_file = get_resource_path("bridge.zip")
     if not os.path.exists(zip_file):
-        return False, f"File archivio bridge mancante: {zip_file}"
+        return False, f"Bridge archive file missing: {zip_file}"
 
     try:
         with zipfile.ZipFile(zip_file, "r") as zf:
             zf.extractall(target_dir)
-        return True, "Bridge di combattimento installato con successo!"
+        return True, "Combat bridge installed successfully!"
     except Exception as e:
-        return False, f"Errore durante l'installazione del bridge: {e}"
+        return False, f"Error during bridge installation: {e}"
 
 
 def uninstall_bridge(win64_dir: str | None = None) -> tuple[bool, str]:
     """Safely removes the bridge DLL and mod script from the game directory."""
     target_dir = win64_dir or find_game_win64_directory()
     if not target_dir or not os.path.isdir(target_dir):
-        return False, "Directory di gioco non trovata."
+        return False, "Game directory not found."
 
     try:
         dwmapi = os.path.join(target_dir, "dwmapi.dll")
@@ -157,6 +157,6 @@ def uninstall_bridge(win64_dir: str | None = None) -> tuple[bool, str]:
 
             shutil.rmtree(mod_dir, ignore_errors=True)
 
-        return True, "Bridge disinstallato con successo."
+        return True, "Bridge uninstalled successfully."
     except Exception as e:
-        return False, f"Errore durante la disinstallazione: {e}"
+        return False, f"Error during uninstallation: {e}"

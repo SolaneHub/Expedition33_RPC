@@ -1,38 +1,22 @@
-# Byte-compiled / optimized / DLL files
+# Byte-compiled / cache files
 __pycache__/
 *.py[cod]
-*$py.class
 
-# PyInstaller
-*.manifest
-*.spec
+# PyInstaller build outputs
 build/
 dist/
+*.manifest
+*.spec
 
-# Virtual Environments
+# Virtual environment (managed by uv)
 .venv/
-venv/
-ENV/
-env/
 
-# Linter and Type Checker Caches
+# Tooling and IDE caches
 .ruff_cache/
-.mypy_cache/
 .pyright/
-
-# IDE and Editor settings
-.vscode/
 .idea/
-*.swp
-*.swo
 
-# Operating System Files
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
+# Operating system files
 .DS_Store
-
-# User screenshots / temporary files
-image.png
-temp_bridge_*/
+Thumbs.db
+Desktop.ini

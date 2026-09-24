@@ -66,6 +66,10 @@ class DiscordRPCManager:
         is_menu = game_state.zone_name in {
             "Menu Principale",
             "Main Menu",
+            "MainMenu",
+            "Map Game Bootstrap",
+            "Map_Game_Bootstrap",
+            "Bootstrap",
         } or game_state.raw_zone in {
             "Main Menu",
             "MainMenu",
@@ -79,25 +83,25 @@ class DiscordRPCManager:
             state_text = "Menu Principale" if is_it else "Main Menu"
         elif game_state.in_combat:
             if anti_spoiler or not game_state.enemy_name:
-                details_text = "⚔️ In Combattimento" if is_it else "⚔️ In Combat"
+                details_text = "In combattimento" if is_it else "In Combat"
             else:
                 details_text = (
-                    f"⚔️ Combattendo: {game_state.enemy_name}"
+                    f"In combattimento con: {game_state.enemy_name}"
                     if is_it
-                    else f"⚔️ Battling: {game_state.enemy_name}"
+                    else f"Fighting: {game_state.enemy_name}"
                 )
             if anti_spoiler:
-                state_text = "📍 Posizione Riservata" if is_it else "📍 Hidden Location"
+                state_text = "Posizione riservata" if is_it else "Hidden Location"
             else:
                 zone_display = game_state.zone_name or ("In viaggio" if is_it else "Traveling")
-                state_text = f"📍 {zone_display}"
+                state_text = zone_display
         else:
-            details_text = "🧭 In Esplorazione" if is_it else "🧭 Exploring"
+            details_text = "In esplorazione" if is_it else "Exploring"
             if anti_spoiler:
-                state_text = "📍 Posizione Riservata" if is_it else "📍 Hidden Location"
+                state_text = "Posizione riservata" if is_it else "Hidden Location"
             else:
                 zone_display = game_state.zone_name or ("In viaggio" if is_it else "Traveling")
-                state_text = f"📍 {zone_display}"
+                state_text = zone_display
 
         start_timestamp = int(game_state.start_time) if game_state.start_time else int(time.time())
 
