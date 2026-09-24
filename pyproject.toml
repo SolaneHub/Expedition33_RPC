@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "expedition33-discord-rpc"
-version = "v1.2.0"
+version = "v1.3.0"
 description = "Discord Rich Presence for Clair Obscur: Expedition 33"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -12,17 +12,6 @@ TARGET_PROCESS_NAMES = {
     "sandfall.exe",
 }
 
-# Traduzioni italiane integrate per le mappe e zone note
-BUILTIN_TRANSLATIONS_IT = {
-    "Level_Side_VersosDraft": "Bozza di Verso",
-    "SideLevel_VersosDraft": "Bozza di Verso",
-    "Level_Small_EsquieRealCousin": "Vero Cugino di Esquie",
-    "WorldMap": "Mappa del Mondo",
-    "ForgottenBattlefield": "Campo di Battaglia Dimenticato",
-    "SideLevel_AxonPath": "Sentiero degli Axon",
-    "SmallLevel_SimonArea": "Area di Simon",
-}
-
 
 @dataclass
 class GameState:
@@ -139,30 +128,39 @@ class GameDetector:
         if not raw_name:
             return "In esplorazione"
 
-        if lang.startswith("it") and raw_name in BUILTIN_TRANSLATIONS_IT:
-            return BUILTIN_TRANSLATIONS_IT[raw_name]
+        menu_names = {
+            "Main Menu",
+            "MainMenu",
+            "Map Game Bootstrap",
+            "Map_Game_Bootstrap",
+            "Bootstrap",
+        }
+        if raw_name in menu_names:
+            return "Menu Principale" if lang.startswith("it") else "Main Menu"
 
         cleaned = raw_name
         for prefix in [
             "Level_Side_",
             "Level_Small_",
             "Level_Main_",
+            "Level_WorldMap_",
             "Level_",
             "SideLevel_",
             "SmallLevel_",
+            "MainLevel_",
             "SubLevel_",
         ]:
             if cleaned.startswith(prefix):
                 cleaned = cleaned[len(prefix) :]
                 break
 
+        cleaned = re.sub(r"_V\d+$", "", cleaned)
+        cleaned = re.sub(r"_C$", "", cleaned)
+        cleaned = re.sub(r"_\d+$", "", cleaned)
+        cleaned = cleaned.replace("_", " ")
+
         spaced = re.sub(r"([a-z])([A-Z])", r"\1 \2", cleaned)
         spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", spaced)
-
-        spaced = spaced.replace("Versos", "Verso's").replace("Simons", "Simon's")
-        if "Esquie" in spaced and "Cousin" in spaced:
-            spaced = "Vero Cugino di Esquie" if lang.startswith("it") else "Esquie's Real Cousin"
-
         return spaced.strip()
 
     def get_game_state(self) -> GameState:
@@ -182,6 +180,8 @@ class GameDetector:
             raw_zone = bridge.get("zone", "")
             in_combat = bridge.get("in_combat", False)
             enemy_name = bridge.get("enemy_name", "")
+            if enemy_name and ("UObject:" in enemy_name or "0x" in enemy_name):
+                enemy_name = ""
 
         if not raw_zone:
             save_dir = self.get_latest_save_dir()
@@ -194,6 +194,7 @@ class GameDetector:
         zone_display = self.last_zone
         if raw_zone:
             zone_display = self.format_zone_name(raw_zone, lang)
+            self.last_zone = zone_display
 
         return GameState(
             is_running=True,
