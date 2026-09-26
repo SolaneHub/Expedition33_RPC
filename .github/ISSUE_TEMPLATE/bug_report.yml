@@ -1,0 +1,82 @@
+name: Bug Report
+description: Report an issue or unexpected behavior in Expedition33_RPC
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue! Before submitting, please check that you are running the latest version from [Releases](https://github.com/SolaneHub/Expedition33_RPC/releases).
+
+  - type: input
+    id: version
+    attributes:
+      label: Application Version
+      description: What version of Expedition33_RPC are you running? (e.g. v1.5.0)
+      placeholder: v1.5.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: game_edition
+    attributes:
+      label: Game Distribution Platform
+      description: Where is your copy of Clair Obscur: Expedition 33 installed?
+      options:
+        - Steam
+        - Xbox App / PC Game Pass
+        - Other / Custom Directory
+    validations:
+      required: true
+
+  - type: dropdown
+    id: bridge_status
+    attributes:
+      label: Combat Bridge (UE4SS) Status
+      description: Did you install the optional Combat Bridge via the tray menu?
+      options:
+        - Installed & Active
+        - Not Installed (Fallback Save Reader only)
+        - Unknown / Not Sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows 11 (64-bit)
+        - Windows 10 (64-bit)
+        - Windows on Steam Deck / Proton
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the issue is.
+      placeholder: The Discord Rich Presence shows Exploring instead of fighting when encountering...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps To Reproduce
+      description: How can we reproduce this behavior?
+      placeholder: |
+        1. Start Expedition33_RPC.exe
+        2. Launch Clair Obscur: Expedition 33
+        3. Travel to Spring Meadows
+        4. Enter combat with Lancelier
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Additional Context, Screenshots or Logs
+      description: Attach screenshots of your Discord profile, tray menu status, or any relevant details.

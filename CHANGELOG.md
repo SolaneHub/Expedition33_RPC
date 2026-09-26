@@ -19,7 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Live Animated Discord Status Previews**:
   - Added authentic recorded animated GIFs (`preview_combat.gif`, `preview_tower.gif`, `preview_antispoiler.gif`) capturing live transitions between exploration, turn-based combat, Endless Tower multi-target trial encounters, and Anti-Spoiler mode.
 - **Automated Security Verification & Antivirus Transparency**:
-  - Added dedicated VirusTotal CI/CD verification badge and documentation in `README.md`, linking release artifacts directly to automated multi-engine scan results.
+  - Published verified permanent VirusTotal report links for both `Expedition33_RPC.exe` (66/71 clean) and `bridge.zip` (67/68 clean).
+  - Added comprehensive technical false-positive disclosures explaining Microsoft Defender cloud ML heuristics (`Trojan:Win32/Wacatac.B!ml`), PyInstaller self-extracting packaging, static AI classifiers, and UE4SS DLL proxying.
+  - Added dedicated [SECURITY.md](SECURITY.md) outlining private vulnerability reporting guidelines and build provenance.
+- **Discord Developer Portal Compliance & Media Organization**:
+  - Added [PRIVACY.md](PRIVACY.md) and [TERMS.md](TERMS.md) covering zero-telemetry local IPC execution, data privacy, and legal terms.
+  - Partitioned project media into dedicated `docs/github/` (README official artwork banner and animated GIF previews) and `docs/discord_portal/` (official high-resolution transparent assets at 1024x1024 and 512x512).
+- **GitHub Community Infrastructure & Issue Templates**:
+  - Added structured GitHub issue form templates (`.github/ISSUE_TEMPLATE/bug_report.yml`, `feature_request.yml`, and `config.yml` linking to GitHub Discussions).
+  - Added dedicated `💬 Issues, Feedback & Bug Reports` section in `README.md` with contribution guidelines and pre-submission checklists.
+- **UI & Presentation Polish**:
+  - Added a centered shields.io total downloads counter in matching `for-the-badge` style directly under the main download executable button.
+  - Streamlined `🚀 Quick Start` instructions by removing the redundant manual Discord Registered Games toggle, leveraging autonomous process PID binding.
 
 ### Fixed
 - **Internal SpawnPoint Enemy Tag Disambiguation (`The Indigo Tree`)**:
