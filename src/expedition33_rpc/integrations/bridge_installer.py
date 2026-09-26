@@ -34,6 +34,9 @@ def get_resource_path(filename: str) -> str:
     candidate = os.path.join(module_dir, "assets", filename)
     if os.path.exists(candidate):
         return candidate
+    candidate_parent = os.path.join(module_dir, "..", "assets", filename)
+    if os.path.exists(candidate_parent):
+        return candidate_parent
 
     return filename
 

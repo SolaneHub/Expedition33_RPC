@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.0] - 2026-09-26
+
+### Added
+- **Complete In-Game Expedition Flag Mapping (115 Flags across 48 Zones)**:
+  - Exhaustive mapping of all 115 Expedition Flags with dual bilingual support (English and Italian).
+  - Multi-tier dynamic resolution (`format_checkpoint_tag`): resolves full SpawnPoint tags, suffix tags, case-insensitive matches, and automatic CamelCase formatting for unmapped future flags.
+  - Sub-area disambiguation (e.g. `Crumbling Path` in Sirene vs `Glissando` in Sirene's Dress; Monolith Exterior, Interior, and Peak entrance flags).
+- **Official Zone Title Normalization**:
+  - Direct translation of internal Unreal Engine map assets into player-facing titles (e.g. `Level_Goblu_Main` -> *Flying Waters*, `Level_SeaCliff` -> *Stone Wave Cliffs*, `Level_CleasFlyingHouse` -> *Flying Manor*, `Level_SimonArea` -> *The Abyss*, `Level_CleasTower` -> *Endless Tower*).
+- **Process PID Binding for Discord Rich Presence**:
+  - Bound Discord Rich Presence directly to the game's running process PID (`SandFall-Win64-Shipping.exe`) via `pypresence`, preventing collisions with Discord's default game detection.
+- **Live Animated Discord Status Previews**:
+  - Added authentic recorded animated GIFs (`preview_combat.gif`, `preview_tower.gif`, `preview_antispoiler.gif`) capturing live transitions between exploration, turn-based combat, Endless Tower multi-target trial encounters, and Anti-Spoiler mode.
+- **Automated Security Verification & Antivirus Transparency**:
+  - Added dedicated VirusTotal CI/CD verification badge and documentation in `README.md`, linking release artifacts directly to automated multi-engine scan results.
+
+### Fixed
+- **Internal SpawnPoint Enemy Tag Disambiguation (`The Indigo Tree`)**:
+  - Corrected tag mapping for The Indigo Tree in Spring Meadows where the internal Unreal Engine level design tagged the spawn point as `Level.SpawnPoint.SpringMeadows.Eveque` (after the Eveque mini-boss guarding the tree), which previously triggered a fallback display of `Spring Meadows (Eveque)`.
+- **Single-Entrance Zone Flag Normalization**:
+  - Resolved zone entry checkpoints that previously defaulted to generic `(Entrance)` instead of their official in-game flag names (e.g. `Dark Shores` -> `Bloodied Beach`, `Coastal Cave` -> `Forge`, `Sunless Cliffs` -> `Chroma Portal`, `Esoteric Ruins` -> `Lumiere Wrecks`, `The Abyss` -> `Simon`, `Painting Workshop` -> `Broken Conception`).
+- **PyInstaller Environment Inheritance on Self-Update**:
+  - Eliminated `_MEIPASS2` and `_MEIPASS` environment variable leakage from the parent process during self-update, ensuring the freshly updated executable generates a clean temporary runtime directory without `LoadLibrary` (`python310.dll`) collisions.
+
+### Changed
+- **100% Silent PowerShell Auto-Updater Trampoline**:
+  - Replaced legacy `cmd.exe / .bat` switch script with an invisible native Windows PowerShell runner (`-WindowStyle Hidden`, `CREATE_NO_WINDOW`).
+  - Eliminates flashing black console windows, incorporates file-lock retry loops, adds an antivirus settlement pause, and ensures completely autonomous process relaunch via Windows Shell (`Start-Process`).
+- **Modular 4-Tier Architecture Refactoring**:
+  - Restructured monolithic detector and root files into four distinct logical modules:
+    - `core/`: Application lifecycle, single-instance mutex, Windows startup, and settings.
+    - `detection/`: Memory detection, save file parsing, checkpoint resolution, and zone timer tracker.
+    - `integrations/`: Discord RPC manager, UE4SS bridge installer, and GitHub release auto-updater.
+    - `ui/`: System tray application, icon management, and dynamic context menus.
+- **Documentation & Showcase Overhaul**:
+  - Completely redesigned `README.md` featuring a horizontal side-by-side animated status showcase, comprehensive bilingual presence matrix (EN/IT), visual architecture tree, and system tray menu guide.
+- **License Transition to MIT with Attribution**:
+  - Updated the license terms to explicitly mandate visible attribution to the author (SolaneHub) and a direct repository link in all public distributions, forks, or derivative works.
+- **CI/CD & Security Enhancements**:
+  - Promoted `VT_API_KEY` to job-level environment in `.github/workflows/release.yml`, ensuring step-level conditionals reliably evaluate secret availability.
+  - Included `bridge.zip` as a first-class release asset alongside `Expedition33_RPC.exe` and `SHA256SUMS.txt`.
+
 ## [v1.4.0] - 2026-09-24
 
 ### Added

@@ -286,34 +286,96 @@ class AppUpdater:
                 return True
 
             current_exe = os.path.abspath(sys.executable)
+            target_dir = os.path.dirname(current_exe)
             current_pid = os.getpid()
+            parent_pid = os.getppid()
 
-            # Create trampoline batch script
-            batch_path = os.path.join(temp_dir, f"e33_updater_{current_pid}.bat")
-            batch_content = f"""@echo off
-setlocal
-set "TARGET={current_exe}"
-set "REPLACEMENT={temp_exe_path}"
-set "OLD={current_exe}.old"
+            # Create trampoline PowerShell script for 100% hidden and reliable restart
+            ps_path = os.path.join(temp_dir, f"e33_updater_{current_pid}.ps1")
+            ps_content = f"""# Expedition 33 RPC Silent Auto-Updater
+# Strip PyInstaller environment inheritance to prevent _MEIPASS2 collision on restart
+Remove-Item env:_MEIPASS2 -ErrorAction SilentlyContinue
+Remove-Item env:_MEIPASS -ErrorAction SilentlyContinue
+[System.Environment]::SetEnvironmentVariable('_MEIPASS2', $null, 'Process')
+[System.Environment]::SetEnvironmentVariable('_MEIPASS', $null, 'Process')
 
-timeout /t 2 /nobreak > nul
-taskkill /pid {current_pid} /f > nul 2>&1
+$currentPid = {current_pid}
+$parentPid = {parent_pid}
+$target = '{current_exe}'
+$targetDir = '{target_dir}'
+$replacement = '{temp_exe_path}'
+$old = '{current_exe}.old'
 
-if exist "%OLD%" del /f /q "%OLD%" > nul 2>&1
-if exist "%TARGET%" move /y "%TARGET%" "%OLD%" > nul 2>&1
-move /y "%REPLACEMENT%" "%TARGET%" > nul 2>&1
+# 1. Wait for process tree to shut down
+Start-Sleep -Seconds 2
+Stop-Process -Id $currentPid, $parentPid -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 1
 
-start "" "%TARGET%"
-del "%~f0" > nul 2>&1
+# 2. Clean up previous backup if present
+if (Test-Path -LiteralPath $old) {{
+    Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
+}}
+
+# 3. Move current target binary to .old (with retry loop)
+$attempts = 0
+while ((Test-Path -LiteralPath $target) -and ($attempts -lt 10)) {{
+    try {{
+        Move-Item -LiteralPath $target -Destination $old -Force -ErrorAction Stop
+        break
+    }} catch {{
+        $attempts++
+        Start-Sleep -Seconds 1
+    }}
+}}
+
+# 4. Move replacement binary into place (with retry loop)
+$attempts = 0
+while ($attempts -lt 10) {{
+    try {{
+        Move-Item -LiteralPath $replacement -Destination $target -Force -ErrorAction Stop
+        break
+    }} catch {{
+        $attempts++
+        Start-Sleep -Seconds 1
+    }}
+}}
+
+# 5. Brief pause to allow Windows Defender to release initial scan lock
+Start-Sleep -Seconds 2
+
+# 6. Automatically relaunch the updated application via Windows Shell (clean environment)
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = $target
+$psi.WorkingDirectory = $targetDir
+$psi.UseShellExecute = $true
+[System.Diagnostics.Process]::Start($psi)
+
+# 7. Self-delete this updater script
+Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 """
-            with open(batch_path, "w", encoding="ascii") as bf:
-                bf.write(batch_content)
+            with open(ps_path, "w", encoding="utf-8") as psf:
+                psf.write(ps_content)
 
-            print(f"[Updater] Spawning updater trampoline script: {batch_path}")
-            detached_flags = 0x00000008 | 0x00000200 | 0x08000000
+            # Strip PyInstaller environment variables when spawning updater
+            clean_env = os.environ.copy()
+            clean_env.pop("_MEIPASS2", None)
+            clean_env.pop("_MEIPASS", None)
+
+            print(f"[Updater] Spawning silent updater trampoline script: {ps_path}")
             subprocess.Popen(
-                ["cmd.exe", "/c", batch_path],
-                creationflags=detached_flags,
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    ps_path,
+                ],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                env=clean_env,
                 close_fds=True,
             )
 

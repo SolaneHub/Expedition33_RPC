@@ -26,7 +26,7 @@ def set_startup_enabled(enable: bool) -> bool:
                     exe_path = sys.executable
                 else:
                     root_main = os.path.abspath(
-                        os.path.join(os.path.dirname(__file__), "..", "..", "main.py")
+                        os.path.join(os.path.dirname(__file__), "..", "..", "..", "main.py")
                     )
                     exe_path = root_main if os.path.exists(root_main) else sys.executable
                 winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{exe_path}"')

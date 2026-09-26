@@ -19,6 +19,8 @@ permissions:
 jobs:
   build-and-release:
     runs-on: windows-latest
+    env:
+      VT_API_KEY: ${{ secrets.VT_API_KEY }}
 
     steps:
       - name: Check out repository
@@ -82,8 +84,6 @@ jobs:
             dist/Expedition33_RPC.exe
             src/expedition33_rpc/assets/bridge.zip
           request_rate: 4
-        env:
-          VT_API_KEY: ${{ secrets.VT_API_KEY }}
 
       - name: Extract Changelog Section
         id: extract_changelog
@@ -135,7 +135,8 @@ jobs:
                   item = item.strip()
                   if "=" in item:
                       fname, url = item.split("=", 1)
-                      sec_lines.append(f"- **{fname}**: [VirusTotal Report]({url})\n")
+                      clean_fname = os.path.basename(fname.strip())
+                      sec_lines.append(f"- **{clean_fname}**: [VirusTotal Report]({url.strip()})\n")
 
           release_notes += "".join(sec_lines)
 
@@ -153,6 +154,7 @@ jobs:
           files: |
             dist/Expedition33_RPC.exe
             dist/SHA256SUMS.txt
+            src/expedition33_rpc/assets/bridge.zip
           body_path: RELEASE_NOTES.md
           tag_name: ${{ steps.extract_changelog.outputs.version || 'v1.1.0' }}
           name: ${{ steps.extract_changelog.outputs.version || 'v1.1.0' }}

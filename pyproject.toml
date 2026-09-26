@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "expedition33-discord-rpc"
-version = "v1.4.0"
+version = "v1.5.0"
 description = "Discord Rich Presence for Clair Obscur: Expedition 33"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [
-    { name = "Veronica" }
+    { name = "SolaneHub" }
 ]
 keywords = ["discord", "rich-presence", "expedition33", "gaming", "rpc"]
 classifiers = [
@@ -40,7 +40,7 @@ dev = [
 ]
 
 [project.scripts]
-expedition33-rpc = "expedition33_rpc.app:main"
+expedition33-rpc = "expedition33_rpc:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/expedition33_rpc"]
