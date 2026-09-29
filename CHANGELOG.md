@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.4] - 2026-09-29
+
+### Fixed
+- **Comprehensive Expedition Flag Alignment (57 Checkpoints across EN and IT)**:
+  - Corrected official checkpoint and expedition flag names across 25 zones in both English and Italian.
+  - Aligned names for Ancient Sanctuary (`RedForest` -> Entrance, `GiantBellAlley` -> Sanctuary Maze, `Arena` -> Giant Bell Alley), Esquie's Nest (`GestralEntry` -> Entrance, `Francois` -> Francois' Cave), Forgotten Battlefield, Frozen Hearts, Lumiere Act 3, Old Lumiere, Visages, Inside the Monolith, and single-entrance caverns.
+  - Implemented zone-contextual resolution in `format_checkpoint_tag` preventing generic suffixes (e.g. `Arena`, `Plazza`, `Inside`, `Lake`, `Cave`) from colliding across maps.
+- **Esquie's Nest & Francois' Cave Detection Bug**:
+  - Resolved `LevelMain_EsquieNest` asset name regex mismatch in binary save reader that previously yielded `None` for level asset names.
+  - Fixed detector gate `if cp_level and cp_tag:` so valid checkpoint tags are preserved even when map asset regex is non-standard.
+  - Added semantic alias links in `SaveFileReader.is_checkpoint_for_zone` for `esquie`, `francois`, `yellowforest`, `chromazone`, `reacher`, `seacliff`, and `goblu`.
+- **UE4SS Lua Bridge Mod Reflection Scanning**:
+  - Added recursive `PropertyLink` reflection scan to `WBP_SavePointMenu_C` in `scripts/main.lua` to dynamically resolve save point subzone and checkpoint names directly from widget state.
+  - Updated distribution bundle `bridge.zip` and synchronized active game installation scripts.
+- **Automatic Bridge Checkpoint Normalization**:
+  - Ensured all checkpoint telemetry emitted from the bridge mod is passed through `format_checkpoint_tag` for consistent localization and title cleanup.
+
 ## [v1.5.3] - 2026-09-29
 
 ### Fixed

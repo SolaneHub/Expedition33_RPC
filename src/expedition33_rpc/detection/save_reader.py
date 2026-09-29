@@ -63,8 +63,9 @@ class SaveFileReader:
                 return None, None
             block = data[idx : idx + 800]
             lvl_m = re.search(
-                rb"LevelAssetName[^\x00]*\x00.*?(Level_[A-Za-z0-9_]+|SideLevel_[A-Za-z0-9_]+|SmallLevel_[A-Za-z0-9_]+)\x00",
+                rb"LevelAssetName.*?NameProperty[^\x00]*\x00.*?([A-Za-z0-9_]{3,50})\x00",
                 block,
+                re.DOTALL,
             )
             level_name = lvl_m.group(1).decode("latin1") if lvl_m else None
             tag_m = re.search(rb"(Level\.SpawnPoint\.[A-Za-z0-9_\.]+)\x00", block)
@@ -74,7 +75,7 @@ class SaveFileReader:
             return None, None
 
     def is_checkpoint_for_zone(
-        self, level_name: str, cp_tag: str, raw_zone: str, zone_display: str
+        self, level_name: str | None, cp_tag: str | None, raw_zone: str, zone_display: str
     ) -> bool:
         if not level_name and not cp_tag:
             return False
@@ -96,7 +97,7 @@ class SaveFileReader:
         )
 
         full_cp = f"{lvl_clean} {tag_clean}"
-        full_cp = re.sub(r"level_|sidelevel_|smalllevel_|_main|_v\d+|spawnpoint", " ", full_cp)
+        full_cp = re.sub(r"level_|sidelevel_|smalllevel_|levelmain_|_main|_v\d+|spawnpoint", " ", full_cp)
         full_cp = re.sub(r"[^a-z0-9]", " ", full_cp)
 
         # 1. Known semantic zone aliases
@@ -104,13 +105,35 @@ class SaveFileReader:
             return True
         if ("flyinghouse" in full_cp or "manor" in full_cp) and "manor" in zone_all:
             return True
+        if ("esquie" in full_cp or "francois" in full_cp) and (
+            "esquie" in zone_all or "nest" in zone_all or "nido" in zone_all
+        ):
+            return True
+        if ("chromazone" in full_cp or "chroma" in full_cp) and (
+            "sunless" in zone_all or "senza sole" in zone_all or "chroma" in zone_all
+        ):
+            return True
+        if ("yellowforest" in full_cp or "yellow" in full_cp) and (
+            "yellow" in zone_all or "giallo" in zone_all or "harvest" in zone_all
+        ):
+            return True
+        if "reacher" in full_cp and ("reacher" in zone_all or "scalatore" in zone_all):
+            return True
+        if "seacliff" in full_cp and (
+            "stone wave" in zone_all or "onda di pietra" in zone_all or "seacliff" in zone_all
+        ):
+            return True
+        if "goblu" in full_cp and (
+            "goblu" in zone_all or "flying waters" in zone_all or "acque volanti" in zone_all
+        ):
+            return True
 
         # 2. Match zone words inside cp identifier
         clean_zone_words = re.sub(r"[^a-z0-9]", " ", zone_all).split()
         for w in clean_zone_words:
             if (
                 len(w) >= 3
-                and w not in ("the", "il", "la", "inside", "peak", "main", "zone")
+                and w not in ("the", "il", "la", "inside", "peak", "main", "zone", "camp", "area")
                 and w in full_cp
             ):
                 return True

@@ -159,13 +159,14 @@ class SaveFileStateProvider(GameStateProvider):
             if not is_continent and not is_menu:
                 cp_level, cp_tag = self.save_reader.read_checkpoint_from_save(save_dir)
                 if (
-                    cp_level
-                    and cp_tag
+                    cp_tag
                     and self.save_reader.is_checkpoint_for_zone(
-                        cp_level, cp_tag, raw_zone, zone_display
+                        cp_level or "", cp_tag, raw_zone, zone_display
                     )
                 ):
-                    checkpoint_name = format_checkpoint_tag(cp_tag, lang)
+                    checkpoint_name = format_checkpoint_tag(
+                        cp_tag, lang=lang, zone=raw_zone or zone_display
+                    )
 
         return {
             "raw_zone": raw_zone,
@@ -302,11 +303,12 @@ class GameDetector:
                 cp_lvl, cp_tag = self.save_reader.read_checkpoint_from_save(save_dir)
                 zone_disp = format_zone_name(raw_zone, lang)
                 if (
-                    cp_lvl
-                    and cp_tag
-                    and self.save_reader.is_checkpoint_for_zone(cp_lvl, cp_tag, raw_zone, zone_disp)
+                    cp_tag
+                    and self.save_reader.is_checkpoint_for_zone(cp_lvl or "", cp_tag, raw_zone, zone_disp)
                 ):
-                    checkpoint_name = format_checkpoint_tag(cp_tag, lang)
+                    checkpoint_name = format_checkpoint_tag(
+                        cp_tag, lang=lang, zone=raw_zone or zone_disp
+                    )
 
         zone_display = self.last_zone
         if raw_zone:
@@ -323,6 +325,10 @@ class GameDetector:
             or is_menu
         ):
             checkpoint_name = ""
+        elif checkpoint_name:
+            checkpoint_name = format_checkpoint_tag(
+                checkpoint_name, lang=lang, zone=raw_zone or zone_display
+            )
 
         # Track Endless Tower stage and trial
         is_tower = any(

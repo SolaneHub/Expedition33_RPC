@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.5.3-blue.svg" alt="Release"></a>
+  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.5.4-blue.svg" alt="Release"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python"></a>
   <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform"></a>
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/badge/code%20style-ruff-000000.svg" alt="Code Style: Ruff"></a>
