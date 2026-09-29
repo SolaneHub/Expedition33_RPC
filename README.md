@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.5.5-blue.svg" alt="Release"></a>
+  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.5.6-blue.svg" alt="Release"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python"></a>
   <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform"></a>
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/badge/code%20style-ruff-000000.svg" alt="Code Style: Ruff"></a>
@@ -155,10 +155,20 @@ All binaries published under [Releases](https://github.com/SolaneHub/Expedition3
 
 During every automated release build, all compiled artifacts are submitted directly to [VirusTotal](https://www.virustotal.com/) and scanned by 70+ industry security vendors. You can inspect the permanent public reports for the latest release:
 
-| Release Artifact | SHA-256 Checksum | Detection Ratio | Permanent VirusTotal Report |
+| Artifact | SHA-256 (Prefix) | Detection Ratio | Permanent Report |
 | :--- | :--- | :---: | :---: |
-| **`Expedition33_RPC.exe`** | `65214d1674fa0881fef3d449094dd06fc52a9c523ab15409bab39e17f3ede225` | **66 / 71 Clean** *(5 Heuristic / ML Flags)* | [**Inspect Full Report**](https://www.virustotal.com/gui/file/65214d1674fa0881fef3d449094dd06fc52a9c523ab15409bab39e17f3ede225?nocache=1) |
-| **`bridge.zip`** | `1a4a6c06f5a2a4d973b0baeb10a38f072ee934d2f175de882071084831194c8a` | **67 / 68 Clean** *(1 Generic Flag)* | [**Inspect Full Report**](https://www.virustotal.com/gui/file/1a4a6c06f5a2a4d973b0baeb10a38f072ee934d2f175de882071084831194c8a?nocache=1) |
+| **`Expedition33_RPC.exe`** | [`fbaaa01b...d9b5`](https://www.virustotal.com/gui/file/fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5) | **65 / 71 Clean** *(6 Heuristic Flags)* | [🛡️ **Inspect Report**](https://www.virustotal.com/gui/file/fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5) |
+| **`bridge.zip`** | [`f5dc985b...eb2c`](https://www.virustotal.com/gui/file/f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c) | **63 / 64 Clean** *(1 Generic)* | [🛡️ **Inspect Report**](https://www.virustotal.com/gui/file/f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c) |
+
+<details>
+<summary>📋 <b>Click to view full SHA-256 Checksums</b></summary>
+
+```text
+fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5  Expedition33_RPC.exe
+f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c  bridge.zip
+```
+
+</details>
 
 > [!NOTE]
 > **Zero Threats Detected by Leading Vendors**: The vast majority of top-tier antivirus suites — including **Kaspersky, Bitdefender, Avast, AVG, ESET-NOD32, Sophos, CrowdStrike Falcon, Symantec, and TrendMicro** — confirm that all binaries are **100% clean and undetected**.
@@ -169,12 +179,17 @@ During every automated release build, all compiled artifacts are submitted direc
 
 If your antivirus or Windows SmartScreen displays an alert, here is exactly why it happens and why the binaries are safe:
 
-#### 1. Why `Expedition33_RPC.exe` shows 5 heuristic detections:
-- **Microsoft Defender (`Trojan:Win32/Wacatac.B!ml`)**:
-  - The **`!ml`** suffix stands explicitly for **Machine Learning** — this is an automated cloud heuristic guess, not a known virus signature match.
+#### 1. Why `Expedition33_RPC.exe` shows 6 heuristic detections:
+- **Exact Detection Breakdown (6 / 71 Vendors)**:
+  - **Microsoft**: `Trojan:Win32/Wacatac.B!ml` *(Automated Cloud ML heuristic guess; `!ml` stands explicitly for Machine Learning)*
+  - **SentinelOne (Static ML)**: `Static AI - Suspicious PE` *(Static machine learning heuristic on self-extracting PyInstaller binary header)*
+  - **Elastic**: `Malicious (high Confidence)` *(Generic heuristic flag on packed executable layout)*
+  - **Bkav Pro**: `W32.Malware.15AC2E30` *(Algorithmic signature mismatch on unsigned binary)*
+  - **SecureAge**: `Malicious` *(Cloud whitelist absence for unsigned open-source binaries)*
+  - **Arctic Wolf**: `Unsafe` *(Generic reputation score heuristic)*
+- **Why PyInstaller Triggers Machine Learning Heuristics**:
   - `Expedition33_RPC` is packaged using **PyInstaller**, which bundles Python 3.10 and dependencies into a self-extracting executable. Because some malware authors also package malicious scripts using packers, automated cloud ML heuristics frequently misclassify fresh, unsigned PyInstaller binaries under generic names like `Wacatac.B!ml`.
-- **Static AI / Generic Scanners** (`SentinelOne: Static AI - Suspicious PE`, `Elastic: Malicious`, `SecureAge`, `Bkav Pro`):
-  - These engines flag the binary due to legitimate Windows API calls: creating a named Windows mutex (used to enforce a single running instance of the tray app) and querying running processes via `psutil` (used solely to detect when `SandFall-Win64-Shipping.exe` launches or exits).
+  - These engines also flag legitimate Windows API calls: creating a named Windows mutex (used to enforce a single running instance of the tray app) and querying running processes via `psutil` (used solely to detect when `SandFall-Win64-Shipping.exe` launches or exits).
 - **Lack of Expensive EV Code-Signing Certificate**:
   - Commercial software publishers pay hundreds of dollars per year ($400+/year) for Extended Validation (EV) certificates to bypass SmartScreen and heuristics. As a free, open-source community tool, `Expedition33_RPC` is unsigned, so automated heuristics assign it a default "low reputation" score until enough community reputation builds.
 

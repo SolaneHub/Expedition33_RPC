@@ -97,7 +97,9 @@ class SaveFileReader:
         )
 
         full_cp = f"{lvl_clean} {tag_clean}"
-        full_cp = re.sub(r"level_|sidelevel_|smalllevel_|levelmain_|_main|_v\d+|spawnpoint", " ", full_cp)
+        full_cp = re.sub(
+            r"level_|sidelevel_|smalllevel_|levelmain_|_main|_v\d+|spawnpoint", " ", full_cp
+        )
         full_cp = re.sub(r"[^a-z0-9]", " ", full_cp)
 
         # 1. Known semantic zone aliases

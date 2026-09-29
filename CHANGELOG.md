@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.6] - 2026-09-29
+
+### Changed
+- **High-Performance VirusTotal CI Scanning Pipeline**:
+  - Replaced legacy blocking `ghaction-virustotal` action with a lightweight, native Python scanner ([`scripts/virustotal_scan.py`](scripts/virustotal_scan.py)) with zero external dependencies.
+  - Added deterministic SHA-256 cache verification via `GET /api/v3/files/{sha256}` to eliminate redundant uploads of unchanged assets (such as `bridge.zip`).
+  - Added non-blocking direct release publishing with permanent VirusTotal permalinks, cutting CI release workflow execution time from minutes down to seconds.
+  - Implemented strict rate-limiting compliance (4 req/min) with automatic backoff and retry on HTTP 429 (`Retry-After`).
+  - Added automated large-file upload endpoint negotiation for binaries exceeding 32 MB.
+  - Embedded real-time detection ratio metrics directly into GitHub Release notes and workflow summaries (`dist/virustotal_report.json`).
+- **VirusTotal Transparency & Documentation Layout**:
+  - Updated live VirusTotal audit permalinks and cryptographic SHA-256 hashes in `README.md` for `Expedition33_RPC.exe` (65/71 clean; transparent technical breakdown of all 6 heuristic/cloud ML flags: Microsoft `Wacatac.B!ml`, SentinelOne `Static AI - Suspicious PE`, Elastic `Malicious (high Confidence)`, Bkav Pro `W32.Malware.15AC2E30`, SecureAge `Malicious`, and Arctic Wolf `Unsafe`) and `bridge.zip` (63/64 clean).
+  - Re-architected the Live VirusTotal Analysis Reports table with a responsive layout and compact hash previews, eliminating horizontal table overflow across standard screen widths.
+  - Added an expandable `<details>` section providing one-click copyable full SHA-256 checksums matching `dist/SHA256SUMS.txt`.
+
 ## [v1.5.5] - 2026-09-29
 
 ### Fixed

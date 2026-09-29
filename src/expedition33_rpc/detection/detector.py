@@ -153,16 +153,12 @@ class SaveFileStateProvider(GameStateProvider):
                 for k in ("continent", "continente", "worldmap")
             )
             is_menu = raw_zone == "MainMenu" or any(
-                k in raw_zone.lower() or k in zone_display.lower()
-                for k in ("menu", "bootstrap")
+                k in raw_zone.lower() or k in zone_display.lower() for k in ("menu", "bootstrap")
             )
             if not is_continent and not is_menu:
                 cp_level, cp_tag = self.save_reader.read_checkpoint_from_save(save_dir)
-                if (
-                    cp_tag
-                    and self.save_reader.is_checkpoint_for_zone(
-                        cp_level or "", cp_tag, raw_zone, zone_display
-                    )
+                if cp_tag and self.save_reader.is_checkpoint_for_zone(
+                    cp_level or "", cp_tag, raw_zone, zone_display
                 ):
                     checkpoint_name = format_checkpoint_tag(
                         cp_tag, lang=lang, zone=raw_zone or zone_display
@@ -302,9 +298,8 @@ class GameDetector:
             if save_dir:
                 cp_lvl, cp_tag = self.save_reader.read_checkpoint_from_save(save_dir)
                 zone_disp = format_zone_name(raw_zone, lang)
-                if (
-                    cp_tag
-                    and self.save_reader.is_checkpoint_for_zone(cp_lvl or "", cp_tag, raw_zone, zone_disp)
+                if cp_tag and self.save_reader.is_checkpoint_for_zone(
+                    cp_lvl or "", cp_tag, raw_zone, zone_disp
                 ):
                     checkpoint_name = format_checkpoint_tag(
                         cp_tag, lang=lang, zone=raw_zone or zone_disp

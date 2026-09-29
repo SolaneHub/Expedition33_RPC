@@ -387,9 +387,10 @@ Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
             # Strip all PyInstaller and Python environment variables when spawning updater
             clean_env = os.environ.copy()
             for k in list(clean_env.keys()):
-                if (
-                    k.startswith(("_MEI", "_PYI", "PYTHON"))
-                    or k in ("PYTHONPATH", "PYTHONHOME", "PYTHONEXECUTABLE")
+                if k.startswith(("_MEI", "_PYI", "PYTHON")) or k in (
+                    "PYTHONPATH",
+                    "PYTHONHOME",
+                    "PYTHONEXECUTABLE",
                 ):
                     clean_env.pop(k, None)
 

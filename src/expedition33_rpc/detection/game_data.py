@@ -76,7 +76,11 @@ ENDLESS_TOWER_TRIALS = [
         [
             ["Alpha Gold Chevaliere", "Chromatic Gold Chevaliere", "Gold Chevaliere Alpha"],
             ["Alpha Steel Chevaliere", "Chromatic Steel Chevaliere", "Steel Chevaliere Alpha"],
-            ["Alpha Ceramic Chevaliere", "Chromatic Ceramic Chevaliere", "Ceramic Chevaliere Alpha"],
+            [
+                "Alpha Ceramic Chevaliere",
+                "Chromatic Ceramic Chevaliere",
+                "Ceramic Chevaliere Alpha",
+            ],
         ],
     ),
     (
@@ -92,12 +96,20 @@ ENDLESS_TOWER_TRIALS = [
     (
         (9, 3),
         None,
-        [["Flame Eveque"], ["Frost Eveque"], ["Alpha Danseuse", "Chromatic Danseuse", "Danseuse Alpha"]],
+        [
+            ["Flame Eveque"],
+            ["Frost Eveque"],
+            ["Alpha Danseuse", "Chromatic Danseuse", "Danseuse Alpha"],
+        ],
     ),
     (
         (9, 2),
         None,
-        [["Thunder Eveque"], ["Alpha Demineur", "Chromatic Demineur", "Demineur Alpha"], ["Stalact"]],
+        [
+            ["Thunder Eveque"],
+            ["Alpha Demineur", "Chromatic Demineur", "Demineur Alpha"],
+            ["Stalact"],
+        ],
     ),
     (
         (9, 1),
@@ -162,7 +174,11 @@ ENDLESS_TOWER_TRIALS = [
     (
         (4, 1),
         None,
-        [["Alpha Orphelin", "Chromatic Orphelin", "Orphelin Alpha"], ["Ceramic Chevaliere"], ["Cruler"]],
+        [
+            ["Alpha Orphelin", "Chromatic Orphelin", "Orphelin Alpha"],
+            ["Ceramic Chevaliere"],
+            ["Cruler"],
+        ],
     ),
     # Stage 3
     (
@@ -1361,11 +1377,14 @@ def format_checkpoint_tag(tag: str, lang: str = "en", zone: str = "") -> str:
             if norm_suffix in ("giantbellalley", "sanctuarymaze"):
                 return "Labirinto del Santuario" if lang.startswith("it") else "Sanctuary Maze"
             if norm_suffix in ("arena", "tanksarena"):
-                return "Vicolo della Grande Campana" if lang.startswith("it") else "Giant Bell Alley"
+                return (
+                    "Vicolo della Grande Campana" if lang.startswith("it") else "Giant Bell Alley"
+                )
 
-        if (
-            any(k in z_norm for k in ("crimson", "orange", "cremisi"))
-            and norm_suffix in ("plazza", "plaza", "centerplazza")
+        if any(k in z_norm for k in ("crimson", "orange", "cremisi")) and norm_suffix in (
+            "plazza",
+            "plaza",
+            "centerplazza",
         ):
             return "Posatoio Cremisi" if lang.startswith("it") else "Crimson Perch"
 
@@ -1375,10 +1394,7 @@ def format_checkpoint_tag(tag: str, lang: str = "en", zone: str = "") -> str:
             if norm_suffix == "totem":
                 return "Totem della Notte" if lang.startswith("it") else "Night Totem"
 
-        if (
-            any(k in z_norm for k in ("esoteric", "esoteriche"))
-            and norm_suffix in ("cliffbottom",)
-        ):
+        if any(k in z_norm for k in ("esoteric", "esoteriche")) and norm_suffix in ("cliffbottom",):
             return "Relitti di Lumière" if lang.startswith("it") else "Lumiere's Wrecks"
 
         if any(k in z_norm for k in ("esquie", "nest", "nido")):
@@ -1387,9 +1403,12 @@ def format_checkpoint_tag(tag: str, lang: str = "en", zone: str = "") -> str:
             if "francois" in norm_suffix:
                 return "Grotta di François" if lang.startswith("it") else "Francois' Cave"
 
-        if (
-            any(k in z_norm for k in ("leaves", "foglie"))
-            and norm_suffix in ("crimsonperch", "plazza", "plaza", "centerplazza", "resinveilgrove")
+        if any(k in z_norm for k in ("leaves", "foglie")) and norm_suffix in (
+            "crimsonperch",
+            "plazza",
+            "plaza",
+            "centerplazza",
+            "resinveilgrove",
         ):
             return "Boschetto del Velo di Resina" if lang.startswith("it") else "Resinveil Grove"
 
@@ -1409,7 +1428,11 @@ def format_checkpoint_tag(tag: str, lang: str = "en", zone: str = "") -> str:
             if norm_suffix in ("caveforest", "icedheart"):
                 return "Cuore Ghiacciato" if lang.startswith("it") else "Iced Heart"
             if norm_suffix in ("trainstation", "iceboundtrainstation"):
-                return "Stazione Ferroviaria Ghiacciata" if lang.startswith("it") else "Icebound Train Station"
+                return (
+                    "Stazione Ferroviaria Ghiacciata"
+                    if lang.startswith("it")
+                    else "Icebound Train Station"
+                )
             if norm_suffix in ("frozenlakes", "glacialfalls"):
                 return "Cascate Glaciali" if lang.startswith("it") else "Glacial Falls"
 
@@ -1430,7 +1453,11 @@ def format_checkpoint_tag(tag: str, lang: str = "en", zone: str = "") -> str:
             if norm_suffix in ("seacliff", "taintedcliffs"):
                 return "Scogliere Corrotte" if lang.startswith("it") else "Tainted Cliffs"
             if norm_suffix in ("forgottenbattlefield", "taintedbattlefield"):
-                return "Campo di Battaglia Corrotto" if lang.startswith("it") else "Tainted Battlefield"
+                return (
+                    "Campo di Battaglia Corrotto"
+                    if lang.startswith("it")
+                    else "Tainted Battlefield"
+                )
             if norm_suffix in ("monocomountain", "taintedhearts"):
                 return "Cuori Corrotti" if lang.startswith("it") else "Tainted Hearts"
             if norm_suffix in ("lumiere", "taintedlumiere"):
@@ -1444,7 +1471,10 @@ def format_checkpoint_tag(tag: str, lang: str = "en", zone: str = "") -> str:
         ):
             return "Stazione di Monoco" if lang.startswith("it") else "Monoco's Station"
 
-        if any(k in z_norm for k in ("siren", "dress", "abito")) and norm_suffix in ("inside", "glissando"):
+        if any(k in z_norm for k in ("siren", "dress", "abito")) and norm_suffix in (
+            "inside",
+            "glissando",
+        ):
             return "Glissando"
 
         if "lumiere" in z_norm:
@@ -1458,7 +1488,9 @@ def format_checkpoint_tag(tag: str, lang: str = "en", zone: str = "") -> str:
                 if norm_suffix in ("maellepath", "leftstreet"):
                     return "Via Sinistra" if lang.startswith("it") else "Left Street"
                 if norm_suffix in ("alphaarena", "alphaarea", "trainstationruins"):
-                    return "Rovine della Stazione" if lang.startswith("it") else "Train Station Ruins"
+                    return (
+                        "Rovine della Stazione" if lang.startswith("it") else "Train Station Ruins"
+                    )
             else:
                 if norm_suffix in ("dock", "harbour"):
                     return "Porto" if lang.startswith("it") else "Harbour"
@@ -1471,7 +1503,11 @@ def format_checkpoint_tag(tag: str, lang: str = "en", zone: str = "") -> str:
                 if norm_suffix in ("gardens", "manorgardens", "lumieresgardens"):
                     return "Giardini di Lumière" if lang.startswith("it") else "Lumiere's Gardens"
                 if norm_suffix in ("curator", "trainstationruins", "crookedtowerwalkway"):
-                    return "Passerella della Torre Storta" if lang.startswith("it") else "Crooked Tower Walkway"
+                    return (
+                        "Passerella della Torre Storta"
+                        if lang.startswith("it")
+                        else "Crooked Tower Walkway"
+                    )
 
         if any(k in z_norm for k in ("workshop", "pittura", "atelier", "canvas", "tela")):
             if norm_suffix in ("brokenlampmaster", "brokenconception"):
@@ -1485,15 +1521,25 @@ def format_checkpoint_tag(tag: str, lang: str = "en", zone: str = "") -> str:
             if norm_suffix in ("goldentree", "tree"):
                 return "Albero Dorato" if lang.startswith("it") else "Golden Tree"
             if norm_suffix in ("entrance", "entry"):
-                if "tree" in clean_tag_lower or "golden" in clean_tag_lower or "gold" in clean_tag_lower:
+                if (
+                    "tree" in clean_tag_lower
+                    or "golden" in clean_tag_lower
+                    or "gold" in clean_tag_lower
+                ):
                     return "Albero Dorato" if lang.startswith("it") else "Golden Tree"
                 return "Entrata" if lang.startswith("it") else "Entrance"
 
-        if (
-            any(k in z_norm for k in ("spring", "prati"))
-            and norm_suffix in ("oldexpeditionercamp", "oldexpeditionnercamp", "abandonedcamp", "abandonedexpeditionercamp")
+        if any(k in z_norm for k in ("spring", "prati")) and norm_suffix in (
+            "oldexpeditionercamp",
+            "oldexpeditionnercamp",
+            "abandonedcamp",
+            "abandonedexpeditionercamp",
         ):
-            return "Accampamento Abbandonato" if lang.startswith("it") else "Abandoned Expeditioner Camp"
+            return (
+                "Accampamento Abbandonato"
+                if lang.startswith("it")
+                else "Abandoned Expeditioner Camp"
+            )
 
         if any(k in z_norm for k in ("stone wave", "seacliff", "onda di pietra")):
             if "cave" in z_norm or "grotta" in z_norm:
@@ -1507,9 +1553,9 @@ def format_checkpoint_tag(tag: str, lang: str = "en", zone: str = "") -> str:
                 if norm_suffix in ("caves", "tidecaverns"):
                     return "Caverne della Marea" if lang.startswith("it") else "Tide Caverns"
 
-        if (
-            any(k in z_norm for k in ("sunless", "chroma", "senza sole"))
-            and norm_suffix in ("cave", "chromaportal")
+        if any(k in z_norm for k in ("sunless", "chroma", "senza sole")) and norm_suffix in (
+            "cave",
+            "chromaportal",
         ):
             return "Portale Chroma" if lang.startswith("it") else "Chroma Portal"
 
@@ -1533,7 +1579,11 @@ def format_checkpoint_tag(tag: str, lang: str = "en", zone: str = "") -> str:
             if norm_suffix in ("lake", "harvestershollow"):
                 return "Conca del Mietitore" if lang.startswith("it") else "Harvester's Hollow"
             if norm_suffix in ("arena", "yellowspirewrecks"):
-                return "Relitti della Guglia Gialla" if lang.startswith("it") else "Yellow Spire Wrecks"
+                return (
+                    "Relitti della Guglia Gialla"
+                    if lang.startswith("it")
+                    else "Yellow Spire Wrecks"
+                )
 
     # 3. Direct dictionary lookup by suffix / clean_tag
     res = name_dict.get(suffix) or fallback_dict.get(suffix)
@@ -1665,4 +1715,3 @@ def resolve_tower_trial(enemy_name: str) -> tuple[tuple[int, int] | str | None, 
             return stage_info, final_enemy
 
     return None, normalized
-
