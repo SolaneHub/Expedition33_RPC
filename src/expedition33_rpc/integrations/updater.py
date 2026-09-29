@@ -293,11 +293,20 @@ class AppUpdater:
             # Create trampoline PowerShell script for 100% hidden and reliable restart
             ps_path = os.path.join(temp_dir, f"e33_updater_{current_pid}.ps1")
             ps_content = f"""# Expedition 33 RPC Silent Auto-Updater
-# Strip PyInstaller environment inheritance to prevent _MEIPASS2 collision on restart
-Remove-Item env:_MEIPASS2 -ErrorAction SilentlyContinue
-Remove-Item env:_MEIPASS -ErrorAction SilentlyContinue
-[System.Environment]::SetEnvironmentVariable('_MEIPASS2', $null, 'Process')
-[System.Environment]::SetEnvironmentVariable('_MEIPASS', $null, 'Process')
+# Strip all PyInstaller and Python environment variables to ensure fresh top-level launch
+Get-ChildItem env: | Where-Object {{
+    $_.Name -like '_MEI*' -or
+    $_.Name -like '_PYI*' -or
+    $_.Name -like 'PYTHON*'
+}} | ForEach-Object {{
+    Remove-Item "env:$($_.Name)" -ErrorAction SilentlyContinue
+    [System.Environment]::SetEnvironmentVariable($_.Name, $null, 'Process')
+}}
+
+# Clean PATH of any temporary extraction directories
+$cleanPaths = ($env:PATH -split ';') | Where-Object {{ $_ -notlike '*\\_MEI*' -and $_ -ne '' }}
+$env:PATH = $cleanPaths -join ';'
+[System.Environment]::SetEnvironmentVariable('PATH', $env:PATH, 'Process')
 
 $currentPid = {current_pid}
 $parentPid = {parent_pid}
@@ -306,9 +315,14 @@ $targetDir = '{target_dir}'
 $replacement = '{temp_exe_path}'
 $old = '{current_exe}.old'
 
-# 1. Wait for process tree to shut down
+# 1. Wait for process tree to shut down and terminate locking processes
 Start-Sleep -Seconds 2
 Stop-Process -Id $currentPid, $parentPid -Force -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name LIKE 'Expedition33%'" | ForEach-Object {{
+    if ($_.ExecutablePath -eq $target -or $_.ProcessId -eq $currentPid) {{
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }}
+}}
 Start-Sleep -Seconds 1
 
 # 2. Clean up previous backup if present
@@ -343,23 +357,46 @@ while ($attempts -lt 10) {{
 # 5. Brief pause to allow Windows Defender to release initial scan lock
 Start-Sleep -Seconds 2
 
-# 6. Automatically relaunch the updated application via Windows Shell (clean environment)
+# 6. Re-sanitize environment immediately before relaunch
+Get-ChildItem env: | Where-Object {{
+    $_.Name -like '_MEI*' -or
+    $_.Name -like '_PYI*' -or
+    $_.Name -like 'PYTHON*'
+}} | ForEach-Object {{
+    Remove-Item "env:$($_.Name)" -ErrorAction SilentlyContinue
+    [System.Environment]::SetEnvironmentVariable($_.Name, $null, 'Process')
+}}
+
+$cleanPaths = ($env:PATH -split ';') | Where-Object {{ $_ -notlike '*\\_MEI*' -and $_ -ne '' }}
+$env:PATH = $cleanPaths -join ';'
+[System.Environment]::SetEnvironmentVariable('PATH', $env:PATH, 'Process')
+
+# 7. Automatically relaunch the updated application with a clean environment
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $target
 $psi.WorkingDirectory = $targetDir
-$psi.UseShellExecute = $true
+$psi.UseShellExecute = $false
 [System.Diagnostics.Process]::Start($psi)
 
-# 7. Self-delete this updater script
+# 8. Self-delete this updater script
 Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 """
             with open(ps_path, "w", encoding="utf-8") as psf:
                 psf.write(ps_content)
 
-            # Strip PyInstaller environment variables when spawning updater
+            # Strip all PyInstaller and Python environment variables when spawning updater
             clean_env = os.environ.copy()
-            clean_env.pop("_MEIPASS2", None)
-            clean_env.pop("_MEIPASS", None)
+            for k in list(clean_env.keys()):
+                if (
+                    k.startswith(("_MEI", "_PYI", "PYTHON"))
+                    or k in ("PYTHONPATH", "PYTHONHOME", "PYTHONEXECUTABLE")
+                ):
+                    clean_env.pop(k, None)
+
+            if "PATH" in clean_env:
+                clean_env["PATH"] = os.pathsep.join(
+                    p for p in clean_env["PATH"].split(os.pathsep) if "_MEI" not in p
+                )
 
             print(f"[Updater] Spawning silent updater trampoline script: {ps_path}")
             subprocess.Popen(

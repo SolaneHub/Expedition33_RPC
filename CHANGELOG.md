@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.5] - 2026-09-29
+
+### Fixed
+- **Silent Auto-Updater Process Isolation & PyInstaller Environment Sanitization**:
+  - Eliminated `Failed to load Python DLL (_MEI... python310.dll / LoadLibrary: Impossibile trovare il modulo specificato)` error on updater handover.
+  - Recursively purges all PyInstaller bootloader variables (`_MEIPASS2`, `_MEIPASS`, `_PYI_PARENT_PROCESS_LEVEL`, `_PYI_ARCHIVE_FILE`, `_PYI_*`), Python environment overrides (`PYTHONPATH`, `PYTHONHOME`, `PYTHONEXECUTABLE`), and deleted `_MEI` temp directories from `PATH` in both Python and the PowerShell trampoline.
+  - Switched trampoline process relaunch to direct process creation with a fully sanitized environment block (`UseShellExecute = $false`), preventing the freshly updated executable from mistaking itself for a child worker process of the terminated instance.
+  - Enhanced process tree termination in updater trampoline to gracefully terminate any processes locking the target binary before applying the update.
+
 ## [v1.5.4] - 2026-09-29
 
 ### Fixed
