@@ -66,6 +66,9 @@ class ExpeditionTrayApp:
         # Attempt automatic combat bridge installation on startup if game folder exists
         self.check_and_auto_install_bridge()
 
+        # Synchronize Windows autostart path in registry if enabled
+        startup.sync_startup_path()
+
     def on_updater_state_change(self):
         if self.icon is not None:
             with contextlib.suppress(Exception):

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "expedition33-discord-rpc"
-version = "v1.5.1"
+version = "v1.5.2"
 description = "Discord Rich Presence for Clair Obscur: Expedition 33"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -38,6 +38,9 @@ dev = [
     "ruff>=0.9.0",
     "pyright>=1.1.0",
 ]
+
+[tool.uv]
+link-mode = "copy"
 
 [project.scripts]
 expedition33-rpc = "expedition33_rpc:main"

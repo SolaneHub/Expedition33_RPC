@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.2] - 2026-09-29
+
+### Fixed
+- **Dynamic Windows Startup Path Synchronization**:
+  - Automatically synchronizes and updates the Windows registry autostart entry (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`) to the active executable path whenever the app launches.
+  - Resolves startup failures caused by moving the executable (e.g. from `Downloads` to `Desktop`) or stale registry paths.
+  - Added existence verification in `is_startup_enabled()` to avoid showing active startup state when the registered binary path has been moved or deleted.
+- **Cross-Filesystem Package Installation in uv**:
+  - Configured `[tool.uv] link-mode = "copy"` in `pyproject.toml` to eliminate NTFS cross-device hardlink warnings when cache and project repositories reside on different drives (`C:` vs `D:`).
+
 ## [v1.5.1] - 2026-09-29
 
 ### Fixed
