@@ -162,30 +162,43 @@ class ExpeditionTrayApp:
                                 mode = "In Combat" if state.in_combat else "Exploring"
 
                             loc = state.zone_name
-                            if state.tower_stage_trial:
-                                if isinstance(state.tower_stage_trial, tuple):
-                                    stg, trl = state.tower_stage_trial
-                                    is_it = state.game_language.startswith("it")
-                                    trial_str = (
-                                        f"Fase {stg}, Prova {trl}"
-                                        if is_it
-                                        else f"Stage {stg}, Trial {trl}"
-                                    )
-                                else:
-                                    trial_str = str(state.tower_stage_trial)
-                                loc = f"{loc} ({trial_str})"
-                            elif state.tower_floor:
-                                is_it = state.game_language.startswith("it")
-                                floor_label = (
-                                    f"Piano {state.tower_floor}"
+                            is_it = state.game_language.startswith("it")
+                            is_continent = (
+                                "continent" in loc.lower()
+                                or "continente" in loc.lower()
+                                or "worldmap" in state.raw_zone.lower()
+                            )
+                            is_menu = "menu" in loc.lower() or state.raw_zone == "MainMenu"
+
+                            if is_menu:
+                                self.icon.title = (
+                                    "Expedition 33: Nel menu principale"
                                     if is_it
-                                    else f"Floor {state.tower_floor}"
+                                    else "Expedition 33: In Main Menu"
                                 )
-                                if "piano" not in loc.lower() and "floor" not in loc.lower():
-                                    loc = f"{loc} ({floor_label})"
-                            elif state.checkpoint_name:
-                                loc = f"{loc} ({state.checkpoint_name})"
-                            self.icon.title = f"Expedition 33: {loc} ({mode})"
+                            else:
+                                if state.tower_stage_trial:
+                                    if isinstance(state.tower_stage_trial, tuple):
+                                        stg, trl = state.tower_stage_trial
+                                        trial_str = (
+                                            f"Fase {stg}, Prova {trl}"
+                                            if is_it
+                                            else f"Stage {stg}, Trial {trl}"
+                                        )
+                                    else:
+                                        trial_str = str(state.tower_stage_trial)
+                                    loc = f"{loc} ({trial_str})"
+                                elif state.tower_floor:
+                                    floor_label = (
+                                        f"Piano {state.tower_floor}"
+                                        if is_it
+                                        else f"Floor {state.tower_floor}"
+                                    )
+                                    if "piano" not in loc.lower() and "floor" not in loc.lower():
+                                        loc = f"{loc} ({floor_label})"
+                                elif state.checkpoint_name and not is_continent:
+                                    loc = f"{loc} ({state.checkpoint_name})"
+                                self.icon.title = f"Expedition 33: {loc} ({mode})"
                     else:
                         self.icon.title = "Expedition 33 RPC (Waiting for game...)"
             except Exception as e:
@@ -204,16 +217,25 @@ class ExpeditionTrayApp:
         if settings.is_anti_spoiler_enabled():
             return "Location: [Hidden - Anti-Spoiler]"
         zone_str = self.current_state.zone_name
+        is_it = self.current_state.game_language.startswith("it")
+        is_continent = (
+            "continent" in zone_str.lower()
+            or "continente" in zone_str.lower()
+            or "worldmap" in self.current_state.raw_zone.lower()
+        )
+        is_menu = "menu" in zone_str.lower() or self.current_state.raw_zone == "MainMenu"
+
+        if is_menu:
+            return f"Location: {'Nel menu principale' if is_it else 'In Main Menu'}"
+
         if self.current_state.tower_stage_trial:
             if isinstance(self.current_state.tower_stage_trial, tuple):
                 stg, trl = self.current_state.tower_stage_trial
-                is_it = self.current_state.game_language.startswith("it")
                 trial_label = f"Fase {stg}, Prova {trl}" if is_it else f"Stage {stg}, Trial {trl}"
             else:
                 trial_label = str(self.current_state.tower_stage_trial)
             zone_str = f"{zone_str} ({trial_label})"
         elif self.current_state.tower_floor:
-            is_it = self.current_state.game_language.startswith("it")
             floor_label = (
                 f"Piano {self.current_state.tower_floor}"
                 if is_it
@@ -221,13 +243,20 @@ class ExpeditionTrayApp:
             )
             if "piano" not in zone_str.lower() and "floor" not in zone_str.lower():
                 zone_str = f"{zone_str} ({floor_label})"
-        elif self.current_state.checkpoint_name:
+        elif self.current_state.checkpoint_name and not is_continent:
             zone_str = f"{zone_str} ({self.current_state.checkpoint_name})"
         return f"Location: {zone_str}"
 
     def menu_combat_status(self, *_) -> str:
         if not self.current_state.is_running:
             return "Status: --"
+        is_menu = (
+            "menu" in self.current_state.zone_name.lower()
+            or self.current_state.raw_zone == "MainMenu"
+        )
+        if is_menu:
+            is_it = self.current_state.game_language.startswith("it")
+            return "Status: Nel menu principale" if is_it else "Status: Main Menu"
         anti_spoiler = settings.is_anti_spoiler_enabled()
         if self.current_state.in_combat:
             if not anti_spoiler and self.current_state.enemy_name:

@@ -64,8 +64,20 @@ class DiscordRPCManager:
             return
 
         is_it = game_state.game_language.startswith("it")
+        is_menu = (
+            game_state.raw_zone.lower().strip() in ("mainmenu", "bootstrap", "map_game_bootstrap")
+            or "menu" in game_state.zone_name.lower()
+        )
+        is_continent = (
+            "continent" in game_state.zone_name.lower()
+            or "continente" in game_state.zone_name.lower()
+            or "worldmap" in game_state.raw_zone.lower()
+        )
 
-        if game_state.in_combat:
+        if is_menu:
+            details_text = "Nel menu principale" if is_it else "In Main Menu"
+            state_text = "Schermata dei titoli" if is_it else "Title Screen"
+        elif game_state.in_combat:
             if anti_spoiler or not game_state.enemy_name:
                 details_text = "In combattimento" if is_it else "In Combat"
             else:
@@ -95,7 +107,7 @@ class DiscordRPCManager:
                     )
                     if "piano" not in zone_display.lower() and "floor" not in zone_display.lower():
                         zone_display = f"{zone_display} ({floor_label})"
-                elif game_state.checkpoint_name:
+                elif game_state.checkpoint_name and not is_continent:
                     zone_display = f"{zone_display} ({game_state.checkpoint_name})"
                 state_text = zone_display
         else:
@@ -112,7 +124,7 @@ class DiscordRPCManager:
                     )
                     if "piano" not in zone_display.lower() and "floor" not in zone_display.lower():
                         zone_display = f"{zone_display} ({floor_label})"
-                elif game_state.checkpoint_name:
+                elif game_state.checkpoint_name and not is_continent:
                     zone_display = f"{zone_display} ({game_state.checkpoint_name})"
                 state_text = zone_display
 

@@ -78,19 +78,40 @@ class BridgeStateProvider(GameStateProvider):
                 pass
 
         raw_zone = bridge.get("zone", "")
-        if raw_zone in ("Map_Game_Bootstrap", "Map Game Bootstrap", "Bootstrap"):
-            raw_zone = ""
+        if (
+            raw_zone.lower().strip()
+            in (
+                "map_game_bootstrap",
+                "map game bootstrap",
+                "bootstrap",
+                "mainmenu",
+                "main menu",
+                "map_mainmenu",
+                "frontend",
+                "title",
+                "entry",
+            )
+            or "bootstrap" in raw_zone.lower()
+            or "mainmenu" in raw_zone.lower()
+        ):
+            raw_zone = "MainMenu"
 
         enemy_name = bridge.get("enemy_name", "")
         if enemy_name:
             enemy_name = format_enemy_name(enemy_name)
+
+        checkpoint = bridge.get("checkpoint", "")
+        if raw_zone == "MainMenu" or any(
+            c in raw_zone.lower() for c in ("continent", "continente", "worldmap")
+        ):
+            checkpoint = ""
 
         return {
             "raw_zone": raw_zone,
             "in_combat": bridge.get("in_combat", False),
             "enemy_name": enemy_name,
             "tower_floor": bridge.get("floor") or bridge.get("tower_floor"),
-            "checkpoint": bridge.get("checkpoint", ""),
+            "checkpoint": checkpoint,
         }
 
 
@@ -101,24 +122,50 @@ class SaveFileStateProvider(GameStateProvider):
         self.save_reader = save_reader
 
     def read_game_data(self, proc: psutil.Process, lang: str) -> dict | None:
-        del proc
         save_dir = self.save_reader.get_latest_save_dir()
         if not save_dir:
             return None
+
+        # Check if process just started and the save file predates the process launch.
+        # If game started less than 40s ago and save file is older, player is in startup / Main Menu.
+        try:
+            proc_start = proc.create_time()
+            container = os.path.join(save_dir, "SavesContainer.sav")
+            if os.path.exists(container):
+                save_mtime = os.path.getmtime(container)
+                if (time.time() - proc_start < 40.0) and (save_mtime < proc_start):
+                    return {
+                        "raw_zone": "MainMenu",
+                        "in_combat": False,
+                        "enemy_name": "",
+                        "tower_floor": None,
+                        "checkpoint": "",
+                    }
+        except Exception:
+            pass
 
         raw_zone = self.save_reader.read_zone_from_saves(save_dir) or ""
         checkpoint_name = ""
         if raw_zone:
             zone_display = format_zone_name(raw_zone, lang)
-            cp_level, cp_tag = self.save_reader.read_checkpoint_from_save(save_dir)
-            if (
-                cp_level
-                and cp_tag
-                and self.save_reader.is_checkpoint_for_zone(
-                    cp_level, cp_tag, raw_zone, zone_display
-                )
-            ):
-                checkpoint_name = format_checkpoint_tag(cp_tag, lang)
+            is_continent = any(
+                k in raw_zone.lower() or k in zone_display.lower()
+                for k in ("continent", "continente", "worldmap")
+            )
+            is_menu = raw_zone == "MainMenu" or any(
+                k in raw_zone.lower() or k in zone_display.lower()
+                for k in ("menu", "bootstrap")
+            )
+            if not is_continent and not is_menu:
+                cp_level, cp_tag = self.save_reader.read_checkpoint_from_save(save_dir)
+                if (
+                    cp_level
+                    and cp_tag
+                    and self.save_reader.is_checkpoint_for_zone(
+                        cp_level, cp_tag, raw_zone, zone_display
+                    )
+                ):
+                    checkpoint_name = format_checkpoint_tag(cp_tag, lang)
 
         return {
             "raw_zone": raw_zone,
@@ -136,6 +183,7 @@ class GameDetector:
         self.cached_pid: int | None = None
         self.game_start_time: float | None = None
         self.last_zone: str = "Exploring"
+        self.last_raw_zone: str = ""
         self.current_tower_trial: tuple[int, int] | str | None = None
 
         # Components
@@ -197,6 +245,8 @@ class GameDetector:
             self.cached_pid = None
             self.game_start_time = None
             self.current_tower_trial = None
+            self.last_zone = "Exploring"
+            self.last_raw_zone = ""
             self.timer_tracker.reset()
             return GameState(is_running=False, game_language=lang)
 
@@ -223,11 +273,30 @@ class GameDetector:
             if not checkpoint_name and data.get("checkpoint"):
                 checkpoint_name = data["checkpoint"]
 
+            # If provider explicitly reports MainMenu, do not fall back to save reader
+            if raw_zone == "MainMenu":
+                checkpoint_name = ""
+                in_combat = False
+                break
+
             if raw_zone and in_combat:
                 break
 
+        is_menu = (
+            raw_zone.lower().strip() in ("mainmenu", "bootstrap", "map_game_bootstrap")
+            or "menu" in raw_zone.lower()
+        )
+        is_continent = (
+            "worldmap" in raw_zone.lower()
+            or raw_zone.lower().strip() in ("main", "the continent", "il continente")
+            or "continent" in raw_zone.lower()
+            or "continente" in raw_zone.lower()
+        )
+
         # Checkpoint resolution via save parser if bridge did not supply one
-        if not checkpoint_name and raw_zone:
+        if is_menu or is_continent:
+            checkpoint_name = ""
+        elif not checkpoint_name and raw_zone:
             save_dir = self.save_reader.get_latest_save_dir()
             if save_dir:
                 cp_lvl, cp_tag = self.save_reader.read_checkpoint_from_save(save_dir)
@@ -243,6 +312,17 @@ class GameDetector:
         if raw_zone:
             zone_display = format_zone_name(raw_zone, lang)
             self.last_zone = zone_display
+            self.last_raw_zone = raw_zone
+
+        # Absolute guarantee: no checkpoint for Continent or Main Menu
+        if (
+            "continent" in zone_display.lower()
+            or "continente" in zone_display.lower()
+            or "menu" in zone_display.lower()
+            or is_continent
+            or is_menu
+        ):
+            checkpoint_name = ""
 
         # Track Endless Tower stage and trial
         is_tower = any(

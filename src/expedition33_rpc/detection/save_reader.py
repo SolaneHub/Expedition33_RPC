@@ -83,6 +83,13 @@ class SaveFileReader:
         disp_clean = strip_accents(zone_display).lower()
         zone_all = f"{raw_clean} {disp_clean}"
 
+        # Checkpoints are never valid for The Continent or Main Menu
+        if any(
+            k in zone_all
+            for k in ("continent", "continente", "worldmap", "world map", "menu", "bootstrap")
+        ):
+            return False
+
         lvl_clean = strip_accents(level_name or "").lower()
         tag_clean = (
             strip_accents(cp_tag or "").lower().replace("level.spawnpoint.", "").replace(".", " ")
@@ -96,10 +103,6 @@ class SaveFileReader:
         if ("paintress" in full_cp or "monolith" in full_cp) and "monolith" in zone_all:
             return True
         if ("flyinghouse" in full_cp or "manor" in full_cp) and "manor" in zone_all:
-            return True
-        if "worldmap" in full_cp and (
-            "continent" in zone_all or "continente" in zone_all or "worldmap" in zone_all
-        ):
             return True
 
         # 2. Match zone words inside cp identifier

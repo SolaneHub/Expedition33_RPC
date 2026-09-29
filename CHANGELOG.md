@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.3] - 2026-09-29
+
+### Fixed
+- **Main Menu & Startup Telemetry Detection**:
+  - Added native recognition for Unreal Engine startup bootstrap and main menu states (`Map_Game_Bootstrap`, `Bootstrap`, `MainMenu`, `Frontend`).
+  - Emits dedicated Presence status ("Nel menu principale - Schermata dei titoli" / "In Main Menu - Title Screen") when the game launches, eliminating premature fallbacks to previous session save files on disk.
+  - Implemented startup freshness validation preventing pre-launch save file fallback while the game is booting up.
+  - Cleans up internal detector zone memory (`last_zone`, `last_raw_zone`) on game termination to avoid persisting previous session locations.
+- **Continent Checkpoint Isolation & Map Transition Cleanup**:
+  - Enforced strict checkpoint clearing whenever traveling to The Continent or transitioning between zones.
+  - Eliminated orphaned checkpoint display on the overworld map (previously appending flags from departed dungeons such as `The Continent (Reverie Path)`).
+  - Added on-screen widget visibility checks to the Lua bridge mod (`WBP_SavePointMenu_C:IsVisible()`) to prevent hidden/closed menu widgets from persisting checkpoint text.
+  - Removed worldmap spawnpoint alias rules in the binary save reader that previously matched overworld maps.
+
 ## [v1.5.2] - 2026-09-29
 
 ### Fixed

@@ -1089,6 +1089,23 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
     if not raw_name:
         return "In esplorazione" if lang.startswith("it") else "Exploring"
 
+    main_menu_names = {
+        "mainmenu",
+        "main_menu",
+        "main menu",
+        "bootstrap",
+        "map_game_bootstrap",
+        "map game bootstrap",
+        "map_mainmenu",
+        "title",
+        "titlescreen",
+        "frontend",
+        "entry",
+    }
+    raw_lower = raw_name.lower().strip()
+    if raw_lower in main_menu_names or "bootstrap" in raw_lower or "mainmenu" in raw_lower:
+        return "Nel menu principale" if lang.startswith("it") else "Main Menu"
+
     continent_names = {
         "main",
         "worldmap",
