@@ -23,33 +23,97 @@ ENDLESS_TOWER_TRIALS = [
     ("Super Boss", "Simon the Divergent Star", [["Simon the Divergent Star", "Simon"]]),
     ("Super Boss", "Clea Unleashed", [["Clea Unleashed", "Clea"]]),
     ("Super Boss", "Duollistes", [["Duollistes", "Duallistes", "Duolliste x2", "Dualliste x2"]]),
-    ("Super Boss", "Chromatic Lampmaster", [["Chromatic Lampmaster"]]),
+    (
+        "Super Boss",
+        "Alpha Lampmaster",
+        [["Alpha Lampmaster", "Chromatic Lampmaster", "Lampmaster Alpha"]],
+    ),
     # Stage 11
     ((11, 3), "Painted Love", [["Painted Love"]]),
-    ((11, 2), None, [["Lampmaster"], ["Creation"], ["Chromatic Clair Obscur"]]),
     (
-        ((11, 1)),
-        None,
-        [["Chromatic Moissonneuse", "Chromatic Moissoneusse"], ["Dualliste"], ["Mask Keeper"]],
-    ),
-    # Stage 10
-    ((10, 3), None, [["Chromatic Chalier"], ["Chromatic Jar"], ["Obscur"]]),
-    (
-        ((10, 2)),
+        (11, 2),
         None,
         [
-            ["Chromatic Gold Chevaliere"],
-            ["Chromatic Steel Chevaliere"],
-            ["Chromatic Ceramic Chevaliere"],
+            ["Lampmaster"],
+            ["Creation"],
+            ["Alpha Clair Obscur", "Chromatic Clair Obscur", "Clair Obscur Alpha"],
         ],
     ),
-    ((10, 1), None, [["Chromatic Portier"], ["Chromatic Demineur"], ["Clair"]]),
+    (
+        (11, 1),
+        None,
+        [
+            [
+                "Alpha Moissonneuse",
+                "Chromatic Moissonneuse",
+                "Moissonneuse Alpha",
+                "Alpha Moissoneusse",
+                "Chromatic Moissoneusse",
+            ],
+            ["Dualliste"],
+            ["Mask Keeper"],
+        ],
+    ),
+    # Stage 10
+    (
+        (10, 3),
+        None,
+        [
+            [
+                "Alpha Chapelier",
+                "Chromatic Chapelier",
+                "Chapelier Alpha",
+                "Alpha Chalier",
+                "Chromatic Chalier",
+            ],
+            ["Alpha Jar", "Chromatic Jar", "Jar Alpha"],
+            ["Obscur"],
+        ],
+    ),
+    (
+        (10, 2),
+        None,
+        [
+            ["Alpha Gold Chevaliere", "Chromatic Gold Chevaliere", "Gold Chevaliere Alpha"],
+            ["Alpha Steel Chevaliere", "Chromatic Steel Chevaliere", "Steel Chevaliere Alpha"],
+            ["Alpha Ceramic Chevaliere", "Chromatic Ceramic Chevaliere", "Ceramic Chevaliere Alpha"],
+        ],
+    ),
+    (
+        (10, 1),
+        None,
+        [
+            ["Alpha Portier", "Chromatic Portier", "Portier Alpha"],
+            ["Alpha Demineur", "Chromatic Demineur", "Demineur Alpha"],
+            ["Clair"],
+        ],
+    ),
     # Stage 9
-    ((9, 3), None, [["Flame Eveque"], ["Frost Eveque"], ["Chromatic Danseuse"]]),
-    ((9, 2), None, [["Thunder Eveque"], ["Chromatic Demineur"], ["Stalact"]]),
-    ((9, 1), None, [["Eveque"], ["Chromatic Cultist"], ["Luster"]]),
+    (
+        (9, 3),
+        None,
+        [["Flame Eveque"], ["Frost Eveque"], ["Alpha Danseuse", "Chromatic Danseuse", "Danseuse Alpha"]],
+    ),
+    (
+        (9, 2),
+        None,
+        [["Thunder Eveque"], ["Alpha Demineur", "Chromatic Demineur", "Demineur Alpha"], ["Stalact"]],
+    ),
+    (
+        (9, 1),
+        None,
+        [["Eveque"], ["Alpha Cultist", "Chromatic Cultist", "Cultist Alpha"], ["Luster"]],
+    ),
     # Stage 8
-    ((8, 3), None, [["Chromatic Sakapatate"], ["Boucheclier", "Bouchelier"], ["Gault"]]),
+    (
+        (8, 3),
+        None,
+        [
+            ["Alpha Sakapatate", "Chromatic Sakapatate", "Sakapatate Alpha"],
+            ["Boucheclier", "Bouchelier"],
+            ["Gault"],
+        ],
+    ),
     ((8, 2), None, [["Glaise"], ["Moissonneuse"], ["Hexga"]]),
     ((8, 1), None, [["Bruler"], ["Chapelier"], ["Benisseur"]]),
     # Stage 7
@@ -61,16 +125,60 @@ ENDLESS_TOWER_TRIALS = [
     ((6, 2), None, [["Boucheclier", "Bouchelier"], ["Gross Tete", "Grosstete"], ["Echassier"]]),
     ((6, 1), None, [["Greatsword Cultist"], ["Reaper Cultist"], ["Cultist"]]),
     # Stage 5
-    ((5, 3), None, [["Chromatic Bourgeon"], ["Volester"], ["Flan"]]),
-    ((5, 2), None, [["Chromatic Greatsword Cultist"], ["Orphelin"], ["Sapling"]]),
-    ((5, 1), None, [["Chromatic Veilleur"], ["Bruler"], ["Orphelin"]]),
+    (
+        (5, 3),
+        None,
+        [["Alpha Bourgeon", "Chromatic Bourgeon", "Bourgeon Alpha"], ["Volester"], ["Flan"]],
+    ),
+    (
+        (5, 2),
+        None,
+        [
+            [
+                "Alpha Greatsword Cultist",
+                "Chromatic Greatsword Cultist",
+                "Greatsword Cultist Alpha",
+            ],
+            ["Orphelin"],
+            ["Sapling"],
+        ],
+    ),
+    (
+        (5, 1),
+        None,
+        [["Alpha Veilleur", "Chromatic Veilleur", "Veilleur Alpha"], ["Bruler"], ["Orphelin"]],
+    ),
     # Stage 4
-    ((4, 3), None, [["Chromatic Echassier"], ["Moissonneuse"], ["Catapult Sakapatate"]]),
+    (
+        (4, 3),
+        None,
+        [
+            ["Alpha Echassier", "Chromatic Echassier", "Echassier Alpha"],
+            ["Moissonneuse"],
+            ["Catapult Sakapatate"],
+        ],
+    ),
     ((4, 2), None, [["Bourgeon"], ["Jar"], ["Rocher"]]),
-    ((4, 1), None, [["Chromatic Orphelin"], ["Ceramic Chevaliere"], ["Cruler"]]),
+    (
+        (4, 1),
+        None,
+        [["Alpha Orphelin", "Chromatic Orphelin", "Orphelin Alpha"], ["Ceramic Chevaliere"], ["Cruler"]],
+    ),
     # Stage 3
-    ((3, 3), None, [["Chromatic Abbest"], ["Goblu"], ["Troubadour"]]),
-    ((3, 2), None, [["Chromatic Benisseur"], ["Boucheclier", "Bouchelier"], ["Clair"]]),
+    (
+        (3, 3),
+        None,
+        [["Alpha Abbest", "Chromatic Abbest", "Abbest Alpha"], ["Goblu"], ["Troubadour"]],
+    ),
+    (
+        (3, 2),
+        None,
+        [
+            ["Alpha Benisseur", "Chromatic Benisseur", "Benisseur Alpha"],
+            ["Boucheclier", "Bouchelier"],
+            ["Clair"],
+        ],
+    ),
     ((3, 1), None, [["Gault"], ["Hexga"], ["Cruler"]]),
     # Stage 2
     ((2, 3), None, [["Lampmaster"], ["Potier"], ["Echassier"]]),
@@ -1038,16 +1146,36 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
     return spaced.strip()
 
 
+def format_enemy_name(enemy_name: str) -> str:
+    """Formats and normalizes enemy names, converting 'Chromatic' to in-game official 'Alpha' and tier formatting."""
+    if not enemy_name:
+        return ""
+    if "UObject:" in enemy_name or "0x" in enemy_name:
+        return ""
+
+    formatted = enemy_name
+    # Format T1 / T2 / T3 suffix as (Tier 1) / (Tier 2) / (Tier 3)
+    formatted = re.sub(r"\bT(\d+)\b", r"(Tier \1)", formatted)
+
+    # In-game chromatic variants are officially called 'Alpha'
+    formatted = re.sub(r"\bChromatic\b", "Alpha", formatted, flags=re.IGNORECASE)
+    formatted = re.sub(r"\bCromatic[oaie]\b", "Alpha", formatted, flags=re.IGNORECASE)
+
+    return formatted.strip()
+
+
 def resolve_tower_trial(enemy_name: str) -> tuple[tuple[int, int] | str | None, str]:
-    """Determines the (stage, trial) in Endless Tower and the clean boss/enemy name based on exact wiki names."""
+    """Determines the (stage, trial) in Endless Tower and the clean boss/enemy name based on official in-game names."""
     if not enemy_name:
         return None, enemy_name
-    cleaned = re.sub(r"\(Tier \d+\)", "", enemy_name, flags=re.IGNORECASE)
+    normalized = format_enemy_name(enemy_name)
+    cleaned = re.sub(r"\(Tier \d+\)", "", normalized, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bT\d+\b", "", cleaned, flags=re.IGNORECASE).lower()
 
     for stage_info, boss_name, enemy_groups in ENDLESS_TOWER_TRIALS:
         if all(any(variant.lower() in cleaned for variant in group) for group in enemy_groups):
-            final_enemy = boss_name if boss_name else enemy_name
+            final_enemy = boss_name if boss_name else normalized
             return stage_info, final_enemy
 
-    return None, enemy_name
+    return None, normalized
+

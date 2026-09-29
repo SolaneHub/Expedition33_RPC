@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -10,6 +9,7 @@ import psutil
 from expedition33_rpc.detection.game_data import (
     TARGET_PROCESS_NAMES,
     format_checkpoint_tag,
+    format_enemy_name,
     format_zone_name,
     resolve_tower_trial,
     strip_accents,
@@ -83,11 +83,7 @@ class BridgeStateProvider(GameStateProvider):
 
         enemy_name = bridge.get("enemy_name", "")
         if enemy_name:
-            if "UObject:" in enemy_name or "0x" in enemy_name:
-                enemy_name = ""
-            else:
-                # Format T1 / T2 / T3 suffix as (Tier 1) / (Tier 2) / (Tier 3)
-                enemy_name = re.sub(r"\bT(\d+)\b", r"(Tier \1)", enemy_name)
+            enemy_name = format_enemy_name(enemy_name)
 
         return {
             "raw_zone": raw_zone,
@@ -221,7 +217,7 @@ class GameDetector:
             if data.get("in_combat"):
                 in_combat = True
             if not enemy_name and data.get("enemy_name"):
-                enemy_name = data["enemy_name"]
+                enemy_name = format_enemy_name(data["enemy_name"])
             if tower_floor is None and data.get("tower_floor") is not None:
                 tower_floor = data["tower_floor"]
             if not checkpoint_name and data.get("checkpoint"):
@@ -293,9 +289,11 @@ class GameDetector:
             checkpoint_name=checkpoint_name,
         )
 
-    # Backwards compatibility delegators
     def format_zone_name(self, raw_name: str, lang: str = "en") -> str:
         return format_zone_name(raw_name, lang)
+
+    def format_enemy_name(self, enemy_name: str) -> str:
+        return format_enemy_name(enemy_name)
 
     def resolve_tower_trial(self, enemy_name: str) -> tuple[tuple[int, int] | str | None, str]:
         return resolve_tower_trial(enemy_name)
@@ -325,6 +323,7 @@ __all__ = [
     "SaveFileStateProvider",
     "GameDetector",
     "format_checkpoint_tag",
+    "format_enemy_name",
     "format_zone_name",
     "resolve_tower_trial",
     "strip_accents",

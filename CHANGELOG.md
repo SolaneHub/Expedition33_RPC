@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.1] - 2026-09-29
+
+### Fixed
+- **In-Game "Alpha" Naming Alignment for Chromatic Variant Enemies**:
+  - Replaced all legacy and wiki references to "Chromatic" enemies with their official in-game designation ("Alpha"), including Endless Tower trial definitions and Super Boss encounters (e.g. *Alpha Lampmaster*, *Alpha Moissonneuse*, *Alpha Sakapatate*, *Alpha Chapelier*).
+  - Corrected legacy wiki typo `Chromatic Chalier` to `Alpha Chapelier`.
+  - Added autonomous normalization helper `format_enemy_name` to handle both English and Italian variants (`Chromatic`, `Cromatico/a/i/e` -> `Alpha`), ensuring compatibility with all game localizations and blueprint class names.
+  - Updated embedded UE4SS combat bridge Lua script to directly emit official "Alpha" designations during live combat extraction.
+
 ## [v1.5.0] - 2026-09-26
 
 ### Added
