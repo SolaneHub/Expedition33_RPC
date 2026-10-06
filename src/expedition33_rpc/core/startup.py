@@ -1,7 +1,12 @@
 import contextlib
 import os
 import sys
-import winreg
+from pathlib import Path
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APP_NAME = "Expedition33_DiscordRPC"
@@ -11,10 +16,8 @@ def get_current_executable_command() -> str:
     """Returns the formatted command to execute this application on startup."""
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}"'
-    root_main = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "..", "main.py")
-    )
-    if os.path.exists(root_main):
+    root_main = Path(__file__).resolve().parents[3] / "main.py"
+    if root_main.exists():
         # On non-frozen Windows, prefer pythonw.exe if available to avoid opening a console window
         py_exe = sys.executable
         pyw_candidate = os.path.join(os.path.dirname(py_exe), "pythonw.exe")
@@ -25,6 +28,8 @@ def get_current_executable_command() -> str:
 
 def is_startup_enabled() -> bool:
     """Checks if the application is registered to run on Windows startup and the target binary exists."""
+    if winreg is None:
+        return False
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ) as key:
             val, _ = winreg.QueryValueEx(key, APP_NAME)
@@ -43,6 +48,8 @@ def is_startup_enabled() -> bool:
 
 def set_startup_enabled(enable: bool) -> bool:
     """Enables or disables automatic startup with Windows."""
+    if winreg is None:
+        return False
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
             if enable:
@@ -59,6 +66,8 @@ def set_startup_enabled(enable: bool) -> bool:
 
 def sync_startup_path() -> None:
     """If startup is enabled, ensures the registered path matches the current location of the executable."""
+    if winreg is None:
+        return
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ) as key:
             val, _ = winreg.QueryValueEx(key, APP_NAME)

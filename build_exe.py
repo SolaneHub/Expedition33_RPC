@@ -2,7 +2,7 @@ import subprocess
 import sys
 
 
-def build():
+def build() -> None:
     print("Building Expedition33_RPC.exe...")
     cmd = [
         sys.executable,

@@ -1,5 +1,6 @@
 import os
 import re
+from pathlib import Path
 
 from expedition33_rpc.detection.game_data import strip_accents
 
@@ -13,18 +14,22 @@ class SaveFileReader:
         )
 
     def get_latest_save_dir(self) -> str | None:
-        if not os.path.isdir(self.base_save_dir):
+        base_path = Path(self.base_save_dir)
+        if not base_path.is_dir():
             return None
         try:
-            subdirs = [
-                os.path.join(self.base_save_dir, d)
-                for d in os.listdir(self.base_save_dir)
-                if os.path.isdir(os.path.join(self.base_save_dir, d))
-            ]
+            subdirs = [p for p in base_path.iterdir() if p.is_dir()]
             if not subdirs:
                 return None
-            subdirs.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-            return subdirs[0]
+
+            def _mtime(p: Path) -> float:
+                try:
+                    return p.stat().st_mtime
+                except OSError:
+                    return 0.0
+
+            latest = max(subdirs, key=_mtime)
+            return str(latest)
         except Exception:
             return None
 
@@ -93,7 +98,7 @@ class SaveFileReader:
 
         lvl_clean = strip_accents(level_name or "").lower()
         tag_clean = (
-            strip_accents(cp_tag or "").lower().replace("level.spawnpoint.", "").replace(".", " ")
+            strip_accents(cp_tag or "").lower().removeprefix("level.spawnpoint.").replace(".", " ")
         )
 
         full_cp = f"{lvl_clean} {tag_clean}"

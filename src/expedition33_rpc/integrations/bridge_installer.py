@@ -1,9 +1,14 @@
 import os
-import sys
-import winreg
 import zipfile
 
 import psutil
+
+from expedition33_rpc.core.resources import get_resource_path
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 TARGET_EXE_NAMES = {
     "sandfall-win64-shipping.exe",
@@ -11,34 +16,6 @@ TARGET_EXE_NAMES = {
     "expedition33.exe",
     "sandfall.exe",
 }
-
-
-def get_resource_path(filename: str) -> str:
-    """Resolves resource path across development and PyInstaller frozen runtime."""
-    if getattr(sys, "frozen", False):
-        base_meipass = getattr(sys, "_MEIPASS", None)
-        if base_meipass:
-            bundled_pkg = os.path.join(base_meipass, "expedition33_rpc", "assets", filename)
-            if os.path.exists(bundled_pkg):
-                return bundled_pkg
-            flat = os.path.join(base_meipass, filename)
-            if os.path.exists(flat):
-                return flat
-
-        exe_dir = os.path.dirname(sys.executable)
-        candidate = os.path.join(exe_dir, filename)
-        if os.path.exists(candidate):
-            return candidate
-
-    module_dir = os.path.dirname(os.path.abspath(__file__))
-    candidate = os.path.join(module_dir, "assets", filename)
-    if os.path.exists(candidate):
-        return candidate
-    candidate_parent = os.path.join(module_dir, "..", "assets", filename)
-    if os.path.exists(candidate_parent):
-        return candidate_parent
-
-    return filename
 
 
 def find_game_win64_directory() -> str | None:
@@ -58,20 +35,22 @@ def find_game_win64_directory() -> str | None:
 
     # 2. Check Steam Registry and Library Folders
     steam_roots = []
-    for hkey, subkey in [
-        (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam"),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam"),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam"),
-    ]:
-        try:
-            with winreg.OpenKey(hkey, subkey) as key:
-                val, _ = winreg.QueryValueEx(key, "SteamPath")
-                if val:
-                    steam_roots.append(os.path.normpath(val))
-        except Exception:
-            pass
+    if winreg is not None:
+        for hkey, subkey in [
+            (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam"),
+        ]:
+            try:
+                with winreg.OpenKey(hkey, subkey) as key:
+                    val, _ = winreg.QueryValueEx(key, "SteamPath")
+                    if val:
+                        steam_roots.append(os.path.normpath(val))
+            except Exception:
+                pass
 
     libraries = list(steam_roots)
+
     for root in steam_roots:
         vdf_path = os.path.join(root, "steamapps", "libraryfolders.vdf")
         if os.path.exists(vdf_path):

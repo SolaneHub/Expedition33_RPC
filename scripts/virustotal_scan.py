@@ -11,11 +11,10 @@ Optimizes file scanning against VirusTotal API v3:
 5. Emits permanent GUI permalinks https://www.virustotal.com/gui/file/{sha256} to $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY.
 """
 
-from __future__ import annotations
-
 import argparse
 import contextlib
 import hashlib
+import io
 import json
 import os
 import sys
@@ -48,11 +47,8 @@ class RateLimiter:
 
 def compute_sha256(file_path: Path) -> str:
     """Computes SHA-256 hash of a file."""
-    hasher = hashlib.sha256()
     with open(file_path, "rb") as f:
-        while chunk := f.read(65536):
-            hasher.update(chunk)
-    return hasher.hexdigest()
+        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def build_multipart_payload(field_name: str, file_path: Path) -> tuple[bytes, str]:
@@ -254,8 +250,17 @@ def append_step_summary(markdown: str) -> None:
 
 def main() -> int:
     try:
-        if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+        if (
+            isinstance(sys.stdout, io.TextIOWrapper)
+            and sys.stdout.encoding
+            and sys.stdout.encoding.lower() not in ("utf-8", "utf8")
+        ):
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if (
+            isinstance(sys.stderr, io.TextIOWrapper)
+            and sys.stderr.encoding
+            and sys.stderr.encoding.lower() not in ("utf-8", "utf8")
+        ):
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
@@ -314,7 +319,7 @@ def main() -> int:
         else:
             # Step 1: Check cache via file-info
             print(f"  -> Checking VirusTotal cache for {sha256[:12]}...")
-            cached, stats, ratio = check_file_report(sha256, api_key, rate_limiter)
+            cached, _, ratio = check_file_report(sha256, api_key, rate_limiter)
             if cached and ratio:
                 status_text = "Cached"
                 ratio_str = ratio
@@ -327,7 +332,7 @@ def main() -> int:
                 if uploaded and analysis_id:
                     print(f"  -> Upload succeeded! Analysis ID: {analysis_id}")
                     if args.timeout > 0:
-                        finished, poll_stats, poll_ratio = poll_analysis(
+                        finished, _, poll_ratio = poll_analysis(
                             analysis_id, api_key, args.timeout, rate_limiter
                         )
                         if finished and poll_ratio:
@@ -338,6 +343,7 @@ def main() -> int:
                             status_text = "Uploaded (Queued)"
                             ratio_str = "In progress"
                             print("  -> Polling timed out; report will finish asynchronously.")
+
                     else:
                         status_text = "Uploaded (Queued)"
                         ratio_str = "Queued"

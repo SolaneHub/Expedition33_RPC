@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.0] - 2026-10-06
+
+### Changed
+- **Python 3.12 Runtime & Toolchain Modernization**:
+  - Upgraded target Python version requirement to `>=3.12` (`.python-version` pinned to `3.12`, Pyright and Ruff configured for `py312`).
+  - Adopted PEP 695 native type parameter and type alias syntax (`type TowerTrial = tuple[int, int] | str`, `type RawGameData = dict[str, Any]`, `type UpdateCallback`, `type ExitCallback`).
+  - Adopted PEP 698 `@override` decorator in polymorphic telemetry providers (`BridgeStateProvider`, `SaveFileStateProvider`).
+  - Modernized `updater.py`, `discord_rpc.py`, and `tray_app.py` with Python 3.12 structural pattern matching (`match/case`) for game trials, combat encounters, and updater states.
+  - Replaced manual chunked loops and full-binary memory reads with Python 3.12 native streaming `hashlib.file_digest` in `scripts/virustotal_scan.py` and GitHub Actions release workflow.
+  - Normalized package versioning in `pyproject.toml` to PEP 440 (`1.6.0`).
+  - Extended Pyright static type checking coverage across `src/`, `scripts/`, `tests/`, `main.py`, and `build_exe.py` with zero errors.
+
+### Fixed
+- **Cross-Platform Test Execution & Windows Registry Fallbacks**:
+  - Implemented graceful `ImportError` fallbacks for `winreg` across `core.settings`, `core.startup`, and `integrations.bridge_installer`, enabling the test suite (`unittest discover tests`) to run deterministically on non-Windows platforms (macOS/Linux) and CI environments without failing on missing Win32 APIs.
+  - Corrected Windows autostart path resolution in `core.startup` to accurately target root `main.py` via 4-level directory traversal (`Path(__file__).resolve().parents[3] / "main.py"`).
+  - Added platform guard in `core.app` single-instance check to prevent `ctypes.windll` errors on non-Windows hosts.
+  - Hardened save directory discovery in `detection.save_reader` (`get_latest_save_dir`) with $O(N)$ `Path.iterdir()` and per-item `OSError` resilience during concurrent folder changes.
+
+### Refactored
+- **Asset Resolution Centralization**:
+  - Extracted shared PyInstaller and development resource locator `get_resource_path()` into dedicated module `core.resources`, eliminating code duplication between `bridge_installer.py` and `tray_app.py`.
+- **String Handling Modernization**:
+  - Replaced legacy string replacement logic with `str.removeprefix()` in `detection.game_data` and `detection.save_reader`.
+
+### Added
+- **Modernization & Cross-Platform Test Suite (`tests/test_modernization.py`)**:
+  - Added 13 comprehensive unit tests validating resource resolution, save reader resilience, Windows Registry simulation, bridge lifecycle, Discord RPC trial formatting, and VirusTotal stdout safety, expanding test coverage to 25 automated tests.
+  - Added pre-build automated test verification step (`uv run python -m unittest discover tests`) to GitHub Actions release workflow.
+
 ## [v1.5.6] - 2026-09-29
 
 ### Changed

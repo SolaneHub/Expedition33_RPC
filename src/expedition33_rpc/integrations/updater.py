@@ -42,6 +42,10 @@ class UpdateInfo:
     html_url: str
 
 
+type UpdateCallback = Callable[[UpdateInfo | None], None]
+type ExitCallback = Callable[[], None]
+
+
 def parse_version(v_str: str) -> tuple[int, ...]:
     """Parses a version string into a comparable tuple of integers.
 
@@ -183,7 +187,7 @@ class AppUpdater:
     def check_in_background(
         self,
         delay_seconds: float = 0.0,
-        on_complete: Callable[[UpdateInfo | None], None] | None = None,
+        on_complete: UpdateCallback | None = None,
     ):
         """Spawns a background thread to check for updates."""
 
@@ -202,7 +206,7 @@ class AppUpdater:
 
     def download_and_install(
         self,
-        on_exit_callback: Callable[[], None] | None = None,
+        on_exit_callback: ExitCallback | None = None,
     ) -> bool:
         """Downloads the update, verifies checksum, and applies self-update."""
         with self._lock:
@@ -412,7 +416,7 @@ Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
                     "-File",
                     ps_path,
                 ],
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 env=clean_env,
                 close_fds=True,
             )
@@ -449,16 +453,18 @@ Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 
     def get_status_text(self) -> str:
         """Returns the formatted menu item label based on the current updater state."""
-        if self.state == UpdateState.CHECKING:
-            return "Checking for Updates..."
-        if self.state == UpdateState.DOWNLOADING:
-            return f"Downloading Update  [{self.download_progress}%]"
-        if self.state == UpdateState.APPLYING:
-            return "Restarting Application..."
-        if self.state == UpdateState.AVAILABLE and self.available_update:
-            return f"Update to {self.available_update.tag_name}  [Install Now]"
-        if self.state == UpdateState.UP_TO_DATE:
-            return f"Version {self.current_version}  [Up to Date]"
-        if self.state == UpdateState.ERROR:
-            return "Update Check Failed  [Click to Retry]"
-        return "Check for Updates"
+        match self.state:
+            case UpdateState.CHECKING:
+                return "Checking for Updates..."
+            case UpdateState.DOWNLOADING:
+                return f"Downloading Update  [{self.download_progress}%]"
+            case UpdateState.APPLYING:
+                return "Restarting Application..."
+            case UpdateState.AVAILABLE if self.available_update:
+                return f"Update to {self.available_update.tag_name}  [Install Now]"
+            case UpdateState.UP_TO_DATE:
+                return f"Version {self.current_version}  [Up to Date]"
+            case UpdateState.ERROR:
+                return "Update Check Failed  [Click to Retry]"
+            case _:
+                return "Check for Updates"

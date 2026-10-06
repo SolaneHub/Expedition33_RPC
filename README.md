@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.5.6-blue.svg" alt="Release"></a>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python"></a>
+  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.6.0-blue.svg" alt="Release"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python"></a>
   <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform"></a>
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/badge/code%20style-ruff-000000.svg" alt="Code Style: Ruff"></a>
   <a href="https://github.com/microsoft/pyright"><img src="https://img.shields.io/badge/type%20checked-pyright-green.svg" alt="Type Checked: Pyright"></a>
@@ -188,7 +188,7 @@ If your antivirus or Windows SmartScreen displays an alert, here is exactly why 
   - **SecureAge**: `Malicious` *(Cloud whitelist absence for unsigned open-source binaries)*
   - **Arctic Wolf**: `Unsafe` *(Generic reputation score heuristic)*
 - **Why PyInstaller Triggers Machine Learning Heuristics**:
-  - `Expedition33_RPC` is packaged using **PyInstaller**, which bundles Python 3.10 and dependencies into a self-extracting executable. Because some malware authors also package malicious scripts using packers, automated cloud ML heuristics frequently misclassify fresh, unsigned PyInstaller binaries under generic names like `Wacatac.B!ml`.
+  - `Expedition33_RPC` is packaged using **PyInstaller**, which bundles Python 3.12 and dependencies into a self-extracting executable. Because some malware authors also package malicious scripts using packers, automated cloud ML heuristics frequently misclassify fresh, unsigned PyInstaller binaries under generic names like `Wacatac.B!ml`.
   - These engines also flag legitimate Windows API calls: creating a named Windows mutex (used to enforce a single running instance of the tray app) and querying running processes via `psutil` (used solely to detect when `SandFall-Win64-Shipping.exe` launches or exits).
 - **Lack of Expensive EV Code-Signing Certificate**:
   - Commercial software publishers pay hundreds of dollars per year ($400+/year) for Extended Validation (EV) certificates to bypass SmartScreen and heuristics. As a free, open-source community tool, `Expedition33_RPC` is unsigned, so automated heuristics assign it a default "low reputation" score until enough community reputation builds.
@@ -237,7 +237,7 @@ uv run python -m expedition33_rpc
 <br>
 
 ### 1. Requirements
-- Python 3.10+
+- Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (recommended package and project manager)
 
 ### 2. Setup Virtual Environment

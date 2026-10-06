@@ -1337,7 +1337,7 @@ def format_checkpoint_tag(tag: str, lang: str = "en", zone: str = "") -> str:
     """Returns the official in-game Expedition Flag name for a given SpawnPoint tag."""
     if not tag:
         return ""
-    clean_tag = tag.replace("Level.SpawnPoint.", "")
+    clean_tag = tag.removeprefix("Level.SpawnPoint.")
     parts = clean_tag.split(".")
     suffix = parts[-1]
     if suffix in ("WorldMap", "Generic", "Dynamic", "Editor", "todelete", "None", "Default"):
@@ -1651,7 +1651,7 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
         "SubLevel_",
     ]:
         if cleaned.startswith(prefix):
-            cleaned = cleaned[len(prefix) :]
+            cleaned = cleaned.removeprefix(prefix)
             break
 
     cleaned = re.sub(r"_V\d+$", "", cleaned)

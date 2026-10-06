@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "expedition33-discord-rpc"
-version = "v1.5.6"
+version = "1.6.0"
 description = "Discord Rich Presence for Clair Obscur: Expedition 33"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { file = "LICENSE" }
 authors = [
     { name = "SolaneHub" }
@@ -19,8 +19,6 @@ classifiers = [
     "Intended Audience :: End Users/Desktop",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Games/Entertainment",
@@ -49,7 +47,7 @@ expedition33-rpc = "expedition33_rpc:main"
 packages = ["src/expedition33_rpc"]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py312"
 line-length = 100
 src = ["src"]
 exclude = [
@@ -81,7 +79,8 @@ ignore = [
 known-first-party = ["expedition33_rpc"]
 
 [tool.pyright]
-include = ["src", "main.py", "build_exe.py"]
+include = ["src", "main.py", "build_exe.py", "scripts", "tests"]
+
 extraPaths = ["src"]
 exclude = [
     "**/__pycache__",
@@ -89,7 +88,7 @@ exclude = [
     "dist",
     ".venv",
 ]
-pythonVersion = "3.10"
+pythonVersion = "3.12"
 pythonPlatform = "Windows"
 venvPath = "."
 venv = ".venv"

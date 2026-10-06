@@ -9,7 +9,7 @@ EMBEDDED_CLIENT_ID = "1552405358503272468"
 
 
 class DiscordRPCManager:
-    def __init__(self):
+    def __init__(self) -> None:
         self.client_id: str = EMBEDDED_CLIENT_ID
         self.rpc: Presence | None = None
         self.is_connected: bool = False
@@ -36,7 +36,7 @@ class DiscordRPCManager:
             self.rpc = None
             return False
 
-    def disconnect(self):
+    def disconnect(self) -> None:
         if self.rpc:
             try:
                 self.rpc.clear()
@@ -46,11 +46,11 @@ class DiscordRPCManager:
         self.rpc = None
         self.is_connected = False
 
-    def reconnect(self):
+    def reconnect(self) -> None:
         self.disconnect()
         self.connect()
 
-    def update(self, game_state: GameState, anti_spoiler: bool = False):
+    def update(self, game_state: GameState, anti_spoiler: bool = False) -> None:
         if not self.is_connected and not self.connect():
             return
 
@@ -91,14 +91,15 @@ class DiscordRPCManager:
             else:
                 zone_display = game_state.zone_name or ("In viaggio" if is_it else "Traveling")
                 if game_state.tower_stage_trial:
-                    if isinstance(game_state.tower_stage_trial, tuple):
-                        stg, trl = game_state.tower_stage_trial
-                        trial_label = (
-                            f"Fase {stg}, Prova {trl}" if is_it else f"Stage {stg}, Trial {trl}"
-                        )
-                    else:
-                        trial_label = str(game_state.tower_stage_trial)
+                    match game_state.tower_stage_trial:
+                        case (stg, trl):
+                            trial_label = (
+                                f"Fase {stg}, Prova {trl}" if is_it else f"Stage {stg}, Trial {trl}"
+                            )
+                        case other:
+                            trial_label = str(other)
                     zone_display = f"{zone_display} ({trial_label})"
+
                 elif game_state.tower_floor:
                     floor_label = (
                         f"Piano {game_state.tower_floor}"
@@ -116,7 +117,16 @@ class DiscordRPCManager:
                 state_text = "Posizione riservata" if is_it else "Hidden Location"
             else:
                 zone_display = game_state.zone_name or ("In viaggio" if is_it else "Traveling")
-                if game_state.tower_floor:
+                if game_state.tower_stage_trial:
+                    match game_state.tower_stage_trial:
+                        case (stg, trl):
+                            trial_label = (
+                                f"Fase {stg}, Prova {trl}" if is_it else f"Stage {stg}, Trial {trl}"
+                            )
+                        case other:
+                            trial_label = str(other)
+                    zone_display = f"{zone_display} ({trial_label})"
+                elif game_state.tower_floor:
                     floor_label = (
                         f"Piano {game_state.tower_floor}"
                         if is_it

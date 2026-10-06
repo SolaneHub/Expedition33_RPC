@@ -3,6 +3,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any, override
 
 import psutil
 
@@ -17,6 +18,9 @@ from expedition33_rpc.detection.game_data import (
 from expedition33_rpc.detection.save_reader import SaveFileReader
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
 
+type TowerTrial = tuple[int, int] | str
+type RawGameData = dict[str, Any]
+
 
 @dataclass
 class GameState:
@@ -29,7 +33,7 @@ class GameState:
     enemy_name: str = ""
     game_language: str = "en"
     tower_floor: int | None = None
-    tower_stage_trial: tuple[int, int] | str | None = None
+    tower_stage_trial: TowerTrial | None = None
     checkpoint_name: str = ""
 
 
@@ -37,7 +41,7 @@ class GameStateProvider(ABC):
     """Abstract polymorphic provider interface for extracting real-time game telemetry."""
 
     @abstractmethod
-    def read_game_data(self, proc: psutil.Process, lang: str) -> dict | None:
+    def read_game_data(self, proc: psutil.Process, lang: str) -> RawGameData | None:
         """Returns raw game state fields or None if data source is unavailable/stale."""
         pass
 
@@ -61,7 +65,8 @@ class BridgeStateProvider(GameStateProvider):
                     pass
         return None
 
-    def read_game_data(self, proc: psutil.Process, lang: str) -> dict | None:
+    @override
+    def read_game_data(self, proc: psutil.Process, lang: str) -> RawGameData | None:
         del lang
         bridge = self.read_bridge_status()
         if not bridge:
@@ -121,7 +126,8 @@ class SaveFileStateProvider(GameStateProvider):
     def __init__(self, save_reader: SaveFileReader):
         self.save_reader = save_reader
 
-    def read_game_data(self, proc: psutil.Process, lang: str) -> dict | None:
+    @override
+    def read_game_data(self, proc: psutil.Process, lang: str) -> RawGameData | None:
         save_dir = self.save_reader.get_latest_save_dir()
         if not save_dir:
             return None

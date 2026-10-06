@@ -32,16 +32,17 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install 3.11
+        run: uv python install 3.12
 
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Verify Code Quality (Ruff & Pyright)
+      - name: Verify Code Quality & Tests (Ruff, Pyright, Unittest)
         run: |
           uv run ruff check
           uv run ruff format --check
           uv run pyright
+          uv run python -m unittest discover tests
 
       - name: Build Standalone Executable
         run: uv run python build_exe.py
@@ -60,7 +61,8 @@ jobs:
           lines = []
           for p in files_to_hash:
               if p.exists():
-                  h = hashlib.sha256(p.read_bytes()).hexdigest()
+                  with open(p, "rb") as f:
+                      h = hashlib.file_digest(f, "sha256").hexdigest()
                   lines.append(f"{h}  {p.name}")
                   print(f"{h}  {p.name}")
 

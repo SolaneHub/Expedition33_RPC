@@ -8,6 +8,8 @@ _MUTEX_HANDLE = None
 
 def is_already_running() -> bool:
     """Checks if another instance of Expedition 33 RPC is already running on Windows."""
+    if sys.platform != "win32":
+        return False
     global _MUTEX_HANDLE
     mutex_name = "Local\\Expedition33_Discord_RPC_Mutex"
     kernel32 = ctypes.windll.kernel32
