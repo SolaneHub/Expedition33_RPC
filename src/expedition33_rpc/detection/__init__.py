@@ -11,7 +11,9 @@ from expedition33_rpc.detection.game_data import (
     CHECKPOINT_NAMES_EN,
     CHECKPOINT_NAMES_IT,
     ENDLESS_TOWER_TRIALS,
-    TARGET_PROCESS_NAMES,
+    TARGET_PROCESS_NAME,
+)
+from expedition33_rpc.detection.normalization import (
     format_checkpoint_tag,
     format_enemy_name,
     format_zone_name,
@@ -34,7 +36,7 @@ __all__ = [
     "format_zone_name",
     "resolve_tower_trial",
     "strip_accents",
-    "TARGET_PROCESS_NAMES",
+    "TARGET_PROCESS_NAME",
     "CHECKPOINT_NAMES_EN",
     "CHECKPOINT_NAMES_IT",
     "ENDLESS_TOWER_TRIALS",

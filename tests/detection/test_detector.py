@@ -1,0 +1,415 @@
+"""Tests for GameDetector process discovery, timer tracking, and telemetry providers."""
+
+from __future__ import annotations
+
+import contextlib
+import dataclasses
+import json
+import threading
+import time
+from dataclasses import FrozenInstanceError
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+from expedition33_rpc.detection.detector import (
+    BridgeStateProvider,
+    GameDetector,
+    GameState,
+    GameStateProvider,
+)
+from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
+
+# ---------------------------------------------------------------------------
+# Test Doubles
+# ---------------------------------------------------------------------------
+
+
+class FakeProcess:
+    """Mock process implementing ProcessLike static protocol for deterministic unit tests."""
+
+    def __init__(
+        self,
+        pid: int,
+        name: str,
+        is_running: bool = True,
+        create_time: float = 100.0,
+    ):
+        self._pid = pid
+        self._name = name
+        self._is_running = is_running
+        self._create_time = create_time
+
+    @property
+    def pid(self) -> int:
+        return self._pid
+
+    def name(self) -> str:
+        return self._name
+
+    def is_running(self) -> bool:
+        return self._is_running
+
+    def create_time(self) -> float:
+        return self._create_time
+
+
+# ---------------------------------------------------------------------------
+# ZoneTimerTracker State Machine Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_zone_timer_exploration_deterministic() -> None:
+    tracker = ZoneTimerTracker()
+    start_t1 = tracker.update("Zone A", in_combat=False, now=1000.0)
+    assert start_t1 == 1000.0
+    assert tracker.current_zone_id == "Zone A"
+
+    start_t2 = tracker.update("Zone A", in_combat=False, now=1050.0)
+    assert start_t2 == 1000.0
+
+
+@pytest.mark.unit
+def test_zone_timer_combat_pause_and_resume() -> None:
+    tracker = ZoneTimerTracker()
+    # 1. Start exploring Zone A at t = 1000.0
+    tracker.update("Zone A", in_combat=False, now=1000.0)
+
+    # 2. Enter combat at t = 1030.0
+    combat_start = tracker.update("Zone A", in_combat=True, now=1030.0)
+    assert combat_start == 1030.0
+
+    # 3. Exit combat at t = 1060.0 (combat duration was 30s)
+    resume_t = tracker.update("Zone A", in_combat=False, now=1060.0)
+    # Shifted forward by 30s: 1000.0 + 30.0 = 1030.0
+    assert resume_t == 1030.0
+
+
+@pytest.mark.unit
+def test_tower_chained_trial_combat() -> None:
+    tracker = ZoneTimerTracker()
+    c1 = tracker.update(
+        "Tower", in_combat=True, is_tower=True, current_tower_trial=(1, 1), now=2000.0
+    )
+    assert c1 == 2000.0
+
+    c2 = tracker.update(
+        "Tower", in_combat=True, is_tower=True, current_tower_trial=(1, 2), now=2045.0
+    )
+    assert c2 == 2045.0
+
+
+@pytest.mark.unit
+def test_zone_transition_resets_timers() -> None:
+    tracker = ZoneTimerTracker()
+    tracker.update("Zone A", in_combat=False, now=1000.0)
+    new_start = tracker.update("Zone B", in_combat=False, now=1100.0)
+    assert new_start == 1100.0
+    assert tracker.current_zone_id == "Zone B"
+
+
+@pytest.mark.unit
+def test_tracker_reset() -> None:
+    tracker = ZoneTimerTracker()
+    tracker.update("Zone A", in_combat=True, now=1000.0)
+    tracker.reset()
+    assert tracker.current_zone_id is None
+    assert tracker.zone_start_time is None
+
+
+# ---------------------------------------------------------------------------
+# Process Discovery & Lifecycle Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_process_found_and_cached() -> None:
+    target = FakeProcess(pid=1001, name="Sandfall-Win64-Shipping.exe")
+    detector = GameDetector(process_scanner=lambda: [target])
+    proc1 = detector.find_game_process()
+    assert proc1 is not None
+    assert proc1.pid == 1001
+
+    # Second call returns cached process
+    proc2 = detector.find_game_process()
+    assert proc2 is not None
+    assert proc2.pid == 1001
+
+
+@pytest.mark.unit
+def test_process_not_found() -> None:
+    detector = GameDetector(process_scanner=lambda: [])
+    assert detector.find_game_process() is None
+
+
+@pytest.mark.unit
+def test_cached_pid_invalidated_when_process_stops() -> None:
+    proc = FakeProcess(pid=4001, name="Sandfall-Win64-Shipping.exe")
+    procs = [proc]
+    detector = GameDetector(process_scanner=lambda: list(procs))
+
+    # 1. Finds and returns running process
+    found = detector.find_game_process()
+    assert found is not None
+    assert found.pid == 4001
+
+    # 2. Process exits
+    proc._is_running = False
+    procs.clear()
+
+    # 3. Cache invalidated and returns None
+    assert detector.find_game_process() is None
+
+
+@pytest.mark.unit
+def test_cached_pid_reused_by_unrelated_process_discovers_new_game() -> None:
+    old_game = FakeProcess(pid=5555, name="Sandfall-Win64-Shipping.exe")
+    procs = [old_game]
+    detector = GameDetector(process_scanner=lambda: list(procs))
+    p1 = detector.find_game_process()
+    assert p1 is not None
+    assert p1.pid == 5555
+
+    # PID 5555 reused by chrome.exe, real game launched on PID 8888
+    reused_proc = FakeProcess(pid=5555, name="chrome.exe", is_running=True)
+    new_game = FakeProcess(pid=8888, name="Sandfall-Win64-Shipping.exe", is_running=True)
+    procs.clear()
+    procs.extend([reused_proc, new_game])
+
+    p2 = detector.find_game_process()
+    assert p2 is not None
+    assert p2.pid == 8888
+
+
+@pytest.mark.unit
+def test_detector_custom_target_process_name_injection() -> None:
+    proc = FakeProcess(pid=7777, name="MyCustomGame.exe")
+    detector = GameDetector(
+        process_scanner=lambda: [proc],
+        target_process_name="mycustomgame.exe",
+    )
+    assert detector.target_process_name == "mycustomgame.exe"
+    found = detector.find_game_process()
+    assert found is not None
+    assert found.pid == 7777
+
+
+# ---------------------------------------------------------------------------
+# Telemetry Providers & Coordination Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_bridge_provider_reads_valid_json(tmp_path: Path) -> None:
+    now = time.time()
+    payload = {
+        "timestamp": now,
+        "zone": "Level_Main_OldLumiere",
+        "in_combat": True,
+        "enemy_name": "Duollistes",
+        "floor": 5,
+        "checkpoint": "Entrance",
+    }
+    bridge_path = tmp_path / "expedition33_status.json"
+    bridge_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    provider = BridgeStateProvider(paths=[str(bridge_path)])
+    data = provider.read_game_data(min_valid_timestamp=now - 5.0, lang="en")
+    assert data is not None
+    assert data["raw_zone"] == "Level_Main_OldLumiere"
+    assert data["in_combat"] is True
+    assert data["enemy_name"] == "Duollistes"
+    assert data["tower_floor"] == 5
+
+
+@pytest.mark.integration
+def test_bridge_provider_rejects_corrupted_or_partial_json(tmp_path: Path) -> None:
+    bridge_path = tmp_path / "expedition33_status.json"
+    provider = BridgeStateProvider(paths=[str(bridge_path)])
+
+    for bad_content in (
+        '{\x00"corrupted": invalid...',
+        '{"timestamp": 123.0, "zone": "Leve',
+        "",
+        "[]",
+    ):
+        bridge_path.write_text(bad_content, encoding="utf-8")
+        assert provider.read_bridge_status() is None
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("menu_token", ["MainMenu", "bootstrap", "map_game_bootstrap"])
+def test_main_menu_suppression_of_fallback(tmp_path: Path, menu_token: str) -> None:
+    mock_proc = FakeProcess(pid=9999, name="Sandfall-Win64-Shipping.exe")
+    ini_path = tmp_path / "GameUserSettings.ini"
+    ini_path.write_text("[Internationalization]\nLanguage=en\n", encoding="utf-8")
+
+    bridge_provider = MagicMock(spec=GameStateProvider)
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": menu_token,
+        "in_combat": False,
+        "enemy_name": "",
+        "tower_floor": None,
+        "checkpoint": "",
+    }
+
+    save_provider = MagicMock(spec=GameStateProvider)
+    save_provider.read_game_data.return_value = {
+        "raw_zone": "Level_Main_OldLumiere",
+        "in_combat": False,
+        "enemy_name": "",
+        "tower_floor": None,
+        "checkpoint": "North Gate",
+    }
+
+    detector = GameDetector(
+        providers=[bridge_provider, save_provider],
+        process_scanner=lambda: [mock_proc],
+        game_user_settings_path=ini_path,
+    )
+    state = detector.get_game_state()
+    assert state.is_running is True
+    assert state.zone_name == "Main Menu"
+    assert state.checkpoint_name == ""
+    assert state.in_combat is False
+
+
+@pytest.mark.integration
+def test_save_fallback_used_when_bridge_absent(tmp_path: Path) -> None:
+    mock_proc = FakeProcess(pid=9999, name="Sandfall-Win64-Shipping.exe")
+    ini_path = tmp_path / "GameUserSettings.ini"
+    ini_path.write_text("[Internationalization]\nLanguage=en\n", encoding="utf-8")
+
+    bridge_provider = MagicMock(spec=GameStateProvider)
+    bridge_provider.read_game_data.return_value = None
+
+    save_provider = MagicMock(spec=GameStateProvider)
+    save_provider.read_game_data.return_value = {
+        "raw_zone": "Level_Main_OldLumiere",
+        "in_combat": False,
+        "enemy_name": "",
+        "tower_floor": None,
+        "checkpoint": "Campfire",
+    }
+
+    detector = GameDetector(
+        providers=[bridge_provider, save_provider],
+        process_scanner=lambda: [mock_proc],
+        game_user_settings_path=ini_path,
+    )
+    state = detector.get_game_state()
+    assert state.is_running is True
+    assert state.zone_name == "Old Lumiere"
+    assert state.checkpoint_name == "Campfire"
+    save_provider.read_game_data.assert_called_once()
+
+
+@pytest.mark.unit
+def test_game_state_frozen_immutability() -> None:
+    state = GameState.create(is_running=True, zone_name="Old Lumiere")
+    with pytest.raises(FrozenInstanceError):
+        state.zone_name = "New Lumiere"  # type: ignore
+
+    with pytest.raises(FrozenInstanceError):
+        state.in_combat = True  # type: ignore
+
+
+@pytest.mark.unit
+def test_game_state_dataclass_replace_immutability() -> None:
+    state_active = GameState.create(in_combat=True, enemy_name="Duollistes")
+    assert state_active.in_combat is True
+    assert state_active.enemy_name == "Duollistes"
+
+    state_peace = dataclasses.replace(state_active, in_combat=False, enemy_name="")
+    assert state_peace.in_combat is False
+    assert state_peace.enemy_name == ""
+
+
+@pytest.mark.integration
+def test_bridge_provider_concurrent_writer_resilience(tmp_path: Path) -> None:
+    bridge_path = tmp_path / "expedition33_status.json"
+    provider = BridgeStateProvider(paths=[str(bridge_path)])
+
+    stop = threading.Event()
+    stats = {"success": 0, "failure": 0}
+
+    def writer():
+        i = 0
+        while not stop.is_set():
+            i += 1
+            with contextlib.suppress(Exception):
+                bridge_path.write_text(
+                    json.dumps({"timestamp": time.time(), "zone": f"Zone_{i}", "in_combat": False}),
+                    encoding="utf-8",
+                )
+            time.sleep(0.015)
+
+    t = threading.Thread(target=writer, daemon=True)
+    t.start()
+
+    start = time.time()
+    while time.time() - start < 1.0:
+        data = provider.read_bridge_status()
+        if data is None:
+            stats["failure"] += 1
+        else:
+            stats["success"] += 1
+        time.sleep(0.005)
+
+    stop.set()
+    t.join(timeout=1.0)
+
+    total = stats["success"] + stats["failure"]
+    assert total > 0
+    failure_rate = (stats["failure"] / total) * 100
+    assert failure_rate < 2.0, f"Failure rate was {failure_rate:.1f}%"
+
+
+@pytest.mark.integration
+def test_detector_bridge_grace_period_prevents_save_fallback_jitter(tmp_path: Path) -> None:
+    mock_proc = FakeProcess(pid=4321, name="Sandfall-Win64-Shipping.exe")
+    ini_path = tmp_path / "GameUserSettings.ini"
+    ini_path.write_text("[Internationalization]\nLanguage=en\n", encoding="utf-8")
+
+    bridge_provider = BridgeStateProvider(grace_period=2.5)
+    bridge_provider.read_bridge_status = MagicMock(  # type: ignore
+        side_effect=[
+            {
+                "zone": "Level_Main_OldLumiere",
+                "in_combat": True,
+                "enemy_name": "Duollistes",
+                "tower_floor": None,
+                "checkpoint": "",
+            },
+            None,  # transient glitch
+        ]
+    )
+
+    save_provider = MagicMock(spec=GameStateProvider)
+    save_provider.resolve_raw_checkpoint.return_value = ""
+    save_provider.read_game_data.return_value = {
+        "raw_zone": "Level_WorldMap",
+        "in_combat": False,
+        "enemy_name": "",
+        "tower_floor": None,
+        "checkpoint": "",
+    }
+
+    detector = GameDetector(
+        providers=[bridge_provider, save_provider],
+        process_scanner=lambda: [mock_proc],
+        game_user_settings_path=ini_path,
+    )
+
+    # Tick 1: Bridge succeeds
+    st1 = detector.get_game_state()
+    assert st1.zone_name == "Old Lumiere"
+    assert st1.in_combat is True
+
+    # Tick 2: Bridge glitch (read_bridge_status returns None), bridge internal grace period returns cached state
+    st2 = detector.get_game_state()
+    assert st2.zone_name == "Old Lumiere"
+    assert st2.in_combat is True
+    save_provider.read_game_data.assert_not_called()

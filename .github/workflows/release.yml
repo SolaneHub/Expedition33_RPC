@@ -37,12 +37,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Verify Code Quality & Tests (Ruff, Pyright, Unittest)
+      - name: Verify Code Quality & Tests (Ruff, Pyright, Pytest)
         run: |
           uv run ruff check
           uv run ruff format --check
           uv run pyright
-          uv run python -m unittest discover tests
+          uv run pytest
 
       - name: Build Standalone Executable
         run: uv run python build_exe.py

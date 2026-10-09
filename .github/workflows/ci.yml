@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Test & Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint Check (Ruff)
+        run: uv run ruff check
+
+      - name: Format Check (Ruff)
+        run: uv run ruff format --check
+
+      - name: Type Check (Pyright)
+        run: uv run pyright
+
+      - name: Run Tests (pytest)
+        run: uv run pytest
+
+      - name: Build Standalone Executable
+        if: matrix.os == 'windows-latest'
+        run: uv run python build_exe.py
+
+      - name: Verify Executable Artifact
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/Expedition33_RPC.exe")) {
+            Write-Error "dist/Expedition33_RPC.exe was not created by build_exe.py"
+            exit 1
+          }
+          $size = (Get-Item "dist/Expedition33_RPC.exe").Length
+          if ($size -le 0) {
+            Write-Error "dist/Expedition33_RPC.exe is an empty file"
+            exit 1
+          }
+          Write-Host "Verified build artifact: dist/Expedition33_RPC.exe ($size bytes)"
+          $proc = Start-Process -FilePath "dist/Expedition33_RPC.exe" -ArgumentList "--smoke-test" -Wait -PassThru -NoNewWindow
+          if ($proc.ExitCode -ne 0) {
+            Write-Error "Smoke test failed with exit code $($proc.ExitCode)"
+            exit $proc.ExitCode
+          }

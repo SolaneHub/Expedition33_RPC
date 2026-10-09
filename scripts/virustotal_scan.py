@@ -282,6 +282,11 @@ def main() -> int:
         default=float(os.environ.get("VT_REQUEST_RATE", "4")),
         help="API request rate limit in requests/min (default: 4)",
     )
+    parser.add_argument(
+        "--output-report",
+        default=os.environ.get("VT_REPORT_PATH", "dist/virustotal_report.json"),
+        help="Path where JSON report will be saved (default: dist/virustotal_report.json or $VT_REPORT_PATH)",
+    )
     args = parser.parse_args()
 
     api_key = args.api_key.strip()
@@ -375,9 +380,8 @@ def main() -> int:
     set_github_output("analysis", vt_output_str)
 
     # Save local JSON report
-    dist_dir = Path("dist")
-    dist_dir.mkdir(parents=True, exist_ok=True)
-    report_file = dist_dir / "virustotal_report.json"
+    report_file = Path(args.output_report)
+    report_file.parent.mkdir(parents=True, exist_ok=True)
     with open(report_file, "w", encoding="utf-8") as rf:
         json.dump(results, rf, indent=2)
     print(f"\n[VirusTotal] Saved summary report to {report_file}")

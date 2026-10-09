@@ -1,4 +1,3 @@
-import contextlib
 import ctypes
 import os
 import sys
@@ -26,23 +25,37 @@ def get_base_dir() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
-def main():
+def main() -> None:
     """Application entry point."""
+    if "--smoke-test" in sys.argv:
+        from expedition33_rpc.core.resources import get_resource_path
+        from expedition33_rpc.detection.detector import GameDetector
+
+        assets = (get_resource_path("icon.png"), get_resource_path("bridge.zip"))
+        if not all(os.path.isfile(a) for a in assets):
+            sys.exit(1)
+        GameDetector()
+        sys.exit(0)
+
     if sys.platform == "win32" and is_already_running():
         sys.exit(0)
 
-    # Clean up leftover .old binary from a previous self-update
-    if getattr(sys, "frozen", False):
-        old_binary = sys.executable + ".old"
-        if os.path.exists(old_binary):
-            with contextlib.suppress(OSError):
-                os.remove(old_binary)
-
-    base_dir = get_base_dir()
-
+    from expedition33_rpc.core.orchestrator import AppOrchestrator
+    from expedition33_rpc.core.settings import SettingsService
     from expedition33_rpc.ui.tray_app import ExpeditionTrayApp
 
-    app = ExpeditionTrayApp(base_dir)
+    settings_service = SettingsService()
+    orchestrator = AppOrchestrator(
+        auto_install_bridge=True,
+        sync_startup=True,
+        settings_service=settings_service,
+    )
+
+    base_dir = get_base_dir()
+    app = ExpeditionTrayApp(
+        script_dir=base_dir,
+        orchestrator=orchestrator,
+    )
     app.run()
 
 

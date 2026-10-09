@@ -20,3 +20,6 @@ dist/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# AI audit and development artifacts
+.ai/
