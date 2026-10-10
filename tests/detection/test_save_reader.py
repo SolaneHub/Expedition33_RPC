@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from tests.harness import SaveFixtureBuilder
@@ -225,28 +226,20 @@ def test_read_checkpoint_from_save_caches_result_and_invalidates_on_change(
         level_name="Level_Initial", spawn_point_tag="Level.SpawnPoint.Initial"
     ).write_expedition_slot(save_dir, slot=0, mtime=1000.0)
 
-    # 1. First read populates cache
+    # 1. First read parses from disk and populates internal cache
     lvl1, tag1 = reader.read_checkpoint_from_save(str(save_dir))
     assert lvl1 == "Level_Initial"
     assert tag1 == "Level.SpawnPoint.Initial"
 
-    sav_file = str(save_dir / "EXPEDITION_0.sav")
-    assert sav_file in reader._checkpoint_cache
-    cached_entry = reader._checkpoint_cache[sav_file]
-    assert cached_entry[2] == ("Level_Initial", "Level.SpawnPoint.Initial")
+    # 2. Black-box verify: second read with identical mtime and size bypasses disk I/O
+    with patch(
+        "builtins.open", side_effect=AssertionError("Should bypass disk I/O when cache is valid")
+    ):
+        lvl_cached, tag_cached = reader.read_checkpoint_from_save(str(save_dir))
+        assert lvl_cached == "Level_Initial"
+        assert tag_cached == "Level.SpawnPoint.Initial"
 
-    # 2. Corrupt or delete file content in memory: cache hit returns without disk parsing
-    # Overwrite cache with a sentinel value to prove it does not re-parse the file
-    reader._checkpoint_cache[sav_file] = (
-        cached_entry[0],
-        cached_entry[1],
-        ("Cached_Level", "Cached_Tag"),
-    )
-    lvl_cached, tag_cached = reader.read_checkpoint_from_save(str(save_dir))
-    assert lvl_cached == "Cached_Level"
-    assert tag_cached == "Cached_Tag"
-
-    # 3. File modification (newer mtime) invalidates cache and triggers re-read
+    # 3. File modification (newer mtime) invalidates cache and triggers re-read from disk
     SaveFixtureBuilder.expedition_slot().with_savepoint(
         level_name="Level_Updated", spawn_point_tag="Level.SpawnPoint.Updated"
     ).write_expedition_slot(save_dir, slot=0, mtime=2000.0)
@@ -254,7 +247,6 @@ def test_read_checkpoint_from_save_caches_result_and_invalidates_on_change(
     lvl_updated, tag_updated = reader.read_checkpoint_from_save(str(save_dir))
     assert lvl_updated == "Level_Updated"
     assert tag_updated == "Level.SpawnPoint.Updated"
-    assert reader._checkpoint_cache[sav_file][2] == ("Level_Updated", "Level.SpawnPoint.Updated")
 
 
 def test_read_zone_from_saves_caches_result_and_invalidates_on_change(
@@ -263,20 +255,18 @@ def test_read_zone_from_saves_caches_result_and_invalidates_on_change(
     save_dir, reader = save_env
     SaveFixtureBuilder.container().with_last_map("Level_ZoneA").write_saves_container(save_dir)
 
-    # 1. First read populates zone cache
+    # 1. First read parses from disk and populates internal cache
     zone1 = reader.read_zone_from_saves(str(save_dir))
     assert zone1 == "Level_ZoneA"
 
-    container_path = str(save_dir / "SavesContainer.sav")
-    assert container_path in reader._zone_cache
-    st_tuple = reader._zone_cache[container_path]
-    assert st_tuple[2] == "Level_ZoneA"
+    # 2. Black-box verify: second read bypasses disk I/O entirely
+    with patch(
+        "builtins.open", side_effect=AssertionError("Should bypass disk I/O when cache is valid")
+    ):
+        zone_cached = reader.read_zone_from_saves(str(save_dir))
+        assert zone_cached == "Level_ZoneA"
 
-    # 2. Modify cache entry to verify cache hit avoids disk parsing
-    reader._zone_cache[container_path] = (st_tuple[0], st_tuple[1], "CachedZone")
-    assert reader.read_zone_from_saves(str(save_dir)) == "CachedZone"
-
-    # 3. Modify container file to invalidate cache
+    # 3. Modify container file to invalidate cache and trigger re-read from disk
     SaveFixtureBuilder.container().with_last_map("Level_ZoneB").write_saves_container(save_dir)
-    assert reader.read_zone_from_saves(str(save_dir)) == "Level_ZoneB"
-    assert reader._zone_cache[container_path][2] == "Level_ZoneB"
+    zone_updated = reader.read_zone_from_saves(str(save_dir))
+    assert zone_updated == "Level_ZoneB"

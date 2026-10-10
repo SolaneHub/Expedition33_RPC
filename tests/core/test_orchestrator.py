@@ -173,6 +173,104 @@ def test_orchestrator_periodic_auto_install_during_step_update() -> None:
 
 
 @pytest.mark.unit
+def test_orchestrator_bridge_auto_install_backoff_and_cooldown() -> None:
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    with (
+        patch(
+            "expedition33_rpc.core.orchestrator.bridge_installer.find_game_win64_directory",
+            return_value="/mock/game/win64",
+        ),
+        patch(
+            "expedition33_rpc.core.orchestrator.bridge_installer.is_bridge_installed",
+            return_value=False,
+        ),
+        patch(
+            "expedition33_rpc.core.orchestrator.bridge_installer.install_bridge",
+            return_value=(False, "Permission denied: access denied to Program Files"),
+        ) as mock_install,
+    ):
+        # 1. First attempt fails at t = 1000.0
+        res1 = orchestrator.check_and_auto_install_bridge(now=1000.0)
+        assert res1 is False
+        assert mock_install.call_count == 1
+        assert orchestrator.bridge_auto_installed is False
+        assert orchestrator.bridge_install_cooldown == 60.0
+
+        # 2. Immediate next attempt at t = 1002.0 (2 seconds later, polling tick)
+        # Should be throttled by cooldown and NOT attempt re-extracting
+        res2 = orchestrator.check_and_auto_install_bridge(now=1002.0)
+        assert res2 is False
+        assert mock_install.call_count == 1
+
+        # 3. Next attempt after 60s cooldown expires at t = 1065.0
+        # Fails again, cooldown doubles to 120.0s
+        res3 = orchestrator.check_and_auto_install_bridge(now=1065.0)
+        assert res3 is False
+        assert mock_install.call_count == 2
+        assert orchestrator.bridge_install_cooldown == 120.0
+
+        # 4. Now simulate permission resolved at t = 1190.0 (past 120s cooldown)
+        mock_install.return_value = (True, "Installed successfully")
+        res4 = orchestrator.check_and_auto_install_bridge(now=1190.0)
+        assert res4 is True
+        assert mock_install.call_count == 3
+        assert orchestrator.bridge_auto_installed is True
+        assert orchestrator.bridge_install_cooldown == 30.0
+
+
+@pytest.mark.unit
+def test_orchestrator_bridge_auto_install_early_boot_and_preinstalled() -> None:
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    with (
+        patch(
+            "expedition33_rpc.core.orchestrator.bridge_installer.find_game_win64_directory",
+            return_value="/mock/game/win64",
+        ),
+        patch(
+            "expedition33_rpc.core.orchestrator.bridge_installer.is_bridge_installed",
+            return_value=True,
+        ) as mock_installed,
+        patch(
+            "expedition33_rpc.core.orchestrator.bridge_installer.install_bridge",
+        ) as mock_install,
+    ):
+        # 1. Early monotonic boot timestamp (now=0.5) must NOT be throttled by initial cooldown
+        res = orchestrator.check_and_auto_install_bridge(now=0.5)
+        assert res is True
+        assert orchestrator.bridge_auto_installed is True
+        mock_installed.assert_called_once_with("/mock/game/win64")
+        mock_install.assert_not_called()
+
+        # 2. toggle_bridge resets the attempt timestamp and cooldown
+        with patch(
+            "expedition33_rpc.core.orchestrator.bridge_installer.uninstall_bridge",
+            return_value=(True, "OK"),
+        ):
+            orchestrator.toggle_bridge()
+            assert orchestrator.bridge_auto_installed is False
+            assert orchestrator.last_bridge_install_attempt == -float("inf")
+            assert orchestrator.bridge_install_cooldown == 30.0
+
+
+@pytest.mark.unit
 def test_orchestrator_os_status_queries_and_toggles() -> None:
     mock_settings = MagicMock(spec=SettingsService)
     mock_settings.toggle_anti_spoiler.return_value = True
@@ -228,7 +326,7 @@ def test_orchestrator_os_status_queries_and_toggles() -> None:
         res_anti_spoiler = orchestrator.toggle_anti_spoiler()
         assert res_anti_spoiler is True
         mock_settings.toggle_anti_spoiler.assert_called_once()
-        assert orchestrator.rpc_manager.last_update_state is None
+        mock_rpc.invalidate.assert_called_once()
         mock_rpc.update.assert_called_once()
 
 

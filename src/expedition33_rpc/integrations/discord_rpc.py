@@ -305,9 +305,22 @@ class DiscordRPCManager:
             self.disconnect()
             self.connect()
 
-    def update(self, game_state: GameState, anti_spoiler: bool = False) -> None:
+    def invalidate(self) -> None:
+        """Clears the cached presence fingerprint, forcing re-transmission on the next update."""
+        with self._lock:
+            self.last_update_state = None
+
+    def update(
+        self,
+        game_state: GameState,
+        anti_spoiler: bool = False,
+        force: bool = False,
+    ) -> None:
         """Formats and transmits the latest presence data to Discord."""
         with self._lock:
+            if force:
+                self.last_update_state = None
+
             if not self.is_connected and not self.connect():
                 return
 

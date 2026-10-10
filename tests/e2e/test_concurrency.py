@@ -155,8 +155,8 @@ def test_concurrent_telemetry_ticks_and_ui_toggles(tmp_path: Path) -> None:
         while not stop_event.is_set() and clicks < 50:
             try:
                 settings_service.toggle_anti_spoiler()
-                with app._state_lock:
-                    curr = app.current_state
+                with app.orchestrator._state_lock:
+                    curr = app.orchestrator.current_state
                     _zone = curr.zone_name
                 # Also simulate user toggling anti-spoiler via tray action
                 app.action_toggle_anti_spoiler()

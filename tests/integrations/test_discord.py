@@ -97,6 +97,16 @@ def test_discord_rpc_manager_end_to_end_with_native_client() -> None:
     manager.update(state, anti_spoiler=False)
     assert len(mock_pipe.written_data) == written_len_1
 
+    # Invalidate forces re-transmission
+    manager.invalidate()
+    manager.update(state, anti_spoiler=False)
+    assert len(mock_pipe.written_data) > written_len_1
+
+    # force=True forces re-transmission directly
+    written_len_2 = len(mock_pipe.written_data)
+    manager.update(state, anti_spoiler=False, force=True)
+    assert len(mock_pipe.written_data) > written_len_2
+
 
 # ---------------------------------------------------------------------------
 # Integration Tests (Real Loopback IPC Transport)

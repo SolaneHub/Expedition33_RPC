@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Any
 
 from expedition33_rpc.detection.game_data import (
     CHECKPOINT_NAMES_EN,
@@ -41,24 +40,15 @@ def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
     return "menu" in raw_lower or "menu" in display_lower
 
 
-def is_menu_zone(raw_zone_or_state: Any, zone_name: str | None = None) -> bool:
-    """Detects if the game is currently on a main menu or title screen."""
-    if hasattr(raw_zone_or_state, "raw_zone"):
-        return is_main_menu(
-            getattr(raw_zone_or_state, "raw_zone", None),
-            getattr(raw_zone_or_state, "zone_name", None),
-        )
-    return is_main_menu(raw_zone_or_state, zone_name)
+def is_menu_zone(raw_zone: str | None = None, zone_name: str | None = None) -> bool:
+    """Detects if raw_zone or zone_name indicates a main menu or title screen."""
+    return is_main_menu(raw_zone, zone_name)
 
 
-def is_continent_zone(raw_zone_or_state: Any, zone_name: str | None = None) -> bool:
-    """Detects if current location is the world map / continent."""
-    if hasattr(raw_zone_or_state, "raw_zone") or hasattr(raw_zone_or_state, "zone_name"):
-        raw = (getattr(raw_zone_or_state, "raw_zone", None) or "").lower()
-        zone = (getattr(raw_zone_or_state, "zone_name", None) or "").lower()
-    else:
-        raw = str(raw_zone_or_state or "").lower()
-        zone = (zone_name or "").lower()
+def is_continent_zone(raw_zone: str | None = None, zone_name: str | None = None) -> bool:
+    """Detects if current location strings represent the world map / continent."""
+    raw = (raw_zone or "").lower()
+    zone = (zone_name or "").lower()
     return "continent" in zone or "continente" in zone or "worldmap" in raw
 
 
@@ -277,50 +267,6 @@ def format_checkpoint_tag(
     return spaced
 
 
-def format_location_name(
-    target: Any = "",
-    raw_checkpoint: str = "",
-    lang: str = "en",
-    *,
-    tower_stage_trial: TowerTrial | None = None,
-    tower_floor: int | None = None,
-) -> str:
-    """Formats the zone name including trial, floor, or checkpoint details."""
-    if hasattr(target, "zone_name"):
-        is_it = getattr(target, "game_language", "en").startswith("it")
-        zone_display = getattr(target, "zone_name", "") or ("In viaggio" if is_it else "Traveling")
-        trial = getattr(target, "tower_stage_trial", None)
-        floor = getattr(target, "tower_floor", None)
-        cp_name = getattr(target, "checkpoint_name", "")
-        is_continent = is_continent_zone(target)
-    else:
-        is_it = lang.startswith("it")
-        zone_display = str(target or ("In viaggio" if is_it else "Traveling"))
-        trial = tower_stage_trial
-        floor = tower_floor
-        cp_name = raw_checkpoint
-        is_continent = is_continent_zone(target)
-
-    if trial:
-        match trial:
-            case (stg, trl):
-                trial_label = f"Fase {stg}, Prova {trl}" if is_it else f"Stage {stg}, Trial {trl}"
-            case other:
-                trial_label = str(other)
-        return f"{zone_display} ({trial_label})"
-
-    if floor:
-        floor_label = f"Piano {floor}" if is_it else f"Floor {floor}"
-        if "piano" not in zone_display.lower() and "floor" not in zone_display.lower():
-            return f"{zone_display} ({floor_label})"
-        return zone_display
-
-    if cp_name and not is_continent:
-        return f"{zone_display} ({cp_name})"
-
-    return zone_display
-
-
 __all__ = [
     "strip_accents",
     "is_main_menu",
@@ -330,5 +276,4 @@ __all__ = [
     "resolve_tower_trial",
     "format_zone_name",
     "format_checkpoint_tag",
-    "format_location_name",
 ]

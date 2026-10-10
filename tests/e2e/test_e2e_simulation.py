@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from tests.harness import (
     DiscordPipeSimulator,
     GameSessionSimulator,
+    MockDiscordServer,
     SaveFixtureBuilder,
 )
 
+from expedition33_rpc.core.orchestrator import AppOrchestrator
+from expedition33_rpc.core.settings import SettingsService
 from expedition33_rpc.integrations.discord_rpc import (
+    OP_FRAME,
+    OP_HANDSHAKE,
     DiscordIPCClient,
     DiscordRPCManager,
 )
@@ -87,7 +94,7 @@ def test_full_lifecycle_simulation(session: GameSessionSimulator, simulated_disc
     assert "Old Lumiere (Manor Gardens)" in activity3["state"]
 
     # 4. Anti-Spoiler Protection Enabled
-    rpc_manager.last_update_state = None  # Force update
+    rpc_manager.invalidate()  # Force update
     rpc_manager.update(state3, anti_spoiler=True)
     frame4 = pipe.pop_last_frame_payload()
     assert frame4 is not None
@@ -205,7 +212,7 @@ def test_timeline_discord_ipc_disconnect_and_reconnect_during_gameplay(
     pipe.close()
 
     # Graceful handling - should not crash
-    rpc_manager.last_update_state = None
+    rpc_manager.invalidate()
     rpc_manager.update(st, anti_spoiler=False)
 
     # 3. Simulate Discord reconnecting with a fresh pipe
@@ -216,7 +223,7 @@ def test_timeline_discord_ipc_disconnect_and_reconnect_during_gameplay(
     assert rpc_manager.connect() is True
     new_pipe.outgoing_bytes.clear()
 
-    rpc_manager.last_update_state = None
+    rpc_manager.invalidate()
     rpc_manager.update(st, anti_spoiler=False)
 
     frame = new_pipe.pop_last_frame_payload()
@@ -259,3 +266,86 @@ def test_fluent_game_session_simulation_chaining(session: GameSessionSimulator) 
     session.stop_game()
     stopped_state = session.get_game_state()
     assert stopped_state.is_running is False
+
+
+def test_unified_orchestrator_e2e_simulation(tmp_path: Path) -> None:
+    """Verifies end-to-end integration pipeline: GameSessionSimulator -> AppOrchestrator -> MockDiscordServer.
+
+    Connects simulated game telemetry to the real AppOrchestrator loopback-wired
+    to an in-process MockDiscordServer via native named pipe/socket wire protocol.
+    """
+    settings_file = tmp_path / "e2e_settings.json"
+    settings = SettingsService(custom_path=settings_file)
+
+    with MockDiscordServer() as server, GameSessionSimulator() as session:
+        ipc_client = DiscordIPCClient(client_id="987654321", custom_pipe_path=server.pipe_path)
+        rpc_manager = DiscordRPCManager(client=ipc_client)
+        orchestrator = AppOrchestrator(
+            detector=session.detector,
+            rpc_manager=rpc_manager,
+            settings_service=settings,
+            auto_install_bridge=False,
+            sync_startup=False,
+        )
+
+        # 1. Initially game not running -> step_update produces no active activity
+        state_idle = orchestrator.step_update()
+        assert state_idle is not None
+        assert state_idle.is_running is False
+
+        # 2. Game launched into zone "Level_Main_OldLumiere" with checkpoint "Entrance"
+        session.start_game(pid=7777).enter_zone("Level_Main_OldLumiere", checkpoint="Entrance")
+        state_explore = orchestrator.step_update()
+        assert state_explore is not None
+        assert state_explore.is_running is True
+        assert state_explore.zone_name == "Old Lumiere"
+        assert state_explore.checkpoint_name == "Entrance"
+
+        # Verify wire-level frame transmitted through MockDiscordServer
+        frames = server.get_frames()
+        assert len(frames) >= 2  # Handshake + SET_ACTIVITY
+        handshake_op, handshake_body = frames[0]
+        assert handshake_op == OP_HANDSHAKE
+        assert handshake_body.get("client_id") == "987654321"
+
+        activity_frame = frames[-1]
+        assert activity_frame[0] == OP_FRAME
+        assert activity_frame[1]["cmd"] == "SET_ACTIVITY"
+        args = activity_frame[1]["args"]
+        assert args["pid"] == 7777
+        assert "Old Lumiere" in args["activity"]["state"]
+        assert args["activity"]["details"] == "Exploring"
+
+        # 3. Enter combat with boss encounter
+        session.trigger_combat("Duollistes")
+        state_combat = orchestrator.step_update()
+        assert state_combat is not None
+        assert state_combat.in_combat is True
+        assert state_combat.enemy_name == "Duollistes"
+
+        frames_combat = server.get_frames()
+        assert len(frames_combat) > len(frames)
+        latest_activity = frames_combat[-1][1]["args"]["activity"]
+        assert latest_activity["details"] == "Fighting: Duollistes"
+
+        # 4. Toggle Anti-Spoiler via orchestrator
+        is_anti_spoiler = orchestrator.toggle_anti_spoiler()
+        assert is_anti_spoiler is True
+        frames_anti_spoiler = server.get_frames()
+        anti_spoiler_activity = frames_anti_spoiler[-1][1]["args"]["activity"]
+        assert anti_spoiler_activity["state"] == "Hidden Location"
+        assert anti_spoiler_activity["details"] == "In Combat"
+
+        # 5. Terminate game process
+        session.stop_game()
+        state_stopped = orchestrator.step_update()
+        assert state_stopped is not None
+        assert state_stopped.is_running is False
+
+        frames_stopped = server.get_frames()
+        stopped_activity = frames_stopped[-1][1]["args"]["activity"]
+        assert stopped_activity is None  # Clear activity on game exit
+
+        # Clean shutdown of orchestrator
+        orchestrator.stop()
+        assert rpc_manager.is_connected is False

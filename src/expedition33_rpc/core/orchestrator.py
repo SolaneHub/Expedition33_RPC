@@ -52,6 +52,11 @@ class AppOrchestrator:
         self.worker_thread: threading.Thread | None = None
         self.bridge_auto_installed = False
 
+        self.bridge_install_min_cooldown: float = 30.0
+        self.bridge_install_max_cooldown: float = 300.0
+        self.bridge_install_cooldown: float = self.bridge_install_min_cooldown
+        self.last_bridge_install_attempt: float = -float("inf")
+
         if self.auto_install_bridge:
             self.check_and_auto_install_bridge()
 
@@ -65,17 +70,39 @@ class AppOrchestrator:
         if update_info and self.on_update_available:
             self.on_update_available(update_info)
 
-    def check_and_auto_install_bridge(self) -> bool:
-        """Checks game installation directory and automatically deploys the bridge mod."""
+    def check_and_auto_install_bridge(self, now: float | None = None) -> bool:
+        """Checks game installation directory and automatically deploys the bridge mod with backoff."""
+        current_time = time.monotonic() if now is None else now
+        if current_time - self.last_bridge_install_attempt < self.bridge_install_cooldown:
+            return False
+
+        self.last_bridge_install_attempt = current_time
         try:
             game_dir = bridge_installer.find_game_win64_directory()
-            if game_dir and not bridge_installer.is_bridge_installed(game_dir):
-                success, _msg = bridge_installer.install_bridge(game_dir)
+            if game_dir:
+                if bridge_installer.is_bridge_installed(game_dir):
+                    self.bridge_auto_installed = True
+                    self.bridge_install_cooldown = self.bridge_install_min_cooldown
+                    return True
+
+                success, msg = bridge_installer.install_bridge(game_dir)
                 if success:
                     self.bridge_auto_installed = True
+                    self.bridge_install_cooldown = self.bridge_install_min_cooldown
                     print(f"[Orchestrator] Automatically deployed Combat Bridge to: {game_dir}")
                     return True
+                else:
+                    self.bridge_install_cooldown = min(
+                        self.bridge_install_cooldown * 2, self.bridge_install_max_cooldown
+                    )
+                    print(
+                        f"[Orchestrator] Combat Bridge auto-install failed ({msg}), "
+                        f"backing off for {self.bridge_install_cooldown:.1f}s"
+                    )
         except Exception as e:
+            self.bridge_install_cooldown = min(
+                self.bridge_install_cooldown * 2, self.bridge_install_max_cooldown
+            )
             print(f"[Orchestrator] Bridge auto-install check failed: {e}")
         return False
 
@@ -133,7 +160,7 @@ class AppOrchestrator:
     def toggle_anti_spoiler(self) -> bool:
         """Toggles anti-spoiler configuration and flushes active presence."""
         new_val = self.settings_service.toggle_anti_spoiler()
-        self.rpc_manager.last_update_state = None
+        self.rpc_manager.invalidate()
         self.rpc_manager.update(self.current_state, anti_spoiler=new_val)
         return new_val
 
@@ -147,12 +174,17 @@ class AppOrchestrator:
 
     def toggle_bridge(self) -> bool:
         """Installs or uninstalls the UE4SS Lua bridge mod."""
+        self.last_bridge_install_attempt = -float("inf")
+        self.bridge_install_cooldown = self.bridge_install_min_cooldown
         if self.is_bridge_installed():
             bridge_installer.uninstall_bridge()
+            self.bridge_auto_installed = False
             return False
         else:
-            bridge_installer.install_bridge()
-            return True
+            success, _msg = bridge_installer.install_bridge()
+            if success:
+                self.bridge_auto_installed = True
+            return success
 
     def toggle_startup(self) -> bool:
         """Toggles Windows autostart configuration."""

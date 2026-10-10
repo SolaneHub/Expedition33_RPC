@@ -16,6 +16,8 @@ from expedition33_rpc.detection.detector import BridgeStateProvider, GameDetecto
 from expedition33_rpc.detection.game_data import ENDLESS_TOWER_TRIALS
 from expedition33_rpc.detection.normalization import (
     format_checkpoint_tag,
+    is_continent_zone,
+    is_menu_zone,
     resolve_tower_trial,
 )
 from expedition33_rpc.detection.save_reader import SaveFileReader
@@ -302,3 +304,20 @@ def test_detector_resolves_structured_bridge_payload_end_to_end(tmp_path: Path) 
     state = detector.get_game_state()
     assert state.in_combat is True
     assert state.enemy_name != ""
+
+
+def test_normalization_pure_string_menu_and_continent_detection() -> None:
+    # Pure string menu checks
+    assert is_menu_zone(raw_zone="MainMenu") is True
+    assert is_menu_zone(raw_zone="bootstrap") is True
+    assert is_menu_zone(zone_name="Main Menu") is True
+    assert is_menu_zone(zone_name="Nel menu principale") is True
+    assert is_menu_zone(raw_zone="Level_Forest", zone_name="Forest") is False
+    assert is_menu_zone(None, None) is False
+
+    # Pure string continent checks
+    assert is_continent_zone(zone_name="The Continent") is True
+    assert is_continent_zone(zone_name="Il Continente") is True
+    assert is_continent_zone(raw_zone="WorldMap_Main") is True
+    assert is_continent_zone(zone_name="Old Lumiere") is False
+    assert is_continent_zone(None, None) is False

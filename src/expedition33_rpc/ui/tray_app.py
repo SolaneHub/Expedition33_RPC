@@ -46,6 +46,27 @@ class ExpeditionTrayApp:
 
         if orchestrator is not None:
             self.orchestrator = orchestrator
+            if orchestrator.on_state_change is not None:
+                orig_on_change = orchestrator.on_state_change
+
+                def chained_on_change(st: GameState, sp: bool) -> None:
+                    self.on_orchestrator_state_change(st, sp)
+                    orig_on_change(st, sp)
+
+                self.orchestrator.on_state_change = chained_on_change
+            else:
+                self.orchestrator.on_state_change = self.on_orchestrator_state_change
+
+            if orchestrator.on_update_available is not None:
+                orig_on_update = orchestrator.on_update_available
+
+                def chained_on_update(info: UpdateInfo) -> None:
+                    self.on_update_available(info)
+                    orig_on_update(info)
+
+                self.orchestrator.on_update_available = chained_on_update
+            else:
+                self.orchestrator.on_update_available = self.on_update_available
         else:
             self.orchestrator = AppOrchestrator(
                 detector=detector,
@@ -54,42 +75,9 @@ class ExpeditionTrayApp:
                 settings_service=settings_service,
                 auto_install_bridge=auto_install_bridge,
                 sync_startup=sync_startup,
+                on_state_change=self.on_orchestrator_state_change,
+                on_update_available=self.on_update_available,
             )
-
-        self.orchestrator.on_state_change = self.on_orchestrator_state_change
-        self.orchestrator.on_update_available = self.on_update_available
-
-    @property
-    def current_state(self) -> GameState:
-        return self.orchestrator.current_state
-
-    @property
-    def _state_lock(self) -> threading.Lock:
-        return self.orchestrator._state_lock
-
-    @property
-    def detector(self) -> GameDetector:
-        return self.orchestrator.detector
-
-    @property
-    def rpc_manager(self) -> DiscordRPCManager:
-        return self.orchestrator.rpc_manager
-
-    @property
-    def updater(self) -> AppUpdater:
-        return self.orchestrator.updater
-
-    @property
-    def settings_service(self) -> SettingsService:
-        return self.orchestrator.settings_service
-
-    @property
-    def running(self) -> bool:
-        return self.orchestrator.running
-
-    @running.setter
-    def running(self, val: bool) -> None:
-        self.orchestrator.running = val
 
     def _safe_update_menu(self) -> None:
         if self.icon is not None:
@@ -107,7 +95,7 @@ class ExpeditionTrayApp:
                 state.tower_floor,
                 state.tower_stage_trial,
                 state.checkpoint_name,
-                self.rpc_manager.is_connected,
+                self.orchestrator.rpc_manager.is_connected,
                 anti_spoiler,
             )
             if menu_state != self._last_menu_state:
@@ -141,27 +129,29 @@ class ExpeditionTrayApp:
         return self.orchestrator.step_update()
 
     def menu_game_status(self, *_) -> str:
-        if self.current_state.is_running:
-            return f"Game: Running (PID: {self.current_state.process_pid})"
+        if self.orchestrator.current_state.is_running:
+            return f"Game: Running (PID: {self.orchestrator.current_state.process_pid})"
         return "Game: Not running"
 
     def menu_zone_status(self, *_) -> str:
         return format_tray_zone_status(
-            self.current_state, anti_spoiler=self.settings_service.is_anti_spoiler_enabled()
+            self.orchestrator.current_state,
+            anti_spoiler=self.orchestrator.settings_service.is_anti_spoiler_enabled(),
         )
 
     def menu_combat_status(self, *_) -> str:
         return format_tray_combat_status(
-            self.current_state, anti_spoiler=self.settings_service.is_anti_spoiler_enabled()
+            self.orchestrator.current_state,
+            anti_spoiler=self.orchestrator.settings_service.is_anti_spoiler_enabled(),
         )
 
     def menu_discord_status(self, *_) -> str:
-        if self.rpc_manager.is_connected:
+        if self.orchestrator.rpc_manager.is_connected:
             return "Discord: Connected"
         return "Discord: Standby (Listening)"
 
     def menu_anti_spoiler_toggle(self, *_) -> str:
-        if self.settings_service.is_anti_spoiler_enabled():
+        if self.orchestrator.settings_service.is_anti_spoiler_enabled():
             return "Anti-Spoiler Mode  [Enabled]"
         return "Anti-Spoiler Mode  [Disabled]"
 
@@ -189,13 +179,17 @@ class ExpeditionTrayApp:
         self._safe_update_menu()
 
     def menu_update_status(self, *_) -> str:
-        return self.updater.get_status_text()
+        return self.orchestrator.updater.get_status_text()
 
     def action_update_click(self, *_):
-        if self.updater.state == UpdateState.AVAILABLE:
-            self.updater.open_release_page()
-        elif self.updater.state in (UpdateState.IDLE, UpdateState.UP_TO_DATE, UpdateState.ERROR):
-            self.updater.check_in_background(
+        if self.orchestrator.updater.state == UpdateState.AVAILABLE:
+            self.orchestrator.updater.open_release_page()
+        elif self.orchestrator.updater.state in (
+            UpdateState.IDLE,
+            UpdateState.UP_TO_DATE,
+            UpdateState.ERROR,
+        ):
+            self.orchestrator.updater.check_in_background(
                 delay_seconds=0.0, on_complete=self.orchestrator.on_update_check_complete
             )
 

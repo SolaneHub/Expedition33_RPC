@@ -7,19 +7,19 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from expedition33_rpc.core.orchestrator import AppOrchestrator
 from expedition33_rpc.core.settings import SettingsService
 from expedition33_rpc.detection.detector import GameDetector, GameState
-from expedition33_rpc.detection.normalization import (
-    format_location_name,
-    is_continent_zone,
-    is_menu_zone,
-)
+from expedition33_rpc.integrations.updater import UpdateInfo
 from expedition33_rpc.ui.presentation import (
     DISCORD_MAX_FIELD_LENGTH,
+    format_location_name,
     format_presence,
     format_tray_combat_status,
     format_tray_title,
     format_tray_zone_status,
+    is_continent_zone,
+    is_menu_zone,
     truncate_presence_field,
 )
 from expedition33_rpc.ui.tray_app import ExpeditionTrayApp
@@ -196,7 +196,7 @@ def test_step_update_reads_state_and_calls_rpc(tray_test_app) -> None:
     result = app.step_update()
 
     mock_detector.get_game_state.assert_called_once()
-    assert app.current_state == running_state
+    assert app.orchestrator.current_state == running_state
     assert result == running_state
     mock_rpc.update.assert_called_once_with(running_state, anti_spoiler=False)
     mock_icon.update_menu.assert_called_once()
@@ -241,3 +241,47 @@ def test_step_update_graceful_exception_handling(tray_test_app) -> None:
     mock_detector.get_game_state.side_effect = Exception("Telemetry fault")
     res2 = app.step_update()
     assert res2 is None
+
+
+def test_tray_app_chains_injected_orchestrator_callbacks() -> None:
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_rpc = MagicMock()
+    mock_icon = MagicMock()
+    external_state_calls: list[tuple[GameState, bool]] = []
+    external_update_calls: list[UpdateInfo] = []
+
+    def ext_on_change(st: GameState, anti_spoiler: bool) -> None:
+        external_state_calls.append((st, anti_spoiler))
+
+    def ext_on_update(info: UpdateInfo) -> None:
+        external_update_calls.append(info)
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        on_state_change=ext_on_change,
+        on_update_available=ext_on_update,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    app = ExpeditionTrayApp(orchestrator=orchestrator)
+    app.icon = mock_icon
+
+    test_state = GameState.create(is_running=True, zone_name="Lumiere")
+    mock_detector.get_game_state.return_value = test_state
+
+    # Trigger tick
+    app.step_update()
+
+    # Both tray icon update and external listener were called
+    assert len(external_state_calls) == 1
+    assert external_state_calls[0][0] == test_state
+    mock_icon.update_menu.assert_called_once()
+
+    # Trigger update callback
+    info = UpdateInfo(tag_name="v2.0.0", version_tuple=(2, 0, 0), html_url="http://example.com")
+    assert orchestrator.on_update_available is not None
+    orchestrator.on_update_available(info)
+    assert len(external_update_calls) == 1
+    assert external_update_calls[0] == info

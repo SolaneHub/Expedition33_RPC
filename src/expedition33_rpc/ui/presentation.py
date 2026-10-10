@@ -12,8 +12,10 @@ if TYPE_CHECKING:
     from expedition33_rpc.detection.detector import GameState
 
 from expedition33_rpc.detection.normalization import (
-    format_location_name,
-    is_menu_zone,
+    is_continent_zone as norm_is_continent_zone,
+)
+from expedition33_rpc.detection.normalization import (
+    is_main_menu,
 )
 
 DISCORD_MAX_FIELD_LENGTH = 128
@@ -27,6 +29,42 @@ def truncate_presence_field(text: str, max_length: int = DISCORD_MAX_FIELD_LENGT
     if len(text) <= max_length:
         return text
     return text[:max_length]
+
+
+def is_menu_zone(game_state: GameState) -> bool:
+    """Detects if the game is currently on a main menu or title screen."""
+    return is_main_menu(game_state.raw_zone, game_state.zone_name)
+
+
+def is_continent_zone(game_state: GameState) -> bool:
+    """Detects if current location is the world map / continent."""
+    return norm_is_continent_zone(game_state.raw_zone, game_state.zone_name)
+
+
+def format_location_name(game_state: GameState) -> str:
+    """Formats the zone name including trial, floor, or checkpoint details."""
+    is_it = game_state.game_language.startswith("it")
+    zone_display = game_state.zone_name or ("In viaggio" if is_it else "Traveling")
+
+    if game_state.tower_stage_trial:
+        match game_state.tower_stage_trial:
+            case (stg, trl):
+                trial_label = f"Fase {stg}, Prova {trl}" if is_it else f"Stage {stg}, Trial {trl}"
+            case other:
+                trial_label = str(other)
+        return f"{zone_display} ({trial_label})"
+
+    if game_state.tower_floor:
+        floor = game_state.tower_floor
+        floor_label = f"Piano {floor}" if is_it else f"Floor {floor}"
+        if "piano" not in zone_display.lower() and "floor" not in zone_display.lower():
+            return f"{zone_display} ({floor_label})"
+        return zone_display
+
+    if game_state.checkpoint_name and not is_continent_zone(game_state):
+        return f"{zone_display} ({game_state.checkpoint_name})"
+
+    return zone_display
 
 
 def format_presence(game_state: GameState, anti_spoiler: bool = False) -> tuple[str, str]:
@@ -116,6 +154,9 @@ __all__ = [
     "DISCORD_MAX_FIELD_LENGTH",
     "truncate_presence_field",
     "format_presence",
+    "format_location_name",
+    "is_menu_zone",
+    "is_continent_zone",
     "format_tray_title",
     "format_tray_zone_status",
     "format_tray_combat_status",

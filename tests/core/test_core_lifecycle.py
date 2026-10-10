@@ -45,9 +45,8 @@ def test_settings_service_in_memory_caching_and_atomic_update(tmp_path: Path) ->
     custom_json = tmp_path / "cached_settings.json"
     service = SettingsService(custom_path=custom_json)
 
-    # Cached settings initialized on __init__
-    assert service._cached_settings is not None
-    assert service._cached_settings.anti_spoiler is False
+    # Initial query returns default without requiring a file on disk
+    assert service.is_anti_spoiler_enabled() is False
 
     # Calling is_anti_spoiler_enabled() returns from memory without disk reads
     with patch(
@@ -58,14 +57,23 @@ def test_settings_service_in_memory_caching_and_atomic_update(tmp_path: Path) ->
     # Atomic write updates in-memory cache and writes to file
     success = service.set_anti_spoiler_enabled(True)
     assert success is True
-    assert service._cached_settings.anti_spoiler is True
     assert service.is_anti_spoiler_enabled() is True
     assert custom_json.is_file()
+
+    # Querying after update continues to read from memory without disk reads
+    with patch(
+        "builtins.open", side_effect=AssertionError("Should not read from disk on cached query")
+    ):
+        assert service.is_anti_spoiler_enabled() is True
 
     # Toggle updates in-memory cache and persists
     new_val = service.toggle_anti_spoiler()
     assert new_val is False
     assert service.is_anti_spoiler_enabled() is False
+
+    # Verify persistence by reading from a fresh service instance
+    fresh_service = SettingsService(custom_path=custom_json)
+    assert fresh_service.is_anti_spoiler_enabled() is False
 
 
 # ---------------------------------------------------------------------------
