@@ -121,22 +121,26 @@ src/expedition33_rpc/
 ├── __main__.py               # CLI entrypoint (`python -m expedition33_rpc`)
 │
 ├── core/                     # Application lifecycle, settings & system startup
-│   ├── app.py                # Main loop, single-instance mutex & event orchestration
+│   ├── app.py                # App entrypoint and single-instance mutex
+│   ├── orchestrator.py       # Headless AppOrchestrator lifecycle coordinator
 │   ├── settings.py           # Persistent configuration management (Anti-Spoiler)
-│   └── startup.py            # Windows Registry autostart integration
+│   ├── startup.py            # Windows Registry autostart integration
+│   └── resources.py          # Bundled asset path resolution
 │
-├── detection/                # Game process, memory, save files & zone tracking
-│   ├── detector.py           # GameDetector with polymorphic state providers
-│   ├── game_data.py          # 115 Expedition Flags, zone overrides & trial tables
-│   ├── save_reader.py        # Binary Unreal Engine .sav file reader & validator
+├── detection/                # Game state detection and telemetry pipelines
+│   ├── compat_paths.py       # Cross-platform IPC paths (Windows, Linux Proton)
+│   ├── detector.py           # GameDetector with BridgeStateProvider & GameState
+│   ├── game_data.py          # Zone overrides, regexes & Endless Tower trials
+│   ├── normalization.py      # Pure domain string normalization routines
 │   └── timer_tracker.py      # ZoneTimerTracker for smooth timer persistence
 │
 ├── integrations/             # External services & installers
-│   ├── discord_rpc.py        # Discord Rich Presence manager via pypresence IPC
 │   ├── bridge_installer.py   # Automatic UE4SS combat bridge deployment
+│   ├── discord_rpc.py        # Native lightweight Discord IPC wire client
 │   └── updater.py            # In-app silent updater with SHA-256 verification
 │
-├── ui/                       # Graphical user interface
+├── ui/                       # Graphical user interface & presentation
+│   ├── presentation.py       # Pure presentation formatting logic for Discord & Tray
 │   └── tray_app.py           # Windows System Tray icon, menu & notifications
 │
 └── assets/                   # Static resources

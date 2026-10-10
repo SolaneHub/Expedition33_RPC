@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import struct
 import sys
+import time
 import uuid
 
 import pytest
 from tests.harness import DiscordPipeSimulator, MockDiscordServer
 
-from expedition33_rpc.detection.detector import GameState
+from expedition33_rpc.core.orchestrator import AppOrchestrator
+from expedition33_rpc.detection.detector import GameDetector, GameState
 from expedition33_rpc.integrations.discord_rpc import (
     OP_FRAME,
     OP_HANDSHAKE,
@@ -199,18 +201,20 @@ def test_discord_rpc_manager_loopback_lifecycle_and_backoff() -> None:
         # Disconnect
         manager.disconnect()
         assert manager.is_connected is False
-        assert manager.rpc is None
 
         # Immediate reconnect is throttled by 5.0s backoff
         assert manager.connect() is False
         assert manager.is_connected is False
 
-        # Bypass backoff
-        manager.last_retry_time = 0.0
-        manager.rpc = DiscordIPCClient(client_id="manager_test", custom_pipe_path=server.pipe_path)
-        assert manager.connect() is True
-        assert manager.is_connected is True
-        manager.disconnect()
+        # Bypass backoff with client injected via constructor
+        custom_client = DiscordIPCClient(
+            client_id="manager_test", custom_pipe_path=server.pipe_path
+        )
+        mgr2 = DiscordRPCManager(client=custom_client)
+        mgr2.last_retry_time = 0.0
+        assert mgr2.connect() is True
+        assert mgr2.is_connected is True
+        mgr2.disconnect()
 
 
 @pytest.mark.integration
@@ -264,35 +268,6 @@ def test_discord_ipc_client_chunked_stream_handling() -> None:
 
 
 @pytest.mark.unit
-def test_discord_rpc_manager_client_factory_lifecycle() -> None:
-    """Verifies that DiscordRPCManager creates clients via client_factory and re-invokes factory on reconnect."""
-    created_clients: list[DiscordIPCClient] = []
-
-    def factory() -> DiscordIPCClient:
-        pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
-        c = DiscordIPCClient(client_id="factory_client", transport=pipe)
-        created_clients.append(c)
-        return c
-
-    manager = DiscordRPCManager(client_factory=factory)
-    assert manager.connect() is True
-    assert len(created_clients) == 1
-    assert manager.is_connected is True
-
-    # Disconnect resets active RPC client
-    manager.disconnect()
-    assert manager.is_connected is False
-    assert manager.rpc is None
-
-    # Reconnect invokes factory again rather than reverting to default unconfigured client
-    manager.last_retry_time = 0.0
-    assert manager.connect() is True
-    assert len(created_clients) == 2
-    assert manager.is_connected is True
-    assert manager.rpc is created_clients[1]
-
-
-@pytest.mark.unit
 def test_discord_rpc_manager_injected_client_retention() -> None:
     """Verifies that an injected custom client is retained across manager disconnect and reconnect."""
     mock_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
@@ -313,3 +288,61 @@ def test_discord_rpc_manager_injected_client_retention() -> None:
     assert manager.connect() is True
     assert manager.is_connected is True
     assert manager.rpc is custom_client
+
+
+@pytest.mark.integration
+def test_discord_ipc_client_and_orchestrator_freeze_chaos() -> None:
+    """Verifies that when Discord IPC server freezes, client and orchestrator disconnect cleanly without hang."""
+    # 1. Test DiscordIPCClient timeout on initial handshake freeze
+    with MockDiscordServer(simulate_freeze=True) as server:
+        start = time.perf_counter()
+        client = DiscordIPCClient(
+            client_id="chaos_test",
+            custom_pipe_path=server.pipe_path,
+            timeout=0.25,
+        )
+        res = client.connect()
+        duration = time.perf_counter() - start
+
+        assert res is False
+        assert client.is_connected is False
+        assert duration < 2.0  # Must not hang or block indefinitely
+
+    # 2. Test mid-session freeze: connected session freezes during runtime set_activity
+    with MockDiscordServer(simulate_freeze=False) as server:
+        active_client = DiscordIPCClient(
+            client_id="chaos_test_midsession",
+            custom_pipe_path=server.pipe_path,
+            timeout=0.25,
+        )
+        manager = DiscordRPCManager(client=active_client)
+        orchestrator = AppOrchestrator(
+            rpc_manager=manager,
+            detector=GameDetector(bridge_provider=None),
+            auto_install_bridge=False,
+            sync_startup=False,
+        )
+
+        assert orchestrator.rpc_manager.connect() is True
+        assert orchestrator.is_rpc_connected() is True
+
+        state1 = GameState.create(is_running=True, zone_name="SafeZone")
+        orchestrator.rpc_manager.update(state1)
+        assert orchestrator.is_rpc_connected() is True
+        safe_fingerprint = orchestrator.rpc_manager.last_update_state
+        assert safe_fingerprint is not None
+
+        # Now simulate Discord IPC daemon deadlock / frozen named pipe
+        server.simulate_freeze = True
+
+        state2 = GameState.create(is_running=True, zone_name="DeadlockZone")
+        t0 = time.perf_counter()
+        orchestrator.rpc_manager.update(state2)
+        freeze_duration = time.perf_counter() - t0
+
+        assert freeze_duration < 1.0  # Finished within timeout budget
+        assert orchestrator.is_rpc_connected() is False
+        assert orchestrator.rpc_manager.is_connected is False
+        # Must not falsely register the failed state2 as successfully updated
+        assert orchestrator.rpc_manager.last_update_state == safe_fingerprint
+        assert "DeadlockZone" not in (orchestrator.rpc_manager.last_update_state or "")

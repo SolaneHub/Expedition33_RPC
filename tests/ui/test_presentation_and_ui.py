@@ -170,15 +170,15 @@ def tray_test_app(tmp_path: Path):
 
     mock_detector = MagicMock(spec=GameDetector)
     mock_rpc = MagicMock()
-    mock_icon = MagicMock()
-
-    app = ExpeditionTrayApp(
+    orchestrator = AppOrchestrator(
         detector=mock_detector,
         rpc_manager=mock_rpc,
         auto_install_bridge=False,
         sync_startup=False,
         settings_service=settings_svc,
     )
+    mock_icon = MagicMock()
+    app = ExpeditionTrayApp(orchestrator=orchestrator)
     app.icon = mock_icon
     return app, mock_detector, mock_rpc, mock_icon
 
@@ -193,7 +193,7 @@ def test_step_update_reads_state_and_calls_rpc(tray_test_app) -> None:
     )
     mock_detector.get_game_state.return_value = running_state
 
-    result = app.step_update()
+    result = app.orchestrator.step_update()
 
     mock_detector.get_game_state.assert_called_once()
     assert app.orchestrator.current_state == running_state
@@ -209,11 +209,11 @@ def test_step_update_state_changes_and_menu_caching(tray_test_app) -> None:
     # Tick 1: Exploring Old Lumiere
     state1 = GameState.create(is_running=True, process_pid=1234, zone_name="Old Lumiere")
     mock_detector.get_game_state.return_value = state1
-    app.step_update()
+    app.orchestrator.step_update()
     assert "Old Lumiere" in mock_icon.title
 
     # Tick 2: Same state
-    app.step_update()
+    app.orchestrator.step_update()
     assert "Old Lumiere" in mock_icon.title
 
     # Tick 3: Combat starts
@@ -225,7 +225,7 @@ def test_step_update_state_changes_and_menu_caching(tray_test_app) -> None:
         enemy_name="Duollistes",
     )
     mock_detector.get_game_state.return_value = state2
-    app.step_update()
+    app.orchestrator.step_update()
     assert "Duollistes" in mock_icon.title
 
 
@@ -235,11 +235,11 @@ def test_step_update_graceful_exception_handling(tray_test_app) -> None:
     mock_detector.get_game_state.return_value = GameState.create(
         is_running=True, zone_name="Lumiere"
     )
-    res = app.step_update()
+    res = app.orchestrator.step_update()
     assert res is not None
 
     mock_detector.get_game_state.side_effect = Exception("Telemetry fault")
-    res2 = app.step_update()
+    res2 = app.orchestrator.step_update()
     assert res2 is None
 
 
@@ -271,8 +271,8 @@ def test_tray_app_chains_injected_orchestrator_callbacks() -> None:
     test_state = GameState.create(is_running=True, zone_name="Lumiere")
     mock_detector.get_game_state.return_value = test_state
 
-    # Trigger tick
-    app.step_update()
+    # Trigger tick directly via orchestrator
+    orchestrator.step_update()
 
     # Both tray icon update and external listener were called
     assert len(external_state_calls) == 1
@@ -281,7 +281,6 @@ def test_tray_app_chains_injected_orchestrator_callbacks() -> None:
 
     # Trigger update callback
     info = UpdateInfo(tag_name="v2.0.0", version_tuple=(2, 0, 0), html_url="http://example.com")
-    assert orchestrator.on_update_available is not None
-    orchestrator.on_update_available(info)
+    orchestrator.on_update_check_complete(info)
     assert len(external_update_calls) == 1
     assert external_update_calls[0] == info

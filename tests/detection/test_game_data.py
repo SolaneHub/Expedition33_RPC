@@ -20,7 +20,6 @@ from expedition33_rpc.detection.normalization import (
     is_menu_zone,
     resolve_tower_trial,
 )
-from expedition33_rpc.detection.save_reader import SaveFileReader
 
 pytestmark = pytest.mark.unit
 
@@ -78,17 +77,10 @@ def test_game_data_schema_and_catalog_integrity(game_data_json: dict) -> None:
         assert isinstance(rule.get("zone_keywords"), list) and len(rule["zone_keywords"]) > 0
         assert any(k in rule for k in criteria_keys)
 
-    # 4. Semantic zone aliases
-    aliases = game_data_json.get("semantic_zone_aliases", [])
-    assert isinstance(aliases, list) and len(aliases) > 0
-    for item in aliases:
-        assert isinstance(item, dict)
-        cp_toks = item.get("cp_tokens")
-        z_toks = item.get("zone_tokens")
-        assert isinstance(cp_toks, list) and len(cp_toks) > 0
-        assert isinstance(z_toks, list) and len(z_toks) > 0
-        for t in cp_toks + z_toks:
-            assert isinstance(t, str) and t == t.lower()
+    # 4. Semantic zone aliases must be purged
+    assert "semantic_zone_aliases" not in game_data_json
+    assert "save_reader_ignored_zone_words" not in game_data_json
+    assert "save_reader_ignored_cp_words" not in game_data_json
 
     # 5. Endless tower trial definitions
     trials = game_data_json.get("endless_tower_trials", [])
@@ -228,28 +220,6 @@ def test_checkpoint_mapping_catalog() -> None:
         assert res_it == expected_it, f"[{zone}] {tag} (IT)"
 
 
-def test_save_reader_zone_matching() -> None:
-    reader = SaveFileReader()
-    assert reader.is_checkpoint_for_zone(
-        "LevelMain_EsquieNest",
-        "Level.SpawnPoint.EsquieNest.Francois",
-        "LevelMain_EsquieNest",
-        "Esquie's Nest",
-    )
-    assert not reader.is_checkpoint_for_zone(
-        "Level_WorldMap",
-        "Level.SpawnPoint.EsquieNest.Francois",
-        "Level_WorldMap",
-        "The Continent",
-    )
-    assert not reader.is_checkpoint_for_zone(
-        "Level_Bootstrap",
-        "Level.SpawnPoint.AncientSanctuary.RedForest",
-        "Level_Bootstrap",
-        "Main Menu",
-    )
-
-
 def test_every_trial_resolves_from_structured_and_exact_names() -> None:
     for stage, boss, groups in ENDLESS_TOWER_TRIALS:
         names = [min(group, key=len) for group in groups]
@@ -296,9 +266,9 @@ def test_detector_resolves_structured_bridge_payload_end_to_end(tmp_path: Path) 
     )
     bridge = BridgeStateProvider(paths=[str(bridge_path)])
     detector = GameDetector(
-        save_reader=SaveFileReader(base_save_dir=str(tmp_path / "saves")),
-        providers=[bridge],
+        bridge_provider=bridge,
     )
+
     real_proc = psutil.Process(os.getpid())
     detector.find_game_process = lambda: real_proc  # type: ignore
     state = detector.get_game_state()
@@ -321,3 +291,30 @@ def test_normalization_pure_string_menu_and_continent_detection() -> None:
     assert is_continent_zone(raw_zone="WorldMap_Main") is True
     assert is_continent_zone(zone_name="Old Lumiere") is False
     assert is_continent_zone(None, None) is False
+
+
+def test_native_game_data_structures_at_module_load() -> None:
+    """Verifies that catalog constants are loaded as native/immutable types at module load."""
+    from expedition33_rpc.detection.game_data import (
+        CHECKPOINT_NAMES_EN,
+        CHECKPOINT_NAMES_IT,
+        CONTEXTUAL_CHECKPOINTS,
+        ENDLESS_TOWER_TRIALS,
+        MAIN_MENU_TOKENS,
+        TARGET_PROCESS_NAME,
+        ZONE_NAME_OVERRIDES_EN,
+        ZONE_NAME_OVERRIDES_IT,
+        get_game_data,
+    )
+
+    data = get_game_data()
+    assert isinstance(data, dict)
+    assert isinstance(TARGET_PROCESS_NAME, str)
+    assert TARGET_PROCESS_NAME == "sandfall-win64-shipping.exe"
+    assert isinstance(MAIN_MENU_TOKENS, frozenset)
+    assert isinstance(ZONE_NAME_OVERRIDES_EN, dict)
+    assert isinstance(ZONE_NAME_OVERRIDES_IT, dict)
+    assert isinstance(CHECKPOINT_NAMES_EN, dict)
+    assert isinstance(CHECKPOINT_NAMES_IT, dict)
+    assert isinstance(CONTEXTUAL_CHECKPOINTS, list)
+    assert isinstance(ENDLESS_TOWER_TRIALS, list)

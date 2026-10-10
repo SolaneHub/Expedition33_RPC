@@ -2,24 +2,99 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import json
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+from tests.harness import DiscordPipeSimulator
+from tests.harness.game_session import GameSessionSimulator
 
 from expedition33_rpc.core.orchestrator import AppOrchestrator
 from expedition33_rpc.core.settings import SettingsService
-from expedition33_rpc.detection.detector import GameDetector, GameState
-from expedition33_rpc.integrations.discord_rpc import DiscordRPCManager
-from expedition33_rpc.integrations.updater import AppUpdater, UpdateInfo
+from expedition33_rpc.detection.detector import BridgeStateProvider, GameDetector, GameState
+from expedition33_rpc.integrations.discord_rpc import DiscordIPCClient, DiscordRPCManager
+from expedition33_rpc.integrations.updater import AppUpdater, UpdateInfo, UpdateState
+
+
+class FakeBridgeInstaller:
+    """In-memory stub for deterministic testing."""
+
+    def __init__(
+        self,
+        game_dir: str | None = "/mock/game/win64",
+        installed: bool = False,
+        install_result: tuple[bool, str] = (True, "Success"),
+        uninstall_result: tuple[bool, str] = (True, "OK"),
+    ):
+        self.game_dir = game_dir
+        self.installed = installed
+        self.install_result = install_result
+        self.uninstall_result = uninstall_result
+        self.is_installed_call_count = 0
+        self.install_call_count = 0
+
+    def find_game_win64_directory(
+        self,
+        target_process_name: str | None = None,
+        known_win64_dir: str | Path | None = None,
+        known_exe_path: str | None = None,
+    ) -> str | None:
+        del target_process_name, known_win64_dir, known_exe_path
+        return self.game_dir
+
+    def is_bridge_installed(self, win64_dir: str | Path | None = None) -> bool:
+        del win64_dir
+        self.is_installed_call_count += 1
+        return self.installed
+
+    def install_bridge(self, win64_dir: str | Path | None = None) -> tuple[bool, str]:
+        del win64_dir
+        self.install_call_count += 1
+        if self.install_result[0]:
+            self.installed = True
+        return self.install_result
+
+    def uninstall_bridge(self, win64_dir: str | Path | None = None) -> tuple[bool, str]:
+        del win64_dir
+        if self.uninstall_result[0]:
+            self.installed = False
+        return self.uninstall_result
+
+
+class FakeStartupService:
+    """In-memory stub for deterministic testing."""
+
+    def __init__(self, enabled: bool = False):
+        self.enabled = enabled
+
+    def is_startup_enabled(self) -> bool:
+        return self.enabled
+
+    def set_startup_enabled(self, enable: bool) -> bool:
+        self.enabled = enable
+        return True
+
+    def toggle_startup(self) -> bool:
+        self.enabled = not self.enabled
+        return self.enabled
+
+    def sync_startup_path(self) -> None:
+        pass
 
 
 @pytest.mark.unit
-def test_orchestrator_initialization_defaults() -> None:
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+def test_orchestrator_initialization_defaults(tmp_path: Path) -> None:
+    pipe = DiscordPipeSimulator()
+    client = DiscordIPCClient(client_id="test", transport=pipe)
+    rpc = DiscordRPCManager(client=client)
+    settings = SettingsService(custom_path=tmp_path / "settings.json")
+    detector = GameDetector(bridge_provider=None)
+
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
+        settings_service=settings,
         auto_install_bridge=False,
         sync_startup=False,
     )
@@ -29,52 +104,76 @@ def test_orchestrator_initialization_defaults() -> None:
 
 
 @pytest.mark.unit
-def test_orchestrator_step_update_coordinates_subsystems() -> None:
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
-    mock_settings = MagicMock(spec=SettingsService)
-    mock_settings.is_anti_spoiler_enabled.return_value = False
+def test_orchestrator_step_update_coordinates_subsystems(tmp_path: Path) -> None:
+    pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="123456", transport=pipe)
+    rpc = DiscordRPCManager(client=client)
+    assert rpc.connect() is True
+    pipe.outgoing_bytes.clear()
 
-    expected_state = GameState.create(
-        is_running=True,
-        process_pid=1234,
-        zone_name="Old Lumiere",
-        in_combat=False,
-    )
-    mock_detector.get_game_state.return_value = expected_state
-
+    settings = SettingsService(custom_path=tmp_path / "settings.json")
     state_changed_events: list[tuple[GameState, bool]] = []
 
-    def on_change(state: GameState, anti_spoiler: bool) -> None:
-        state_changed_events.append((state, anti_spoiler))
+    with GameSessionSimulator(base_dir=tmp_path) as session:
+        session.start_game(pid=1234).enter_zone("Level_Main_OldLumiere")
+        orchestrator = AppOrchestrator(
+            detector=session.detector,
+            rpc_manager=rpc,
+            settings_service=settings,
+            on_state_change=lambda st, sp: state_changed_events.append((st, sp)),
+            auto_install_bridge=False,
+            sync_startup=False,
+        )
 
-    orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
-        settings_service=mock_settings,
-        on_state_change=on_change,
-        auto_install_bridge=False,
-        sync_startup=False,
-    )
+        result = orchestrator.step_update()
 
-    result = orchestrator.step_update()
+        assert result is not None
+        assert result.is_running is True
+        assert result.zone_name == "Old Lumiere"
 
-    assert result == expected_state
-    assert orchestrator.current_state == expected_state
-    mock_rpc.update.assert_called_once_with(expected_state, anti_spoiler=False)
-    assert len(state_changed_events) == 1
-    assert state_changed_events[0] == (expected_state, False)
+        # Assert frame emitted on mock Discord channel
+        frame = pipe.pop_last_frame_payload()
+        assert frame is not None
+        assert frame["cmd"] == "SET_ACTIVITY"
+        assert frame["args"]["pid"] == 1234
+        assert "Old Lumiere" in frame["args"]["activity"]["state"]
+        assert frame["args"]["activity"]["details"] == "Exploring"
+
+        # Assert external subscriber notification
+        assert len(state_changed_events) == 1
+        assert state_changed_events[0][0].zone_name == "Old Lumiere"
+        assert state_changed_events[0][1] is False
 
 
 @pytest.mark.unit
 def test_orchestrator_step_update_error_resilience() -> None:
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_detector.get_game_state.side_effect = RuntimeError("Telemetry failure")
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    class FailingProvider(BridgeStateProvider):
+        def read_game_data(
+            self, min_valid_timestamp: float | None = None, lang: str = "en"
+        ) -> None:
+            del min_valid_timestamp, lang
+            raise RuntimeError("Telemetry failure")
+
+    class FakeProc:
+        pid = 1111
+
+        def is_running(self) -> bool:
+            return True
+
+        def name(self) -> str:
+            return "sandfall-win64-shipping.exe"
+
+        def create_time(self) -> float:
+            return 1000.0
+
+    detector = GameDetector(bridge_provider=FailingProvider(), process_scanner=lambda: [FakeProc()])
+    pipe = DiscordPipeSimulator()
+    client = DiscordIPCClient(client_id="test", transport=pipe)
+    rpc = DiscordRPCManager(client=client)
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         auto_install_bridge=False,
         sync_startup=False,
     )
@@ -85,249 +184,388 @@ def test_orchestrator_step_update_error_resilience() -> None:
 
 @pytest.mark.unit
 def test_orchestrator_lifecycle_start_stop() -> None:
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_updater = MagicMock(spec=AppUpdater)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="test", transport=pipe)
+    rpc = DiscordRPCManager(client=client)
+    assert rpc.connect() is True
+    assert rpc.is_connected is True
 
+    mock_updater = MagicMock(spec=AppUpdater)
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=GameDetector(bridge_provider=None),
+        rpc_manager=rpc,
         updater=mock_updater,
         auto_install_bridge=False,
         sync_startup=False,
         polling_interval=0.01,
     )
 
-    with patch.object(orchestrator, "run_loop"):
-        orchestrator.start()
-        assert orchestrator.running is True
-        assert orchestrator.worker_thread is not None
-        mock_updater.check_in_background.assert_called_once()
+    orchestrator.start()
+    assert orchestrator.running is True
+    assert orchestrator.worker_thread is not None
+    mock_updater.check_in_background.assert_called_once()
 
-        # Starting again is idempotent
-        orchestrator.start()
+    # Starting again is idempotent
+    orchestrator.start()
 
     orchestrator.stop()
     assert orchestrator.running is False
-    mock_rpc.disconnect.assert_called_once()
+    if orchestrator.worker_thread is not None:
+        orchestrator.worker_thread.join(timeout=1.0)
+        assert not orchestrator.worker_thread.is_alive()
+    assert rpc.is_connected is False
 
 
 @pytest.mark.unit
-def test_orchestrator_auto_install_bridge_on_init() -> None:
+def test_orchestrator_auto_install_bridge_on_process_detection() -> None:
     mock_detector = MagicMock(spec=GameDetector)
+    mock_detector.get_game_state.return_value = GameState.create(is_running=True, process_pid=1234)
+    mock_detector.win64_dir = Path("/mock/game/win64")
     mock_rpc = MagicMock(spec=DiscordRPCManager)
-
-    with (
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.find_game_win64_directory",
-            return_value="/mock/game/win64",
-        ) as mock_find,
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.is_bridge_installed",
-            return_value=False,
-        ) as mock_installed,
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.install_bridge",
-            return_value=(True, "Success"),
-        ) as mock_install,
-    ):
-        orchestrator = AppOrchestrator(
-            detector=mock_detector,
-            rpc_manager=mock_rpc,
-            auto_install_bridge=True,
-            sync_startup=False,
-        )
-        assert orchestrator.bridge_auto_installed is True
-        mock_find.assert_called_once()
-        mock_installed.assert_called_once_with("/mock/game/win64")
-        mock_install.assert_called_once_with("/mock/game/win64")
-
-
-@pytest.mark.unit
-def test_orchestrator_periodic_auto_install_during_step_update() -> None:
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_detector.get_game_state.return_value = GameState.create(is_running=True)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    fake_bridge = FakeBridgeInstaller(
+        game_dir="/mock/game/win64",
+        installed=False,
+        install_result=(True, "Success"),
+    )
 
     orchestrator = AppOrchestrator(
         detector=mock_detector,
         rpc_manager=mock_rpc,
+        bridge_installer_service=fake_bridge,
+        auto_install_bridge=True,
+        sync_startup=False,
+    )
+    # Bridge is not installed prior to game detection event
+    assert orchestrator.bridge_auto_installed is False
+    assert fake_bridge.installed is False
+    assert orchestrator.is_bridge_installed() is False
+
+    # Process detection event triggers auto installation
+    orchestrator.step_update()
+    assert orchestrator.bridge_auto_installed is True
+    assert fake_bridge.installed is True
+    assert orchestrator.is_bridge_installed() is True
+
+
+@pytest.mark.unit
+def test_orchestrator_event_driven_bridge_check_eliminates_parasitic_io() -> None:
+    """Verifies that bridge check runs on initial process detection and NOT on subsequent ticks (no parasitic I/O)."""
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_detector.get_game_state.return_value = GameState.create(
+        is_running=True, process_pid=4242, start_time=1000.0
+    )
+    mock_detector.win64_dir = Path("/mock/game/win64")
+    mock_detector.exe_path = "/mock/game/win64/Sandfall-Win64-Shipping.exe"
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    fake_bridge = FakeBridgeInstaller(game_dir="/mock/game/win64", installed=False)
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        bridge_installer_service=fake_bridge,
+        auto_install_bridge=True,
+        sync_startup=False,
+    )
+
+    # Tick 1: First time PID 4242 detected -> triggers check and auto installation
+    orchestrator.step_update()
+    assert fake_bridge.installed is True
+    assert fake_bridge.is_installed_call_count == 1
+    assert fake_bridge.install_call_count == 1
+    assert orchestrator.is_bridge_installed() is True
+
+    # Ticks 2..10: Same PID 4242 is running -> NO parasitic I/O, call count MUST remain 1
+    for _ in range(9):
+        orchestrator.step_update()
+
+    assert fake_bridge.is_installed_call_count == 1
+    assert fake_bridge.install_call_count == 1
+
+
+@pytest.mark.unit
+def test_orchestrator_event_driven_bridge_check_triggers_on_process_restart() -> None:
+    """Verifies that bridge check re-triggers when game process stops and restarts, or when PID/start_time changes."""
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    fake_bridge = FakeBridgeInstaller(game_dir="/mock/game/win64", installed=True)
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        bridge_installer_service=fake_bridge,
         auto_install_bridge=False,
         sync_startup=False,
     )
-    # Enable flag to test periodic check during step_update
-    orchestrator.auto_install_bridge = True
-    orchestrator.bridge_auto_installed = False
 
-    with (
-        patch.object(
-            orchestrator, "check_and_auto_install_bridge", return_value=True
-        ) as mock_check,
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.is_bridge_installed",
-            return_value=False,
-        ),
-    ):
-        orchestrator.step_update()
-        mock_check.assert_called_once()
+    # 1. Process 1001 detected
+    mock_detector.get_game_state.return_value = GameState.create(
+        is_running=True, process_pid=1001, start_time=500.0
+    )
+    orchestrator.step_update()
+    assert fake_bridge.is_installed_call_count == 1
+
+    # 2. Same process running -> cached, no additional call
+    orchestrator.step_update()
+    assert fake_bridge.is_installed_call_count == 1
+
+    # 3. Game closes
+    mock_detector.get_game_state.return_value = GameState(is_running=False)
+    orchestrator.step_update()
+    assert fake_bridge.is_installed_call_count == 1
+
+    # 4. Game restarts with new PID 2002 -> re-checks
+    mock_detector.get_game_state.return_value = GameState.create(
+        is_running=True, process_pid=2002, start_time=600.0
+    )
+    orchestrator.step_update()
+    assert fake_bridge.is_installed_call_count == 2
+
+    # 5. Fast restart: PID reused but start_time changed without intermediate stopped tick -> re-checks
+    mock_detector.get_game_state.return_value = GameState.create(
+        is_running=True, process_pid=2002, start_time=700.0
+    )
+    orchestrator.step_update()
+    assert fake_bridge.is_installed_call_count == 3
+
+
+@pytest.mark.unit
+def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> None:
+    """Verifies that bridge check is NOT attempted on every tick when backoff cooldown is active."""
+    import time as time_mod
+
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_detector.get_game_state.return_value = GameState.create(is_running=True)
+    mock_detector.win64_dir = Path("/mock/game/win64")
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    fake_bridge = FakeBridgeInstaller(installed=False)
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        bridge_installer_service=fake_bridge,
+        auto_install_bridge=True,
+        sync_startup=False,
+    )
+    fake_bridge.installed = False
+    orchestrator._bridge_installed = False
+    orchestrator.bridge_auto_installed = False
+    orchestrator.last_bridge_install_attempt = time_mod.monotonic()
+    orchestrator.bridge_install_cooldown = 60.0
+
+    orchestrator.step_update()
+    assert fake_bridge.installed is False
+    assert orchestrator.bridge_auto_installed is False
 
 
 @pytest.mark.unit
 def test_orchestrator_bridge_auto_install_backoff_and_cooldown() -> None:
     mock_detector = MagicMock(spec=GameDetector)
     mock_rpc = MagicMock(spec=DiscordRPCManager)
+    fake_bridge = FakeBridgeInstaller(
+        game_dir="/mock/game/win64",
+        installed=False,
+        install_result=(False, "Permission denied: access denied to Program Files"),
+    )
 
     orchestrator = AppOrchestrator(
         detector=mock_detector,
         rpc_manager=mock_rpc,
+        bridge_installer_service=fake_bridge,
         auto_install_bridge=False,
         sync_startup=False,
     )
 
-    with (
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.find_game_win64_directory",
-            return_value="/mock/game/win64",
-        ),
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.is_bridge_installed",
-            return_value=False,
-        ),
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.install_bridge",
-            return_value=(False, "Permission denied: access denied to Program Files"),
-        ) as mock_install,
-    ):
-        # 1. First attempt fails at t = 1000.0
-        res1 = orchestrator.check_and_auto_install_bridge(now=1000.0)
-        assert res1 is False
-        assert mock_install.call_count == 1
-        assert orchestrator.bridge_auto_installed is False
-        assert orchestrator.bridge_install_cooldown == 60.0
+    # 1. First attempt fails at t = 1000.0
+    res1 = orchestrator.check_and_auto_install_bridge(now=1000.0)
+    assert res1 is False
+    assert orchestrator.bridge_auto_installed is False
+    assert orchestrator.bridge_install_cooldown == 60.0
+    assert fake_bridge.installed is False
 
-        # 2. Immediate next attempt at t = 1002.0 (2 seconds later, polling tick)
-        # Should be throttled by cooldown and NOT attempt re-extracting
-        res2 = orchestrator.check_and_auto_install_bridge(now=1002.0)
-        assert res2 is False
-        assert mock_install.call_count == 1
+    # 2. Immediate next attempt at t = 1002.0 (2 seconds later, polling tick)
+    # Should be throttled by cooldown and NOT attempt re-extracting
+    res2 = orchestrator.check_and_auto_install_bridge(now=1002.0)
+    assert res2 is False
+    assert orchestrator.bridge_auto_installed is False
+    assert fake_bridge.installed is False
 
-        # 3. Next attempt after 60s cooldown expires at t = 1065.0
-        # Fails again, cooldown doubles to 120.0s
-        res3 = orchestrator.check_and_auto_install_bridge(now=1065.0)
-        assert res3 is False
-        assert mock_install.call_count == 2
-        assert orchestrator.bridge_install_cooldown == 120.0
+    # 3. Next attempt after 60s cooldown expires at t = 1065.0
+    # Fails again, cooldown doubles to 120.0s
+    res3 = orchestrator.check_and_auto_install_bridge(now=1065.0)
+    assert res3 is False
+    assert orchestrator.bridge_auto_installed is False
+    assert orchestrator.bridge_install_cooldown == 120.0
 
-        # 4. Now simulate permission resolved at t = 1190.0 (past 120s cooldown)
-        mock_install.return_value = (True, "Installed successfully")
-        res4 = orchestrator.check_and_auto_install_bridge(now=1190.0)
-        assert res4 is True
-        assert mock_install.call_count == 3
-        assert orchestrator.bridge_auto_installed is True
-        assert orchestrator.bridge_install_cooldown == 30.0
+    # 4. Now simulate permission resolved at t = 1190.0 (past 120s cooldown)
+    fake_bridge.install_result = (True, "Installed successfully")
+    res4 = orchestrator.check_and_auto_install_bridge(now=1190.0)
+    assert res4 is True
+    assert orchestrator.bridge_auto_installed is True
+    assert fake_bridge.installed is True
+    assert orchestrator.bridge_install_cooldown == 30.0
+    assert orchestrator.is_bridge_installed() is True
 
 
 @pytest.mark.unit
 def test_orchestrator_bridge_auto_install_early_boot_and_preinstalled() -> None:
     mock_detector = MagicMock(spec=GameDetector)
     mock_rpc = MagicMock(spec=DiscordRPCManager)
+    fake_bridge = FakeBridgeInstaller(
+        game_dir="/mock/game/win64",
+        installed=True,
+    )
 
     orchestrator = AppOrchestrator(
         detector=mock_detector,
         rpc_manager=mock_rpc,
+        bridge_installer_service=fake_bridge,
         auto_install_bridge=False,
         sync_startup=False,
     )
 
-    with (
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.find_game_win64_directory",
-            return_value="/mock/game/win64",
-        ),
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.is_bridge_installed",
-            return_value=True,
-        ) as mock_installed,
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.install_bridge",
-        ) as mock_install,
-    ):
-        # 1. Early monotonic boot timestamp (now=0.5) must NOT be throttled by initial cooldown
-        res = orchestrator.check_and_auto_install_bridge(now=0.5)
-        assert res is True
-        assert orchestrator.bridge_auto_installed is True
-        mock_installed.assert_called_once_with("/mock/game/win64")
-        mock_install.assert_not_called()
+    # 1. Early monotonic boot timestamp (now=0.5) must NOT be throttled by initial cooldown
+    res = orchestrator.check_and_auto_install_bridge(now=0.5)
+    assert res is True
+    assert orchestrator.bridge_auto_installed is True
+    assert fake_bridge.installed is True
+    assert orchestrator.is_bridge_installed() is True
 
-        # 2. toggle_bridge resets the attempt timestamp and cooldown
-        with patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.uninstall_bridge",
-            return_value=(True, "OK"),
-        ):
-            orchestrator.toggle_bridge()
-            assert orchestrator.bridge_auto_installed is False
-            assert orchestrator.last_bridge_install_attempt == -float("inf")
-            assert orchestrator.bridge_install_cooldown == 30.0
+    # 2. toggle_bridge resets the attempt timestamp and cooldown
+    toggle_res = orchestrator.toggle_bridge()
+    assert toggle_res is False
+    assert orchestrator.bridge_auto_installed is False
+    assert orchestrator.last_bridge_install_attempt == -float("inf")
+    assert orchestrator.bridge_install_cooldown == 30.0
+    assert fake_bridge.installed is False
+    assert orchestrator.is_bridge_installed() is False
 
 
 @pytest.mark.unit
-def test_orchestrator_os_status_queries_and_toggles() -> None:
-    mock_settings = MagicMock(spec=SettingsService)
-    mock_settings.toggle_anti_spoiler.return_value = True
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+def test_orchestrator_os_status_queries_and_toggles(tmp_path: Path) -> None:
+    settings = SettingsService(custom_path=tmp_path / "settings.json")
+    pipe = DiscordPipeSimulator()
+    client = DiscordIPCClient(client_id="test", transport=pipe)
+    rpc = DiscordRPCManager(client=client)
+    fake_bridge = FakeBridgeInstaller(installed=False)
+    fake_startup = FakeStartupService(enabled=True)
 
     orchestrator = AppOrchestrator(
-        settings_service=mock_settings,
-        rpc_manager=mock_rpc,
+        settings_service=settings,
+        rpc_manager=rpc,
+        bridge_installer_service=fake_bridge,
+        startup_service=fake_startup,
         auto_install_bridge=False,
         sync_startup=False,
     )
 
-    with (
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.is_bridge_installed",
-            side_effect=[False, False, True, True],
-        ),
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.install_bridge",
-            return_value=(True, "OK"),
-        ) as mock_install,
-        patch(
-            "expedition33_rpc.core.orchestrator.bridge_installer.uninstall_bridge",
-            return_value=(True, "OK"),
-        ) as mock_uninstall,
-        patch(
-            "expedition33_rpc.core.orchestrator.startup.is_startup_enabled",
-            return_value=True,
-        ),
-        patch(
-            "expedition33_rpc.core.orchestrator.startup.toggle_startup",
-            return_value=False,
-        ) as mock_toggle_startup,
-    ):
-        # 1. Bridge
-        assert orchestrator.is_bridge_installed() is False
-        res1 = orchestrator.toggle_bridge()
-        assert res1 is True
-        mock_install.assert_called_once()
+    # 1. Bridge
+    assert orchestrator.is_bridge_installed() is False
+    res1 = orchestrator.toggle_bridge()
+    assert res1 is True
+    assert fake_bridge.installed is True
+    assert orchestrator.is_bridge_installed() is True
 
-        assert orchestrator.is_bridge_installed() is True
-        res2 = orchestrator.toggle_bridge()
-        assert res2 is False
-        mock_uninstall.assert_called_once()
+    res2 = orchestrator.toggle_bridge()
+    assert res2 is False
+    assert fake_bridge.installed is False
+    assert orchestrator.is_bridge_installed() is False
 
-        # 2. Startup
-        assert orchestrator.is_startup_enabled() is True
-        res_startup = orchestrator.toggle_startup()
-        assert res_startup is False
-        mock_toggle_startup.assert_called_once()
+    # 2. Startup
+    assert orchestrator.is_startup_enabled() is True
+    res_startup = orchestrator.toggle_startup()
+    assert res_startup is False
+    assert fake_startup.enabled is False
+    assert orchestrator.is_startup_enabled() is False
 
-        # 3. Anti-Spoiler
-        res_anti_spoiler = orchestrator.toggle_anti_spoiler()
-        assert res_anti_spoiler is True
-        mock_settings.toggle_anti_spoiler.assert_called_once()
-        mock_rpc.invalidate.assert_called_once()
-        mock_rpc.update.assert_called_once()
+    # 3. Anti-Spoiler persisted to disk and invalidating presence
+    assert orchestrator.is_anti_spoiler_enabled() is False
+    res_anti_spoiler = orchestrator.toggle_anti_spoiler()
+    assert res_anti_spoiler is True
+    assert orchestrator.is_anti_spoiler_enabled() is True
+    saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert saved["anti_spoiler"] is True
+    assert rpc.last_update_state is None  # Fingerprint invalidated
+
+    res_off = orchestrator.toggle_anti_spoiler()
+    assert res_off is False
+    assert orchestrator.is_anti_spoiler_enabled() is False
+    saved_off = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert saved_off["anti_spoiler"] is False
+
+
+@pytest.mark.unit
+def test_orchestrator_session_simulator_telemetry_flow(tmp_path: Path) -> None:
+    """Verifies observable telemetry state propagation and wire-level presence frames using GameSessionSimulator."""
+    pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="test_flow", transport=pipe)
+    rpc = DiscordRPCManager(client=client)
+    assert rpc.connect() is True
+    pipe.outgoing_bytes.clear()
+
+    settings = SettingsService(custom_path=tmp_path / "settings.json")
+
+    with GameSessionSimulator(base_dir=tmp_path) as session:
+        orchestrator = AppOrchestrator(
+            detector=session.detector,
+            rpc_manager=rpc,
+            settings_service=settings,
+            auto_install_bridge=False,
+            sync_startup=False,
+        )
+
+        observed_states: list[GameState] = []
+        orchestrator.on_state_change = lambda st, _spoiler: observed_states.append(st)
+
+        # 1. Game not running
+        st1 = orchestrator.step_update()
+        assert st1 is not None and st1.is_running is False
+        assert len(observed_states) == 1
+        assert observed_states[-1].is_running is False
+        pipe.outgoing_bytes.clear()
+
+        # 2. Launch game and explore Old Lumiere
+        session.start_game(pid=8888).enter_zone("Level_Main_OldLumiere", checkpoint="Entrance")
+        st2 = orchestrator.step_update()
+        assert st2 is not None and st2.is_running is True
+        assert st2.zone_name == "Old Lumiere"
+        assert st2.checkpoint_name == "Entrance"
+        assert len(observed_states) == 2
+
+        frame_explore = pipe.pop_last_frame_payload()
+        assert frame_explore is not None
+        assert frame_explore["cmd"] == "SET_ACTIVITY"
+        assert frame_explore["args"]["pid"] == 8888
+        assert frame_explore["args"]["activity"]["details"] == "Exploring"
+        assert "Old Lumiere" in frame_explore["args"]["activity"]["state"]
+
+        # 3. Trigger combat
+        session.trigger_combat("Duollistes")
+        st3 = orchestrator.step_update()
+        assert st3 is not None and st3.in_combat is True
+        assert st3.enemy_name == "Duollistes"
+        assert len(observed_states) == 3
+
+        frame_combat = pipe.pop_last_frame_payload()
+        assert frame_combat is not None
+        assert frame_combat["args"]["activity"]["details"] == "Fighting: Duollistes"
+
+        # 4. Leave combat
+        session.leave_combat()
+        st4 = orchestrator.step_update()
+        assert st4 is not None and st4.in_combat is False
+
+        frame_peace = pipe.pop_last_frame_payload()
+        assert frame_peace is not None
+        assert frame_peace["args"]["activity"]["details"] == "Exploring"
+
+        # 5. Stop game
+        session.stop_game()
+        st5 = orchestrator.step_update()
+        assert st5 is not None and st5.is_running is False
+
+        frame_stopped = pipe.pop_last_frame_payload()
+        assert frame_stopped is not None
+        assert frame_stopped["args"]["activity"] is None
 
 
 @pytest.mark.unit
@@ -361,3 +599,82 @@ def test_orchestrator_update_notification_callback() -> None:
     # None update does not invoke callback
     orchestrator.on_update_check_complete(None)
     assert len(update_notifications) == 1
+
+
+@pytest.mark.unit
+def test_orchestrator_callbacks_dispatch(tmp_path: Path) -> None:
+    """Verifies that direct callbacks are invoked upon state change and update events."""
+    pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="test_sub", transport=pipe)
+    rpc = DiscordRPCManager(client=client)
+
+    with GameSessionSimulator(base_dir=tmp_path) as session:
+        session.start_game().enter_zone("Level_Main_OldLumiere")
+        orchestrator = AppOrchestrator(
+            detector=session.detector,
+            rpc_manager=rpc,
+            auto_install_bridge=False,
+            sync_startup=False,
+        )
+
+        state_calls: list[tuple[GameState, bool]] = []
+        update_calls: list[UpdateInfo] = []
+
+        orchestrator.on_state_change = lambda st, sp: state_calls.append((st, sp))
+        orchestrator.on_update_available = lambda info: update_calls.append(info)
+
+        st = orchestrator.step_update()
+        assert st is not None
+        assert len(state_calls) == 1
+        assert state_calls[0][0].zone_name == "Old Lumiere"
+
+        sample_info = UpdateInfo(tag_name="v2.0.0", version_tuple=(2, 0, 0), html_url="")
+        orchestrator.on_update_check_complete(sample_info)
+        assert len(update_calls) == 1
+        assert update_calls[0].tag_name == "v2.0.0"
+
+
+@pytest.mark.unit
+def test_orchestrator_facade_methods(tmp_path: Path) -> None:
+    """Verifies that AppOrchestrator exposes Demeter-compliant facade queries and actions."""
+    pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="facade_test", transport=pipe)
+    rpc = DiscordRPCManager(client=client)
+    assert rpc.connect() is True
+
+    settings = SettingsService(custom_path=tmp_path / "settings.json")
+    settings.set_anti_spoiler_enabled(True)
+
+    mock_updater = MagicMock(spec=AppUpdater)
+    mock_updater.get_status_text.return_value = "Update: Available (v2.0.0)"
+    mock_updater.state = UpdateState.AVAILABLE
+
+    orchestrator = AppOrchestrator(
+        detector=GameDetector(bridge_provider=None),
+        rpc_manager=rpc,
+        settings_service=settings,
+        updater=mock_updater,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    # 1. State queries
+    assert orchestrator.is_rpc_connected() is True
+    assert orchestrator.is_anti_spoiler_enabled() is True
+    assert orchestrator.get_updater_status_text() == "Update: Available (v2.0.0)"
+    assert orchestrator.is_update_available() is True
+
+    # 2. Update action when AVAILABLE
+    orchestrator.trigger_update_action()
+    mock_updater.open_release_page.assert_called_once()
+    mock_updater.check_in_background.assert_not_called()
+
+    # 3. Update action when UP_TO_DATE
+    mock_updater.open_release_page.reset_mock()
+    mock_updater.state = UpdateState.UP_TO_DATE
+    assert orchestrator.is_update_available() is False
+    orchestrator.trigger_update_action()
+    mock_updater.open_release_page.assert_not_called()
+    mock_updater.check_in_background.assert_called_once_with(
+        delay_seconds=0.0, on_complete=orchestrator.on_update_check_complete
+    )

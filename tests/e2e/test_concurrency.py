@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from tests.harness import DiscordPipeSimulator
 
+from expedition33_rpc.core.orchestrator import AppOrchestrator
 from expedition33_rpc.core.settings import SettingsService
 from expedition33_rpc.detection.detector import GameDetector, GameState
 from expedition33_rpc.integrations.discord_rpc import (
@@ -106,7 +107,7 @@ def test_concurrent_settings_mutations(tmp_path: Path) -> None:
     assert errors == []
     # Ensure file on disk remains valid JSON
     final_settings = settings_service.load_settings()
-    assert "anti_spoiler" in final_settings
+    assert isinstance(final_settings.anti_spoiler, bool)
 
 
 def test_concurrent_telemetry_ticks_and_ui_toggles(tmp_path: Path) -> None:
@@ -122,13 +123,14 @@ def test_concurrent_telemetry_ticks_and_ui_toggles(tmp_path: Path) -> None:
     mock_detector = MagicMock(spec=GameDetector)
     mock_icon = MagicMock()
 
-    app = ExpeditionTrayApp(
+    orchestrator = AppOrchestrator(
         detector=mock_detector,
         rpc_manager=real_rpc,
         auto_install_bridge=False,
         sync_startup=False,
         settings_service=settings_service,
     )
+    app = ExpeditionTrayApp(orchestrator=orchestrator)
     app.icon = mock_icon
 
     stop_event = threading.Event()
@@ -144,7 +146,7 @@ def test_concurrent_telemetry_ticks_and_ui_toggles(tmp_path: Path) -> None:
                     zone_name=f"Zone_{tick_count % 3}",
                     in_combat=(tick_count % 2 == 0),
                 )
-                app.step_update()
+                app.orchestrator.step_update()
                 tick_count += 1
             except Exception as e:
                 errors.append(e)

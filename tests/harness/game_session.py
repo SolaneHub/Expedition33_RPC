@@ -13,9 +13,7 @@ from expedition33_rpc.detection.detector import (
     BridgeStateProvider,
     GameDetector,
     GameState,
-    SaveFileStateProvider,
 )
-from expedition33_rpc.detection.save_reader import SaveFileReader
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
 
 
@@ -59,12 +57,7 @@ class GameSessionSimulator:
         self.current_tower_trial: Any = None
 
         # Telemetry providers and detector
-        self.save_dir = self.root_path / "SaveGames" / "Profile1"
-        self.save_dir.mkdir(parents=True, exist_ok=True)
-        self.save_reader = SaveFileReader(base_save_dir=str(self.root_path / "SaveGames"))
-
         self.bridge_provider = BridgeStateProvider(paths=[str(self.bridge_path)])
-        self.save_provider = SaveFileStateProvider(self.save_reader)
         self.timer_tracker = ZoneTimerTracker()
 
         self._detector: GameDetector | None = None
@@ -152,9 +145,8 @@ class GameSessionSimulator:
         """Creates or returns a GameDetector wired to this simulation session."""
         if self._detector is None:
             self._detector = GameDetector(
-                save_reader=self.save_reader,
                 timer_tracker=self.timer_tracker,
-                providers=[self.bridge_provider, self.save_provider],
+                bridge_provider=self.bridge_provider,
                 process_scanner=lambda: list(self.running_procs),
             )
         return self._detector

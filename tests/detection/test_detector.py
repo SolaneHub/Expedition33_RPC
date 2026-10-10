@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import json
+import os
 import threading
 import time
 from dataclasses import FrozenInstanceError
@@ -17,7 +18,6 @@ from expedition33_rpc.detection.detector import (
     BridgeStateProvider,
     GameDetector,
     GameState,
-    GameStateProvider,
 )
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
 
@@ -241,12 +241,12 @@ def test_bridge_provider_rejects_corrupted_or_partial_json(tmp_path: Path) -> No
 
 @pytest.mark.integration
 @pytest.mark.parametrize("menu_token", ["MainMenu", "bootstrap", "map_game_bootstrap"])
-def test_main_menu_suppression_of_fallback(tmp_path: Path, menu_token: str) -> None:
+def test_main_menu_detection(tmp_path: Path, menu_token: str) -> None:
     mock_proc = FakeProcess(pid=9999, name="Sandfall-Win64-Shipping.exe")
     ini_path = tmp_path / "GameUserSettings.ini"
     ini_path.write_text("[Internationalization]\nLanguage=en\n", encoding="utf-8")
 
-    bridge_provider = MagicMock(spec=GameStateProvider)
+    bridge_provider = MagicMock(spec=BridgeStateProvider)
     bridge_provider.read_game_data.return_value = {
         "raw_zone": menu_token,
         "in_combat": False,
@@ -255,20 +255,12 @@ def test_main_menu_suppression_of_fallback(tmp_path: Path, menu_token: str) -> N
         "checkpoint": "",
     }
 
-    save_provider = MagicMock(spec=GameStateProvider)
-    save_provider.read_game_data.return_value = {
-        "raw_zone": "Level_Main_OldLumiere",
-        "in_combat": False,
-        "enemy_name": "",
-        "tower_floor": None,
-        "checkpoint": "North Gate",
-    }
-
     detector = GameDetector(
-        providers=[bridge_provider, save_provider],
+        bridge_provider=bridge_provider,
         process_scanner=lambda: [mock_proc],
         game_user_settings_path=ini_path,
     )
+
     state = detector.get_game_state()
     assert state.is_running is True
     assert state.zone_name == "Main Menu"
@@ -277,33 +269,35 @@ def test_main_menu_suppression_of_fallback(tmp_path: Path, menu_token: str) -> N
 
 
 @pytest.mark.integration
-def test_save_fallback_used_when_bridge_absent(tmp_path: Path) -> None:
-    mock_proc = FakeProcess(pid=9999, name="Sandfall-Win64-Shipping.exe")
-    ini_path = tmp_path / "GameUserSettings.ini"
-    ini_path.write_text("[Internationalization]\nLanguage=en\n", encoding="utf-8")
-
-    bridge_provider = MagicMock(spec=GameStateProvider)
-    bridge_provider.read_game_data.return_value = None
-
-    save_provider = MagicMock(spec=GameStateProvider)
-    save_provider.read_game_data.return_value = {
-        "raw_zone": "Level_Main_OldLumiere",
-        "in_combat": False,
-        "enemy_name": "",
-        "tower_floor": None,
-        "checkpoint": "Campfire",
+def test_bridge_provider_wall_clock_timeout_rejects_stale_data(tmp_path: Path) -> None:
+    bridge_path = tmp_path / "expedition33_status.json"
+    now = time.time()
+    payload = {
+        "timestamp": now - 10.0,
+        "zone": "Level_Main_OldLumiere",
+        "in_combat": True,
+        "enemy_name": "Duollistes",
     }
+    bridge_path.write_text(json.dumps(payload), encoding="utf-8")
+    provider = BridgeStateProvider(paths=[str(bridge_path)], grace_period=0.0)
 
-    detector = GameDetector(
-        providers=[bridge_provider, save_provider],
-        process_scanner=lambda: [mock_proc],
-        game_user_settings_path=ini_path,
+    # Stale timestamp (>5s difference) is marked invalid
+    assert provider.read_game_data(min_valid_timestamp=now - 20.0) is None
+
+
+@pytest.mark.integration
+def test_bridge_provider_rejects_non_numeric_timestamp(tmp_path: Path) -> None:
+    bridge_path = tmp_path / "expedition33_status.json"
+    provider = BridgeStateProvider(paths=[str(bridge_path)], grace_period=0.0)
+
+    # Non-numeric timestamp is rejected as unparseable
+    bridge_path.write_text(
+        json.dumps(
+            {"timestamp": "invalid_time", "zone": "Level_Main_OldLumiere", "in_combat": True}
+        ),
+        encoding="utf-8",
     )
-    state = detector.get_game_state()
-    assert state.is_running is True
-    assert state.zone_name == "Old Lumiere"
-    assert state.checkpoint_name == "Campfire"
-    save_provider.read_game_data.assert_called_once()
+    assert provider.read_game_data() is None
 
 
 @pytest.mark.unit
@@ -368,7 +362,7 @@ def test_bridge_provider_concurrent_writer_resilience(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_detector_bridge_grace_period_prevents_save_fallback_jitter(tmp_path: Path) -> None:
+def test_detector_bridge_grace_period_prevents_telemetry_jitter(tmp_path: Path) -> None:
     mock_proc = FakeProcess(pid=4321, name="Sandfall-Win64-Shipping.exe")
     ini_path = tmp_path / "GameUserSettings.ini"
     ini_path.write_text("[Internationalization]\nLanguage=en\n", encoding="utf-8")
@@ -387,18 +381,8 @@ def test_detector_bridge_grace_period_prevents_save_fallback_jitter(tmp_path: Pa
         ]
     )
 
-    save_provider = MagicMock(spec=GameStateProvider)
-    save_provider.resolve_raw_checkpoint.return_value = ""
-    save_provider.read_game_data.return_value = {
-        "raw_zone": "Level_WorldMap",
-        "in_combat": False,
-        "enemy_name": "",
-        "tower_floor": None,
-        "checkpoint": "",
-    }
-
     detector = GameDetector(
-        providers=[bridge_provider, save_provider],
+        bridge_provider=bridge_provider,
         process_scanner=lambda: [mock_proc],
         game_user_settings_path=ini_path,
     )
@@ -412,4 +396,79 @@ def test_detector_bridge_grace_period_prevents_save_fallback_jitter(tmp_path: Pa
     st2 = detector.get_game_state()
     assert st2.zone_name == "Old Lumiere"
     assert st2.in_combat is True
-    save_provider.read_game_data.assert_not_called()
+
+
+@pytest.mark.unit
+def test_bridge_retains_checkpoint_across_ticks_for_same_zone() -> None:
+    """Verifies that when BridgeStateProvider has empty checkpoint for same zone, last known checkpoint is retained."""
+    mock_proc = MagicMock()
+    mock_proc.pid = 9999
+    mock_proc.name.return_value = "sandfall-win64-shipping.exe"
+    mock_proc.is_running.return_value = True
+    mock_proc.create_time.return_value = 1000.0
+
+    bridge_provider = MagicMock(spec=BridgeStateProvider)
+
+    # Bridge returns valid data with empty checkpoint
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_Main_OldLumiere",
+        "in_combat": False,
+        "enemy_name": "",
+        "checkpoint": "",
+        "timestamp": time.time(),
+    }
+
+    detector = GameDetector(
+        bridge_provider=bridge_provider,
+        process_scanner=lambda: [mock_proc],
+    )
+
+    # First tick: bridge is active, checkpoint supplied
+    bridge_provider.read_game_data.return_value["checkpoint"] = "Entrance"
+    st1 = detector.get_game_state()
+    assert st1.zone_name == "Old Lumiere"
+    assert st1.checkpoint_name == "Entrance"
+
+    # Second tick: bridge returns empty checkpoint for the same zone;
+    # it must retain the last known checkpoint
+    bridge_provider.read_game_data.return_value["checkpoint"] = ""
+    st2 = detector.get_game_state()
+    assert st2.zone_name == "Old Lumiere"
+    assert st2.checkpoint_name == "Entrance"
+
+    # Third tick: zone changes to Monolith with empty checkpoint; checkpoint should cleanly reset
+    bridge_provider.read_game_data.return_value["raw_zone"] = "Level_Main_Monolith"
+    st3 = detector.get_game_state()
+    assert st3.zone_name == "Monolith"
+    assert st3.checkpoint_name == ""
+
+
+@pytest.mark.unit
+def test_game_process_path_and_win64_dir_propagation(tmp_path: Path) -> None:
+    """Verifies that GameDetector exposes exe_path and win64_dir when game process is detected."""
+    fake_exe = tmp_path / "Binaries" / "Win64" / "sandfall-win64-shipping.exe"
+    fake_exe.parent.mkdir(parents=True, exist_ok=True)
+    fake_exe.write_text("binary", encoding="utf-8")
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 7777
+    mock_proc.name.return_value = "sandfall-win64-shipping.exe"
+    mock_proc.is_running.return_value = True
+    mock_proc.create_time.return_value = 1000.0
+    mock_proc.exe.return_value = str(fake_exe)
+
+    detector = GameDetector(
+        process_scanner=lambda: [mock_proc],
+    )
+
+    assert detector.game_exe_path is None
+    assert detector.game_win64_dir is None
+    assert detector.exe_path is None
+    assert detector.win64_dir is None
+
+    proc = detector.find_game_process()
+    assert proc is mock_proc
+    assert detector.game_exe_path == os.path.normpath(str(fake_exe))
+    assert detector.game_win64_dir == fake_exe.parent
+    assert detector.exe_path == os.path.normpath(str(fake_exe))
+    assert detector.win64_dir == fake_exe.parent

@@ -13,10 +13,8 @@ from pystray import Menu, MenuItem
 
 from expedition33_rpc.core.orchestrator import AppOrchestrator
 from expedition33_rpc.core.resources import get_resource_path
-from expedition33_rpc.core.settings import SettingsService
-from expedition33_rpc.detection.detector import GameDetector, GameState
-from expedition33_rpc.integrations.discord_rpc import DiscordRPCManager
-from expedition33_rpc.integrations.updater import AppUpdater, UpdateInfo, UpdateState
+from expedition33_rpc.detection.detector import GameState
+from expedition33_rpc.integrations.updater import UpdateInfo
 from expedition33_rpc.ui.presentation import (
     format_tray_combat_status,
     format_tray_title,
@@ -31,53 +29,35 @@ class ExpeditionTrayApp:
         self,
         script_dir: str = "",
         orchestrator: AppOrchestrator | None = None,
-        *,
-        detector: GameDetector | None = None,
-        rpc_manager: DiscordRPCManager | None = None,
-        updater: AppUpdater | None = None,
-        settings_service: SettingsService | None = None,
-        auto_install_bridge: bool = False,
-        sync_startup: bool = False,
     ):
         self.script_dir = script_dir
         self._menu_lock = threading.Lock()
         self.icon: Any = None
         self._last_menu_state: tuple[Any, ...] | None = None
 
-        if orchestrator is not None:
-            self.orchestrator = orchestrator
-            if orchestrator.on_state_change is not None:
-                orig_on_change = orchestrator.on_state_change
+        self.orchestrator = orchestrator if orchestrator is not None else AppOrchestrator()
 
-                def chained_on_change(st: GameState, sp: bool) -> None:
-                    self.on_orchestrator_state_change(st, sp)
-                    orig_on_change(st, sp)
+        existing_state_change = getattr(self.orchestrator, "on_state_change", None)
+        if existing_state_change is not None:
 
-                self.orchestrator.on_state_change = chained_on_change
-            else:
-                self.orchestrator.on_state_change = self.on_orchestrator_state_change
+            def chained_state_change(st: GameState, sp: bool) -> None:
+                existing_state_change(st, sp)
+                self.on_orchestrator_state_change(st, sp)
 
-            if orchestrator.on_update_available is not None:
-                orig_on_update = orchestrator.on_update_available
-
-                def chained_on_update(info: UpdateInfo) -> None:
-                    self.on_update_available(info)
-                    orig_on_update(info)
-
-                self.orchestrator.on_update_available = chained_on_update
-            else:
-                self.orchestrator.on_update_available = self.on_update_available
+            self.orchestrator.on_state_change = chained_state_change
         else:
-            self.orchestrator = AppOrchestrator(
-                detector=detector,
-                rpc_manager=rpc_manager,
-                updater=updater,
-                settings_service=settings_service,
-                auto_install_bridge=auto_install_bridge,
-                sync_startup=sync_startup,
-                on_state_change=self.on_orchestrator_state_change,
-                on_update_available=self.on_update_available,
-            )
+            self.orchestrator.on_state_change = self.on_orchestrator_state_change
+
+        existing_update = getattr(self.orchestrator, "on_update_available", None)
+        if existing_update is not None:
+
+            def chained_update(info: UpdateInfo) -> None:
+                existing_update(info)
+                self.on_update_available(info)
+
+            self.orchestrator.on_update_available = chained_update
+        else:
+            self.orchestrator.on_update_available = self.on_update_available
 
     def _safe_update_menu(self) -> None:
         if self.icon is not None:
@@ -95,7 +75,7 @@ class ExpeditionTrayApp:
                 state.tower_floor,
                 state.tower_stage_trial,
                 state.checkpoint_name,
-                self.orchestrator.rpc_manager.is_connected,
+                self.orchestrator.is_rpc_connected(),
                 anti_spoiler,
             )
             if menu_state != self._last_menu_state:
@@ -124,10 +104,6 @@ class ExpeditionTrayApp:
         # Controlled fallback: 64x64 solid golden icon without binary blobs
         return Image.new("RGBA", (64, 64), color=(212, 175, 55, 255))
 
-    def step_update(self) -> GameState | None:
-        """Delegates synchronous polling tick to the application orchestrator."""
-        return self.orchestrator.step_update()
-
     def menu_game_status(self, *_) -> str:
         if self.orchestrator.current_state.is_running:
             return f"Game: Running (PID: {self.orchestrator.current_state.process_pid})"
@@ -136,22 +112,22 @@ class ExpeditionTrayApp:
     def menu_zone_status(self, *_) -> str:
         return format_tray_zone_status(
             self.orchestrator.current_state,
-            anti_spoiler=self.orchestrator.settings_service.is_anti_spoiler_enabled(),
+            anti_spoiler=self.orchestrator.is_anti_spoiler_enabled(),
         )
 
     def menu_combat_status(self, *_) -> str:
         return format_tray_combat_status(
             self.orchestrator.current_state,
-            anti_spoiler=self.orchestrator.settings_service.is_anti_spoiler_enabled(),
+            anti_spoiler=self.orchestrator.is_anti_spoiler_enabled(),
         )
 
     def menu_discord_status(self, *_) -> str:
-        if self.orchestrator.rpc_manager.is_connected:
+        if self.orchestrator.is_rpc_connected():
             return "Discord: Connected"
         return "Discord: Standby (Listening)"
 
     def menu_anti_spoiler_toggle(self, *_) -> str:
-        if self.orchestrator.settings_service.is_anti_spoiler_enabled():
+        if self.orchestrator.is_anti_spoiler_enabled():
             return "Anti-Spoiler Mode  [Enabled]"
         return "Anti-Spoiler Mode  [Disabled]"
 
@@ -179,19 +155,10 @@ class ExpeditionTrayApp:
         self._safe_update_menu()
 
     def menu_update_status(self, *_) -> str:
-        return self.orchestrator.updater.get_status_text()
+        return self.orchestrator.get_updater_status_text()
 
     def action_update_click(self, *_):
-        if self.orchestrator.updater.state == UpdateState.AVAILABLE:
-            self.orchestrator.updater.open_release_page()
-        elif self.orchestrator.updater.state in (
-            UpdateState.IDLE,
-            UpdateState.UP_TO_DATE,
-            UpdateState.ERROR,
-        ):
-            self.orchestrator.updater.check_in_background(
-                delay_seconds=0.0, on_complete=self.orchestrator.on_update_check_complete
-            )
+        self.orchestrator.trigger_update_action()
 
     def action_exit(self, *_):
         self.orchestrator.stop()
@@ -225,20 +192,6 @@ class ExpeditionTrayApp:
             menu=self.create_menu(),
         )
         if self.icon is not None:
-            # Hook Win32 notification to guarantee menu items refresh dynamically on every right click
-            icon_obj: Any = self.icon
-            orig_on_notify = getattr(icon_obj, "_on_notify", None)
-            if callable(orig_on_notify):
-
-                def hooked_on_notify(wparam: Any, lparam: Any) -> Any:
-                    # 517 is WM_RBUTTONUP (right mouse button released on tray icon)
-                    if lparam == 517 and self.icon is not None:
-                        with contextlib.suppress(Exception):
-                            self.icon.update_menu()
-                    return orig_on_notify(wparam, lparam)
-
-                icon_obj._on_notify = hooked_on_notify
-
             self.icon.run()
 
 

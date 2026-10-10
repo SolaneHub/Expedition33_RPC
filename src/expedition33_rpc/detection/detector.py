@@ -3,24 +3,27 @@ from __future__ import annotations
 import json
 import os
 import time
-from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, override, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import psutil
 
+from expedition33_rpc.detection.compat_paths import (
+    get_telemetry_file_path,
+    get_telemetry_file_paths,
+)
 from expedition33_rpc.detection.game_data import TARGET_PROCESS_NAME
 from expedition33_rpc.detection.normalization import (
     format_checkpoint_tag,
     format_enemy_name,
     format_zone_name,
-    is_main_menu,
+    is_continent_zone,
+    is_menu_zone,
     resolve_tower_trial,
     strip_accents,
 )
-from expedition33_rpc.detection.save_reader import SaveFileReader
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
 
 type TowerTrial = tuple[int, int] | str
@@ -39,6 +42,9 @@ class ProcessLike(Protocol):
     def create_time(self) -> float: ...
 
     def is_running(self) -> bool: ...
+
+
+_UNSET = object()
 
 
 @dataclass(frozen=True)
@@ -72,7 +78,7 @@ class GameState:
         enemies: list[str] | None = None,
         raw_checkpoint: str = "",
         tower_floor: int | None = None,
-        tower_stage_trial: TowerTrial | None = None,
+        tower_stage_trial: TowerTrial | None | object = _UNSET,
         current_tower_trial: TowerTrial | None = None,
         zone_name: str | None = None,
         checkpoint_name: str | None = None,
@@ -87,36 +93,25 @@ class GameState:
             resolved_zone = format_zone_name(raw_zone, game_language)
 
         # 2. Enemy name & tower trial
-        is_tower = any(k in (raw_zone or resolved_zone).lower() for k in ("torre", "tower", "clea"))
         final_enemy = ""
-        trial_info = tower_stage_trial if tower_stage_trial is not None else current_tower_trial
+        trial_resolved = tower_stage_trial is not _UNSET
+        trial_info: TowerTrial | None = (
+            tower_stage_trial  # type: ignore
+            if trial_resolved
+            else current_tower_trial
+        )
 
         effective_enemy = enemy_name or (", ".join(enemies) if enemies else "")
         if effective_enemy or enemies:
-            if is_tower:
-                if tower_stage_trial is not None:
-                    trial_info = tower_stage_trial
-                    final_enemy = format_enemy_name(effective_enemy)
-                else:
-                    t_info, clean_enemy = resolve_tower_trial(effective_enemy, enemies=enemies)
-                    if t_info and not trial_info:
-                        trial_info = t_info
-                    final_enemy = clean_enemy if clean_enemy else format_enemy_name(effective_enemy)
-            else:
-                final_enemy = format_enemy_name(effective_enemy)
+            final_enemy = format_enemy_name(effective_enemy)
 
         # 3. Checkpoint name
         if checkpoint_name is not None:
             resolved_cp = checkpoint_name
         else:
             resolved_cp = ""
-            is_menu = is_main_menu(raw_zone, resolved_zone)
-            is_continent = (
-                "worldmap" in raw_zone.lower()
-                or raw_zone.lower().strip() in ("main", "the continent", "il continente")
-                or "continent" in raw_zone.lower()
-                or "continente" in raw_zone.lower()
-            )
+            is_menu = is_menu_zone(raw_zone, resolved_zone)
+            is_continent = is_continent_zone(raw_zone, resolved_zone)
             if not is_menu and not is_continent and raw_checkpoint:
                 resolved_cp = format_checkpoint_tag(
                     raw_checkpoint,
@@ -154,42 +149,18 @@ class GameState:
         )
 
 
-class GameStateProvider(ABC):
-    """Abstract Strategy interface for querying game presence telemetry."""
-
-    def reset(self) -> None:
-        """Resets cached or grace-period state when game terminates."""
-        return None
-
-    @abstractmethod
-    def read_game_data(
-        self, min_valid_timestamp: float | None = None, lang: str = "en"
-    ) -> RawGameData | None:
-        """Reads raw, un-normalized game telemetry from the provider."""
-        pass
-
-    def resolve_raw_checkpoint(self, raw_zone: str) -> str:
-        """Resolves raw checkpoint tag for a zone if supported by this provider."""
-        del raw_zone
-        return ""
-
-
-class BridgeStateProvider(GameStateProvider):
+class BridgeStateProvider:
     """Reads real-time in-game telemetry provided by the UE4SS Lua bridge mod via IPC JSON."""
 
     def __init__(self, paths: list[str] | None = None, grace_period: float = 2.5):
         if paths is not None:
             self.paths = list(paths)
         else:
-            self.paths = [
-                os.path.expandvars(r"%TEMP%\expedition33_status.json"),
-                os.path.expandvars(r"%LOCALAPPDATA%\Sandfall\rpc_status.json"),
-            ]
+            self.paths = get_telemetry_file_paths()
         self.grace_period = grace_period
         self._last_valid_data: RawGameData | None = None
         self._last_valid_time: float = 0.0
 
-    @override
     def reset(self) -> None:
         self._last_valid_data = None
         self._last_valid_time = 0.0
@@ -216,7 +187,6 @@ class BridgeStateProvider(GameStateProvider):
                     break
         return None
 
-    @override
     def read_game_data(
         self, min_valid_timestamp: float | None = None, lang: str = "en"
     ) -> RawGameData | None:
@@ -225,10 +195,13 @@ class BridgeStateProvider(GameStateProvider):
         if bridge:
             bridge_ts = bridge.get("timestamp")
             is_fresh = True
-            if bridge_ts is not None and min_valid_timestamp is not None:
+            now = time.time()
+            if bridge_ts is not None:
                 try:
                     ts_val = float(bridge_ts)
-                    if ts_val < (min_valid_timestamp - 10):
+                    if abs(now - ts_val) > 5.0 or (
+                        min_valid_timestamp is not None and ts_val < (min_valid_timestamp - 10)
+                    ):
                         is_fresh = False
                 except Exception:
                     is_fresh = False
@@ -276,6 +249,9 @@ class BridgeStateProvider(GameStateProvider):
                 self._last_valid_data = data
                 self._last_valid_time = time.time()
                 return data
+            else:
+                self._last_valid_data = None
+                return None
 
         # Transient glitch grace period encapsulated inside bridge provider
         if (
@@ -287,100 +263,28 @@ class BridgeStateProvider(GameStateProvider):
         return None
 
 
-class SaveFileStateProvider(GameStateProvider):
-    """Fallback provider that extracts zone and checkpoint locations from Unreal Engine .sav files.
-
-    Passive fallback contract:
-    - Provides non-intrusive disk inspection when active bridge IPC telemetry is inactive.
-    - If min_valid_timestamp is provided and save files predate process launch, indicates
-      the user is at game startup / Main Menu before loading a save.
-    """
-
-    def __init__(self, save_reader: SaveFileReader):
-        self.save_reader = save_reader
-
-    @override
-    def resolve_raw_checkpoint(self, raw_zone: str) -> str:
-        """Finds matching checkpoint tag using the SaveFileReader index."""
-        save_dir = self.save_reader.get_latest_save_dir()
-        if not save_dir:
-            return ""
-
-        cp_lvl, cp_tag = self.save_reader.read_checkpoint_from_save(save_dir)
-        zone_disp = format_zone_name(raw_zone)
-        if cp_tag and self.save_reader.is_checkpoint_for_zone(
-            cp_lvl or "", cp_tag, raw_zone, zone_disp
-        ):
-            return cp_tag
-
-        return ""
-
-    @override
-    def read_game_data(
-        self, min_valid_timestamp: float | None = None, lang: str = "en"
-    ) -> RawGameData | None:
-        del lang
-        save_dir = self.save_reader.get_latest_save_dir()
-        if not save_dir:
-            return None
-
-        # Check if process launched and save file strictly predates process start time
-        if min_valid_timestamp is not None:
-            try:
-                container = os.path.join(save_dir, "SavesContainer.sav")
-                if os.path.exists(container):
-                    save_mtime = os.path.getmtime(container)
-                else:
-                    sav_files = list(Path(save_dir).glob("*.sav"))
-                    if sav_files:
-                        save_mtime = max(p.stat().st_mtime for p in sav_files)
-                    else:
-                        save_mtime = os.path.getmtime(save_dir)
-                if save_mtime < min_valid_timestamp:
-                    return {
-                        "raw_zone": "MainMenu",
-                        "in_combat": False,
-                        "enemy_name": "",
-                        "enemies": [],
-                        "tower_floor": None,
-                        "tower_trial": None,
-                        "checkpoint": "",
-                    }
-            except Exception:
-                pass
-
-        raw_zone = self.save_reader.read_zone_from_saves(save_dir) or ""
-        raw_checkpoint = self.resolve_raw_checkpoint(raw_zone) if raw_zone else ""
-
-        return {
-            "raw_zone": raw_zone,
-            "in_combat": False,
-            "enemy_name": "",
-            "enemies": [],
-            "tower_floor": None,
-            "tower_trial": None,
-            "checkpoint": raw_checkpoint,
-        }
-
-
 class GameDetector:
     """Orchestrates game process detection, telemetry providers, and zone timing."""
 
     def __init__(
         self,
-        base_save_dir: str | None = None,
-        save_reader: SaveFileReader | None = None,
         timer_tracker: ZoneTimerTracker | None = None,
-        providers: list[GameStateProvider] | None = None,
+        bridge_provider: BridgeStateProvider | None | object = _UNSET,
         process_scanner: Callable[[], Iterable[ProcessLike]] | None = None,
         target_process_name: str | None = None,
         game_user_settings_path: Path | str | None = None,
     ):
         self.cached_pid: int | None = None
         self.game_start_time: float | None = None
+        self.game_exe_path: str | None = None
+        self.game_win64_dir: Path | None = None
         self.last_zone: str = "Exploring"
         self.last_raw_zone: str = ""
+        self.last_raw_checkpoint: str = ""
         self.current_tower_trial: tuple[int, int] | str | None = None
+        self._cached_language: str = "en"
+        self._last_ini_mtime: float | None = None
+        self._last_ini_path: Path | None = None
         self._game_user_settings_path: Path | None = (
             Path(game_user_settings_path) if game_user_settings_path is not None else None
         )
@@ -391,16 +295,43 @@ class GameDetector:
         )
 
         # Components
-        effective_reader = save_reader if save_reader is not None else SaveFileReader(base_save_dir)
         self.timer_tracker = timer_tracker if timer_tracker is not None else ZoneTimerTracker()
         self.process_scanner = process_scanner
 
-        # Polymorphic Telemetry Providers Pipeline (Bridge IPC -> Save File)
-        self.providers: list[GameStateProvider] = (
-            list(providers)
-            if providers is not None
-            else [BridgeStateProvider(), SaveFileStateProvider(effective_reader)]
-        )
+        # Telemetry Provider (Bridge IPC)
+        if bridge_provider is _UNSET:
+            self.bridge_provider: BridgeStateProvider | None = BridgeStateProvider()
+        else:
+            self.bridge_provider = (  # type: ignore[assignment]
+                bridge_provider
+                if isinstance(bridge_provider, BridgeStateProvider)
+                else None
+                if bridge_provider is None
+                else bridge_provider  # type: ignore
+            )
+
+    @property
+    def exe_path(self) -> str | None:
+        """Returns the detected executable path of the running game process."""
+        return self.game_exe_path
+
+    @property
+    def win64_dir(self) -> Path | None:
+        """Returns the detected Win64 directory of the running game process."""
+        return self.game_win64_dir
+
+    def _resolve_and_cache_process_paths(self, proc: ProcessLike) -> None:
+        if self.game_win64_dir is not None:
+            return
+        try:
+            exe_func = getattr(proc, "exe", None)
+            exe = exe_func() if callable(exe_func) else exe_func
+            if exe and isinstance(exe, str) and os.path.exists(exe):
+                self.game_exe_path = os.path.normpath(exe)
+                candidate = os.path.dirname(self.game_exe_path)
+                self.game_win64_dir = Path(candidate)
+        except Exception:
+            pass
 
     def find_game_process(self) -> ProcessLike | None:
         """Finds game process using cached PID validation or fast name-only process iteration."""
@@ -414,6 +345,7 @@ class GameDetector:
                             and p.is_running()
                             and p.name().lower() == self.target_process_name
                         ):
+                            self._resolve_and_cache_process_paths(p)
                             return p
                 except Exception:
                     pass
@@ -421,10 +353,13 @@ class GameDetector:
                 try:
                     proc = psutil.Process(self.cached_pid)
                     if proc.is_running() and proc.name().lower() == self.target_process_name:
+                        self._resolve_and_cache_process_paths(proc)
                         return proc
                 except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
                     pass
             self.cached_pid = None
+            self.game_exe_path = None
+            self.game_win64_dir = None
 
         # 2. Optimized global enumeration: request only name and pid, avoid create_time on all processes
         try:
@@ -441,6 +376,7 @@ class GameDetector:
                 proc_name = proc.name()
                 if proc_name and proc_name.lower() == self.target_process_name:
                     self.cached_pid = proc.pid
+                    self._resolve_and_cache_process_paths(proc)
                     if not self.game_start_time:
                         try:
                             self.game_start_time = float(proc.create_time())
@@ -449,44 +385,60 @@ class GameDetector:
                     return proc
             except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
                 continue
+        self.game_exe_path = None
+        self.game_win64_dir = None
         return None
 
     def get_game_language(self, ini_path: Path | str | None = None) -> str:
-        """Extracts configured UI language from GameUserSettings.ini."""
+        """Extracts configured UI language from GameUserSettings.ini with mtime caching."""
         target_ini = ini_path or self._game_user_settings_path
         if target_ini is None:
             target_ini = os.path.expandvars(
                 r"%LOCALAPPDATA%\Sandfall\Saved\Config\Windows\GameUserSettings.ini"
             )
         ini_file = Path(target_ini)
-        if ini_file.is_file():
-            try:
+        try:
+            if ini_file.is_file():
+                current_mtime = ini_file.stat().st_mtime
+                if self._last_ini_path == ini_file and self._last_ini_mtime == current_mtime:
+                    return self._cached_language
+
+                lang = "en"
                 with open(ini_file, encoding="utf-8", errors="ignore") as f:
                     for line in f:
                         line = line.strip()
                         if line.startswith("Language="):
                             val = line.split("=", 1)[1].strip().strip('"').strip("'").lower()
                             if val:
-                                return val
-            except Exception:
-                pass
-        return "en"
+                                lang = val
+                                break
+                self._cached_language = lang
+                self._last_ini_mtime = current_mtime
+                self._last_ini_path = ini_file
+                return lang
+        except Exception:
+            pass
+        return self._cached_language
 
     def get_game_state(self) -> GameState:
         """Executes a full detection cycle returning an immutable GameState snapshot."""
         proc = self.find_game_process()
-        lang = self.get_game_language()
 
         if not proc:
             self.cached_pid = None
             self.game_start_time = None
+            self.game_exe_path = None
+            self.game_win64_dir = None
             self.current_tower_trial = None
             self.last_zone = "Exploring"
             self.last_raw_zone = ""
-            for provider in self.providers:
-                provider.reset()
+            self.last_raw_checkpoint = ""
+            if self.bridge_provider is not None:
+                self.bridge_provider.reset()
             self.timer_tracker.reset()
-            return GameState(is_running=False, game_language=lang)
+            return GameState(is_running=False, game_language=self._cached_language)
+
+        lang = self.get_game_language()
 
         # Extract process creation time safely only for the matched process
         proc_create_time: float | None = None
@@ -495,12 +447,12 @@ class GameDetector:
         except Exception:
             proc_create_time = None
 
-        # Query configured telemetry providers polymorphic pipeline
-        data: RawGameData | None = None
-        for provider in self.providers:
-            data = provider.read_game_data(min_valid_timestamp=proc_create_time, lang=lang)
-            if data:
-                break
+        # Query configured telemetry provider
+        data: RawGameData | None = (
+            self.bridge_provider.read_game_data(min_valid_timestamp=proc_create_time, lang=lang)
+            if self.bridge_provider is not None
+            else None
+        )
 
         raw_zone = ""
         in_combat = False
@@ -517,43 +469,48 @@ class GameDetector:
             tower_floor = data.get("tower_floor")
             raw_checkpoint = str(data.get("checkpoint", "") or "")
 
-            if is_main_menu(raw_zone):
+            if is_menu_zone(raw_zone):
                 raw_checkpoint = ""
                 in_combat = False
 
-        is_menu = is_main_menu(raw_zone)
-        is_continent = (
-            "worldmap" in raw_zone.lower()
-            or raw_zone.lower().strip() in ("main", "the continent", "il continente")
-            or "continent" in raw_zone.lower()
-            or "continente" in raw_zone.lower()
-        )
+        is_menu = is_menu_zone(raw_zone)
+        is_continent = is_continent_zone(raw_zone)
 
-        # Checkpoint resolution via providers if not supplied by the active telemetry source
+        # Checkpoint resolution via active telemetry source
         if is_menu or is_continent:
             raw_checkpoint = ""
-        elif not raw_checkpoint and raw_zone:
-            for provider in self.providers:
-                resolved_cp = provider.resolve_raw_checkpoint(raw_zone)
-                if resolved_cp and isinstance(resolved_cp, str):
-                    raw_checkpoint = resolved_cp
-                    break
+            self.last_raw_checkpoint = ""
+        elif raw_checkpoint:
+            self.last_raw_checkpoint = raw_checkpoint
+        else:
+            if raw_zone and raw_zone == self.last_raw_zone:
+                raw_checkpoint = self.last_raw_checkpoint
+            else:
+                raw_checkpoint = ""
+                self.last_raw_checkpoint = ""
+
+        self.last_raw_zone = raw_zone
 
         # Track Endless Tower stage and trial
         is_tower = any(k in raw_zone.lower() for k in ("torre", "tower", "clea"))
+        effective_enemy = raw_enemy
         if is_tower and in_combat:
             bridge_trial = data.get("tower_trial") if data else None
             if bridge_trial:
                 self.current_tower_trial = bridge_trial
             elif raw_enemy or raw_enemies:
-                trial_info, _clean_enemy = resolve_tower_trial(raw_enemy, enemies=raw_enemies)
-                if trial_info:
-                    self.current_tower_trial = trial_info
+                trial_info, clean_enemy = resolve_tower_trial(raw_enemy, enemies=raw_enemies)
+                self.current_tower_trial = trial_info
+                if clean_enemy:
+                    effective_enemy = clean_enemy
+            else:
+                self.current_tower_trial = None
         elif not in_combat:
             self.current_tower_trial = None
 
         # Determine zone key and update state timing machine
         zone_key = raw_zone.strip() or "Exploring"
+        self.last_zone = zone_key
         if zone_key in (
             "Exploring",
             "In esplorazione",
@@ -574,10 +531,11 @@ class GameDetector:
             game_language=lang,
             raw_zone=raw_zone,
             in_combat=in_combat,
-            enemy_name=raw_enemy,
+            enemy_name=effective_enemy,
             enemies=raw_enemies,
             raw_checkpoint=raw_checkpoint,
             tower_floor=tower_floor,
+            tower_stage_trial=self.current_tower_trial,
             current_tower_trial=self.current_tower_trial,
         )
 
@@ -585,9 +543,7 @@ class GameDetector:
 __all__ = [
     "ProcessLike",
     "GameState",
-    "GameStateProvider",
     "BridgeStateProvider",
-    "SaveFileStateProvider",
     "GameDetector",
     "format_checkpoint_tag",
     "format_enemy_name",
@@ -595,4 +551,6 @@ __all__ = [
     "resolve_tower_trial",
     "strip_accents",
     "TARGET_PROCESS_NAME",
+    "get_telemetry_file_path",
+    "get_telemetry_file_paths",
 ]

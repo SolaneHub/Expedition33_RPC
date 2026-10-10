@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from typing import Any
 
 from expedition33_rpc.detection.game_data import (
     CHECKPOINT_NAMES_EN,
@@ -40,15 +41,33 @@ def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
     return "menu" in raw_lower or "menu" in display_lower
 
 
-def is_menu_zone(raw_zone: str | None = None, zone_name: str | None = None) -> bool:
-    """Detects if raw_zone or zone_name indicates a main menu or title screen."""
-    return is_main_menu(raw_zone, zone_name)
+def is_menu_zone(
+    raw_zone_or_state: Any = None,
+    zone_name: str | None = None,
+    *,
+    raw_zone: str | None = None,
+) -> bool:
+    """Detects if raw_zone, zone_name, or a GameState indicates a main menu or title screen."""
+    target = raw_zone if raw_zone is not None else raw_zone_or_state
+    if hasattr(target, "raw_zone"):
+        return is_main_menu(getattr(target, "raw_zone", None), getattr(target, "zone_name", None))
+    return is_main_menu(target, zone_name)
 
 
-def is_continent_zone(raw_zone: str | None = None, zone_name: str | None = None) -> bool:
-    """Detects if current location strings represent the world map / continent."""
-    raw = (raw_zone or "").lower()
-    zone = (zone_name or "").lower()
+def is_continent_zone(
+    raw_zone_or_state: Any = None,
+    zone_name: str | None = None,
+    *,
+    raw_zone: str | None = None,
+) -> bool:
+    """Detects if current location strings or a GameState represent the world map / continent."""
+    target = raw_zone if raw_zone is not None else raw_zone_or_state
+    if hasattr(target, "raw_zone"):
+        raw = (getattr(target, "raw_zone", "") or "").lower()
+        zone = (getattr(target, "zone_name", None) or "").lower()
+    else:
+        raw = (target or "").lower()
+        zone = (zone_name or "").lower()
     return "continent" in zone or "continente" in zone or "worldmap" in raw
 
 

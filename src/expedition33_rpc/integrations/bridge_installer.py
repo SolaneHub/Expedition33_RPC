@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import contextlib
 import os
 import shutil
 import zipfile
+from pathlib import Path
 
 import psutil
 
@@ -14,8 +17,25 @@ except ImportError:
     winreg = None
 
 
-def find_game_win64_directory(target_process_name: str | None = None) -> str | None:
+def find_game_win64_directory(
+    target_process_name: str | None = None,
+    known_win64_dir: Path | str | None = None,
+    known_exe_path: Path | str | None = None,
+) -> str | None:
     """Locates Clair Obscur: Expedition 33 Win64 directory via active processes or Steam libraries."""
+    if known_win64_dir and os.path.isdir(known_win64_dir):
+        return os.path.normpath(str(known_win64_dir))
+    if known_exe_path and os.path.exists(known_exe_path):
+        candidate = (
+            os.path.dirname(os.path.normpath(str(known_exe_path)))
+            if os.path.isfile(known_exe_path)
+            else os.path.normpath(str(known_exe_path))
+        )
+        if os.path.isdir(candidate):
+            return candidate
+    if target_process_name and os.path.isdir(target_process_name):
+        return os.path.normpath(target_process_name)
+
     target_name = (
         target_process_name.strip().lower()
         if target_process_name is not None
@@ -158,9 +178,19 @@ def _update_mods_txt_for_uninstall(mods_txt_path: str) -> bool:
     return other_mods_active
 
 
-def is_bridge_installed(win64_dir: str | None = None) -> bool:
+def _resolve_target_dir(win64_dir: Path | str | None = None) -> str | None:
+    if win64_dir:
+        norm = os.path.normpath(str(win64_dir))
+        if os.path.isfile(norm):
+            return os.path.dirname(norm)
+        if os.path.isdir(norm):
+            return norm
+    return find_game_win64_directory(known_win64_dir=win64_dir)
+
+
+def is_bridge_installed(win64_dir: Path | str | None = None) -> bool:
     """Checks whether the UE4SS combat bridge files are present in the game directory."""
-    target_dir = win64_dir or find_game_win64_directory()
+    target_dir = _resolve_target_dir(win64_dir)
     if not target_dir or not os.path.isdir(target_dir):
         return False
 
@@ -169,9 +199,9 @@ def is_bridge_installed(win64_dir: str | None = None) -> bool:
     return os.path.exists(dwmapi) and os.path.exists(lua_script)
 
 
-def install_bridge(win64_dir: str | None = None) -> tuple[bool, str]:
+def install_bridge(win64_dir: Path | str | None = None) -> tuple[bool, str]:
     """Surgically extracts and configures the embedded UE4SS bridge without overwriting third-party mods."""
-    target_dir = win64_dir or find_game_win64_directory()
+    target_dir = _resolve_target_dir(win64_dir)
     if not target_dir or not os.path.isdir(target_dir):
         return False, "Game directory not found. Please launch the game once to detect it."
 
@@ -211,9 +241,9 @@ def install_bridge(win64_dir: str | None = None) -> tuple[bool, str]:
         return False, f"Error during bridge installation: {e}"
 
 
-def uninstall_bridge(win64_dir: str | None = None) -> tuple[bool, str]:
+def uninstall_bridge(win64_dir: Path | str | None = None) -> tuple[bool, str]:
     """Surgically removes the bridge mod while preserving UE4SS and other active third-party mods."""
-    target_dir = win64_dir or find_game_win64_directory()
+    target_dir = _resolve_target_dir(win64_dir)
     if not target_dir or not os.path.isdir(target_dir):
         return False, "Game directory not found."
 

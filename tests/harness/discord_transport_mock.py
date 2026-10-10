@@ -14,6 +14,7 @@ import struct
 import sys
 import tempfile
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -37,8 +38,10 @@ class MockDiscordServer:
         self,
         pipe_path: str | None = None,
         handler: Callable[[int, dict[str, Any]], tuple[int, dict[str, Any]] | None] | None = None,
+        simulate_freeze: bool = False,
     ) -> None:
         self.handler = handler
+        self.simulate_freeze = simulate_freeze
         self._lock = threading.Lock()
         self._ready_event = threading.Event()
         self._running = False
@@ -209,11 +212,17 @@ class MockDiscordServer:
                         with self._lock:
                             self.received_frames.append((op, payload))
 
+                        if self.simulate_freeze:
+                            while self._running:
+                                time.sleep(0.05)
+                            break
+
                         resp = (
                             self.handler(op, payload)
                             if self.handler
                             else self._default_handler(op, payload)
                         )
+
                         if resp is not None:
                             resp_op, resp_payload = resp
                             resp_data = json.dumps(resp_payload, separators=(",", ":")).encode(
@@ -291,11 +300,17 @@ class MockDiscordServer:
                         with self._lock:
                             self.received_frames.append((op, payload))
 
+                        if self.simulate_freeze:
+                            while self._running:
+                                time.sleep(0.05)
+                            break
+
                         resp = (
                             self.handler(op, payload)
                             if self.handler
                             else self._default_handler(op, payload)
                         )
+
                         if resp is not None:
                             resp_op, resp_payload = resp
                             resp_data = json.dumps(resp_payload, separators=(",", ":")).encode(

@@ -38,6 +38,9 @@ jobs:
       - name: Type Check (Pyright)
         run: uv run pyright
 
+      - name: Fast Unit Tests Fail-Fast
+        run: uv run pytest -m unit
+
       - name: Run Tests (pytest)
         run: uv run pytest
 

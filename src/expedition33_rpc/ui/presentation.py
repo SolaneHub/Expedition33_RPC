@@ -12,10 +12,8 @@ if TYPE_CHECKING:
     from expedition33_rpc.detection.detector import GameState
 
 from expedition33_rpc.detection.normalization import (
-    is_continent_zone as norm_is_continent_zone,
-)
-from expedition33_rpc.detection.normalization import (
-    is_main_menu,
+    is_continent_zone,
+    is_menu_zone,
 )
 
 DISCORD_MAX_FIELD_LENGTH = 128
@@ -29,16 +27,6 @@ def truncate_presence_field(text: str, max_length: int = DISCORD_MAX_FIELD_LENGT
     if len(text) <= max_length:
         return text
     return text[:max_length]
-
-
-def is_menu_zone(game_state: GameState) -> bool:
-    """Detects if the game is currently on a main menu or title screen."""
-    return is_main_menu(game_state.raw_zone, game_state.zone_name)
-
-
-def is_continent_zone(game_state: GameState) -> bool:
-    """Detects if current location is the world map / continent."""
-    return norm_is_continent_zone(game_state.raw_zone, game_state.zone_name)
 
 
 def format_location_name(game_state: GameState) -> str:

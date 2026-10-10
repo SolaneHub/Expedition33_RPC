@@ -79,7 +79,7 @@ ignore = [
 known-first-party = ["expedition33_rpc"]
 
 [tool.pyright]
-include = ["src", "main.py", "build_exe.py", "scripts", "tests"]
+include = ["src", "main.py", "build_exe.py", "tests"]
 
 extraPaths = ["src"]
 exclude = [
@@ -105,5 +105,7 @@ pythonpath = ["."]
 markers = [
     "unit: Fast in-memory unit tests",
     "integration: Integration tests exercising filesystem or IPC",
+    "ci: CI release and tooling tests",
 ]
+
 

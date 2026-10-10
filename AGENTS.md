@@ -32,14 +32,15 @@ The repository follows a clean, modular structure under `src/expedition33_rpc/`:
 src/expedition33_rpc/
 ├── core/                   # Application lifecycle and core utilities
 │   ├── app.py              # Single instance mutex/file lock and app entrypoint
+│   ├── orchestrator.py     # Headless AppOrchestrator coordinator with facade and pub/sub
 │   ├── settings.py         # Persistent JSON configuration with legacy registry migration
 │   ├── startup.py          # Windows autostart (Run registry key) management
 │   └── resources.py        # Bundled asset path resolution (PyInstaller _MEIPASS)
 ├── detection/              # Game state detection and telemetry pipelines
+│   ├── compat_paths.py     # Cross-platform IPC paths (Windows, Linux, Steam Deck Proton)
 │   ├── detector.py         # GameDetector coordinating telemetry providers and immutable GameState
 │   ├── normalization.py    # Pure domain string normalization and location formatting
-│   ├── game_data.py        # Static name dictionaries (EN/IT), regexes, Endless Tower trial matcher
-│   ├── save_reader.py      # Binary UE .sav file reader and regex map parser
+│   ├── game_data.py        # Lazy name dictionaries (EN/IT), regexes, Endless Tower trial matcher
 │   └── timer_tracker.py    # ZoneTimerTracker state machine for smooth Discord presence times
 ├── integrations/           # External service integrations
 │   ├── bridge_installer.py # Automatic and manual UE4SS Lua bridge installation
@@ -51,12 +52,11 @@ src/expedition33_rpc/
 ```
 
 ### Key Architectural Concepts
-1. **Polymorphic Telemetry Providers Pipeline (`detection/detector.py`)**:
-   - `BridgeStateProvider`: Primary provider reading memory/IPC JSON from the UE4SS Lua mod.
-   - `SaveFileStateProvider`: Fallback provider scanning Unreal Engine binary `.sav` files.
-   - Telemetry sources are prioritized: if Bridge detects `MainMenu` or active combat, save file fallback is suppressed to avoid stale data.
+1. **Dynamic IPC Telemetry Pipeline (`detection/detector.py`)**:
+   - `BridgeStateProvider`: Real-time telemetry provider reading memory/IPC JSON from the UE4SS Lua mod.
+   - Enforces a 5.0-second wall-clock freshness timeout to immediately expire stale combat or zone telemetry when the game or mod halts.
 2. **Dependency Injection**:
-   - `GameDetector` accepts injected `providers`, `timer_tracker`, and `save_reader` for deterministic unit testing.
+   - `GameDetector` accepts injected `providers`, `timer_tracker`, and `process_scanner` for deterministic unit testing.
 3. **Pure Presentation Layer (`ui/presentation.py`)**:
    - Extracts string formatting away from Discord IPC and GUI event loops, preventing divergent texts and enabling fast unit testing without mocks.
 4. **Mirrored Test Suite Architecture (`tests/`)**:
@@ -97,7 +97,7 @@ Bridge Mod writes state to `%TEMP%\expedition33_status.json` or `%LOCALAPPDATA%\
 
 ### 4.2. VirusTotal Summary Report (`virustotal_report.json`)
 
-Written by `scripts/virustotal_scan.py` during builds or CI:
+Written by `.github/scripts/virustotal_scan.py` during builds or CI:
 
 ```json
 {

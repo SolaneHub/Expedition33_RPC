@@ -1676,39 +1676,6 @@
       "en": "Yellow Spire Wrecks",
       "it": "Relitti della Guglia Gialla"
     }
-  ],
-  "semantic_zone_aliases": [
-    {
-      "cp_tokens": ["paintress", "monolith"],
-      "zone_tokens": ["monolith"]
-    },
-    {
-      "cp_tokens": ["flyinghouse", "manor"],
-      "zone_tokens": ["manor"]
-    },
-    {
-      "cp_tokens": ["esquie", "francois"],
-      "zone_tokens": ["esquie", "nest", "nido"]
-    },
-    {
-      "cp_tokens": ["chromazone", "chroma"],
-      "zone_tokens": ["sunless", "senza sole", "chroma"]
-    },
-    {
-      "cp_tokens": ["yellowforest", "yellow"],
-      "zone_tokens": ["yellow", "giallo", "harvest"]
-    },
-    {
-      "cp_tokens": ["reacher"],
-      "zone_tokens": ["reacher", "scalatore"]
-    },
-    {
-      "cp_tokens": ["seacliff"],
-      "zone_tokens": ["stone wave", "onda di pietra", "seacliff"]
-    },
-    {
-      "cp_tokens": ["goblu"],
-      "zone_tokens": ["goblu", "flying waters", "acque volanti"]
-    }
   ]
 }
+

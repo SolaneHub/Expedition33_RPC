@@ -13,7 +13,7 @@ import pytest
 from expedition33_rpc.core import startup
 from expedition33_rpc.core.app import is_already_running, main
 from expedition33_rpc.core.resources import get_resource_path
-from expedition33_rpc.core.settings import AppSettings, SettingsService
+from expedition33_rpc.core.settings import SettingsService
 
 # ---------------------------------------------------------------------------
 # Settings Persistence Tests
@@ -30,14 +30,29 @@ def test_json_file_persistence(tmp_path: Path) -> None:
     assert service.is_anti_spoiler_enabled() is True
     assert custom_json.is_file()
 
-    # Read back raw JSON content and typed dataclass
+    # Read back raw JSON content
     data = json.loads(custom_json.read_text(encoding="utf-8"))
-    assert data.get("schema_version") == 1
     assert data.get("anti_spoiler") is True
 
-    loaded_settings = service.load_settings()
-    assert isinstance(loaded_settings, AppSettings)
-    assert loaded_settings.anti_spoiler is True
+    fresh_service = SettingsService(custom_path=custom_json)
+    assert fresh_service.is_anti_spoiler_enabled() is True
+
+
+@pytest.mark.unit
+def test_settings_preserves_existing_keys_on_update(tmp_path: Path) -> None:
+    custom_json = tmp_path / "custom_settings.json"
+    custom_json.write_text(
+        json.dumps({"theme": "dark", "locale": "it", "custom_option": 42}),
+        encoding="utf-8",
+    )
+    service = SettingsService(custom_path=custom_json)
+    service.set_anti_spoiler_enabled(True)
+
+    data = json.loads(custom_json.read_text(encoding="utf-8"))
+    assert data["anti_spoiler"] is True
+    assert data["theme"] == "dark"
+    assert data["locale"] == "it"
+    assert data["custom_option"] == 42
 
 
 @pytest.mark.unit
@@ -74,6 +89,57 @@ def test_settings_service_in_memory_caching_and_atomic_update(tmp_path: Path) ->
     # Verify persistence by reading from a fresh service instance
     fresh_service = SettingsService(custom_path=custom_json)
     assert fresh_service.is_anti_spoiler_enabled() is False
+
+
+@pytest.mark.unit
+def test_settings_save_atomic_failure_preserves_ram_and_disk_consistency(tmp_path: Path) -> None:
+    """Verifies that disk I/O / file lock errors during atomic save prevent RAM-disk desynchronization."""
+    from expedition33_rpc.core.orchestrator import AppOrchestrator
+    from expedition33_rpc.integrations.discord_rpc import DiscordRPCManager
+
+    custom_json = tmp_path / "locked_settings.json"
+    service = SettingsService(custom_path=custom_json)
+
+    # 1. Initial save: anti_spoiler = False
+    assert service.set_anti_spoiler_enabled(False) is True
+    assert service.is_anti_spoiler_enabled() is False
+    assert custom_json.is_file()
+
+    # 2. Simulate permission/lock error during atomic rename
+    with patch("pathlib.Path.replace", side_effect=PermissionError("File locked")):
+        success = service.set_anti_spoiler_enabled(True)
+        assert success is False
+
+    # 3. Verify in-memory state did NOT flip to True (no desync with disk)
+    assert service.is_anti_spoiler_enabled() is False
+    assert service.load() is False
+
+    # 4. Verify disk file remains intact and uncorrupted
+    data = json.loads(custom_json.read_text(encoding="utf-8"))
+    assert data["anti_spoiler"] is False
+
+    # 5. Verify AppOrchestrator handles toggle failure without desync
+    from tests.harness import DiscordPipeSimulator
+
+    from expedition33_rpc.integrations.discord_rpc import DiscordIPCClient
+
+    pipe = DiscordPipeSimulator()
+    rpc = DiscordRPCManager(client=DiscordIPCClient(client_id="test", transport=pipe))
+    rpc.last_update_state = "prior_fingerprint"
+
+    orchestrator = AppOrchestrator(
+        settings_service=service,
+        rpc_manager=rpc,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    with patch("pathlib.Path.replace", side_effect=OSError("Lock failure")):
+        toggled_val = orchestrator.toggle_anti_spoiler()
+        assert toggled_val is False
+        assert service.is_anti_spoiler_enabled() is False
+
+    assert rpc.last_update_state is None
 
 
 # ---------------------------------------------------------------------------

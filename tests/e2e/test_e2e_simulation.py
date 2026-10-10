@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
 
 import pytest
@@ -9,7 +11,6 @@ from tests.harness import (
     DiscordPipeSimulator,
     GameSessionSimulator,
     MockDiscordServer,
-    SaveFixtureBuilder,
 )
 
 from expedition33_rpc.core.orchestrator import AppOrchestrator
@@ -162,36 +163,30 @@ def test_timeline_menu_to_combat_and_return_to_menu(
     assert frame4["args"]["activity"]["state"] == "Title Screen"
 
 
-def test_timeline_death_reload_save_fallback(session: GameSessionSimulator) -> None:
-    """Simulates player death and save reload via SaveFile fallback without process restart."""
+def test_timeline_death_reload_telemetry(session: GameSessionSimulator) -> None:
+    """Simulates player death in combat and checkpoint reload via Bridge telemetry without process restart."""
     session.start_game()
-    if session.bridge_path.exists():
-        session.bridge_path.unlink()
 
-    # 1. Initial save state before death
-    SaveFixtureBuilder.container().with_last_map("Level_Main_OldLumiere").write_saves_container(
-        session.save_dir
-    )
-    SaveFixtureBuilder.expedition_slot().with_savepoint(
-        level_name="Level_Main_OldLumiere",
-        spawn_point_tag="Level.SpawnPoint.Camp",
-    ).write_expedition_slot(session.save_dir, slot=0, mtime=1000.0)
-
+    # 1. Initial state: exploring Old Lumiere at Campfire checkpoint
+    session.enter_zone("Level_Main_OldLumiere", checkpoint="Campfire")
     st1 = session.get_game_state()
     assert st1.is_running is True
     assert st1.zone_name == "Old Lumiere"
     assert st1.checkpoint_name == "Campfire"
 
-    # 2. Player dies and reloads an earlier/different save point (slot 1 with newer timestamp)
-    SaveFixtureBuilder.expedition_slot().with_savepoint(
-        level_name="Level_Main_OldLumiere",
-        spawn_point_tag="Level.SpawnPoint.ManorGardens",
-    ).write_expedition_slot(session.save_dir, slot=1, mtime=2000.0)
+    # 2. Player enters combat and dies
+    session.trigger_combat("Duollistes")
+    st_combat = session.get_game_state()
+    assert st_combat.in_combat is True
+    assert st_combat.enemy_name == "Duollistes"
 
+    # 3. Player reloads at Manor Gardens checkpoint
+    session.leave_combat(checkpoint="Manor Gardens")
     st2 = session.get_game_state()
     assert st2.is_running is True
     assert st2.zone_name == "Old Lumiere"
     assert st2.checkpoint_name == "Manor Gardens"
+    assert st2.in_combat is False
 
 
 def test_timeline_discord_ipc_disconnect_and_reconnect_during_gameplay(
@@ -218,9 +213,9 @@ def test_timeline_discord_ipc_disconnect_and_reconnect_during_gameplay(
     # 3. Simulate Discord reconnecting with a fresh pipe
     new_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
     new_client = DiscordIPCClient(client_id="123456789", transport=new_pipe)
-    rpc_manager.rpc = new_client
-    rpc_manager.last_retry_time = 0.0
+    rpc_manager = DiscordRPCManager(client=new_client)
     assert rpc_manager.connect() is True
+
     new_pipe.outgoing_bytes.clear()
 
     rpc_manager.invalidate()
@@ -331,6 +326,7 @@ def test_unified_orchestrator_e2e_simulation(tmp_path: Path) -> None:
         # 4. Toggle Anti-Spoiler via orchestrator
         is_anti_spoiler = orchestrator.toggle_anti_spoiler()
         assert is_anti_spoiler is True
+        orchestrator.step_update()
         frames_anti_spoiler = server.get_frames()
         anti_spoiler_activity = frames_anti_spoiler[-1][1]["args"]["activity"]
         assert anti_spoiler_activity["state"] == "Hidden Location"
@@ -349,3 +345,60 @@ def test_unified_orchestrator_e2e_simulation(tmp_path: Path) -> None:
         # Clean shutdown of orchestrator
         orchestrator.stop()
         assert rpc_manager.is_connected is False
+
+
+def test_bridge_heartbeat_timeout_clears_zombie_combat_presence(tmp_path: Path) -> None:
+    """Verifies that stale telemetry (>5s old) expires and does not transmit zombie combat state to Discord."""
+    settings_file = tmp_path / "e2e_settings.json"
+    settings = SettingsService(custom_path=settings_file)
+
+    with MockDiscordServer() as server, GameSessionSimulator() as session:
+        ipc_client = DiscordIPCClient(client_id="987654321", custom_pipe_path=server.pipe_path)
+        rpc_manager = DiscordRPCManager(client=ipc_client)
+        orchestrator = AppOrchestrator(
+            detector=session.detector,
+            rpc_manager=rpc_manager,
+            settings_service=settings,
+            auto_install_bridge=False,
+            sync_startup=False,
+        )
+
+        # 1. Start game and enter combat with Duollistes
+        session.start_game(pid=5555).enter_zone("Level_Main_OldLumiere").trigger_combat(
+            "Duollistes"
+        )
+        st_active = orchestrator.step_update()
+        assert st_active is not None
+        assert st_active.in_combat is True
+        assert st_active.enemy_name == "Duollistes"
+
+        # Check emitted Discord frame
+        frames = server.get_frames()
+        assert len(frames) >= 2
+        active_activity = frames[-1][1]["args"]["activity"]
+        assert active_activity["details"] == "Fighting: Duollistes"
+
+        # 2. Overwrite telemetry file with timestamp >5s in the past (simulating game crash/freeze)
+        stale_payload = {
+            "timestamp": time.time() - 10.0,
+            "zone": "Level_Main_OldLumiere",
+            "in_combat": True,
+            "enemy_name": "Duollistes",
+            "checkpoint": "",
+        }
+        session.bridge_path.write_text(json.dumps(stale_payload), encoding="utf-8")
+
+        # 3. Next orchestrator tick must detect stale telemetry and NOT keep fighting Duollistes
+        st_stale = orchestrator.step_update()
+        assert st_stale is not None
+        assert st_stale.in_combat is False
+        assert st_stale.enemy_name == ""
+
+        # Verify wire-level activity sent to Discord is no longer "Fighting: Duollistes"
+        frames_after = server.get_frames()
+        assert len(frames_after) > len(frames)
+        latest_activity = frames_after[-1][1]["args"]["activity"]
+        assert latest_activity["details"] != "Fighting: Duollistes"
+        assert latest_activity["details"] == "Exploring"
+
+        orchestrator.stop()

@@ -57,10 +57,14 @@ class AppUpdater:
         self,
         current_version: str = __version__,
         on_state_change: Callable[[], None] | None = None,
+        api_url: str = API_LATEST_RELEASE_URL,
+        timeout: float = 10.0,
     ):
         self.current_version = current_version
         self.current_version_tuple = parse_version(current_version)
         self.on_state_change = on_state_change
+        self.api_url = api_url
+        self.timeout = timeout
 
         self.state = UpdateState.IDLE
         self.available_update: UpdateInfo | None = None
@@ -86,14 +90,14 @@ class AppUpdater:
     def check_for_updates(self) -> UpdateInfo | None:
         """Queries GitHub Releases API for the latest release."""
         self._set_state(UpdateState.CHECKING)
-        print(f"[Updater] Checking for updates against {API_LATEST_RELEASE_URL}...")
+        print(f"[Updater] Checking for updates against {self.api_url}...")
 
         try:
             req = urllib.request.Request(
-                API_LATEST_RELEASE_URL,
+                self.api_url,
                 headers={"User-Agent": USER_AGENT},
             )
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
 
             tag_name = data.get("tag_name", "")
@@ -120,11 +124,17 @@ class AppUpdater:
                 print("[Updater] Application is up to date.")
                 return None
 
+        except urllib.error.HTTPError as e:
+            msg = f"HTTP error {e.code}: {e.reason}"
+            print(f"[Updater] {msg}")
+            self._set_state(UpdateState.ERROR, error_msg=msg)
+            return None
         except urllib.error.URLError as e:
             msg = f"Network connection error: {e.reason}"
             print(f"[Updater] {msg}")
             self._set_state(UpdateState.ERROR, error_msg=msg)
             return None
+
         except Exception as e:
             msg = f"Update check failed: {e}"
             print(f"[Updater] {msg}")

@@ -4,18 +4,25 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from scripts.virustotal_scan import (
+
+# Ensure scripts directory is importable in CI test run
+SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from virustotal_scan import (  # noqa: E402  # type: ignore[import-not-found]
     RateLimiter,
     check_file_report,
     compute_sha256,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.ci
 
 
 @pytest.fixture
