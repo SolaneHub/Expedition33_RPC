@@ -49,11 +49,16 @@ def mock_release_server() -> Generator[tuple[str, type[MockReleaseHTTPHandler]],
         pass
 
     server = http.server.HTTPServer(("127.0.0.1", 0), ConfigurableHandler)
+    server.poll_interval = 0.01  # pyright: ignore[reportAttributeAccessIssue]
     host = str(server.server_address[0])
     port = int(server.server_address[1])
     url = f"http://{host}:{port}/releases/latest"
 
-    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": server.poll_interval},  # pyright: ignore[reportAttributeAccessIssue]
+        daemon=True,
+    )
     worker.start()
 
     try:
@@ -183,7 +188,7 @@ def test_check_for_updates_socket_timeout(
     mock_release_server: tuple[str, type[MockReleaseHTTPHandler]],
 ) -> None:
     url, handler = mock_release_server
-    handler.delay = 0.5
+    handler.delay = 0.1
     handler.response_code = 200
     handler.response_body = b'{"tag_name": "v2.0.0"}'
 

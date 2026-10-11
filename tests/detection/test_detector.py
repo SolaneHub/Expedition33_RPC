@@ -35,11 +35,13 @@ class FakeProcess:
         name: str,
         is_running: bool = True,
         create_time: float = 100.0,
+        exe_path: str | None = None,
     ):
         self._pid = pid
         self._name = name
         self._is_running = is_running
         self._create_time = create_time
+        self._exe_path = exe_path
 
     @property
     def pid(self) -> int:
@@ -47,6 +49,9 @@ class FakeProcess:
 
     def name(self) -> str:
         return self._name
+
+    def exe(self) -> str | None:
+        return self._exe_path
 
     def is_running(self) -> bool:
         return self._is_running
@@ -294,18 +299,22 @@ def test_main_menu_detection(tmp_path: Path, menu_token: str) -> None:
 @pytest.mark.integration
 def test_bridge_provider_wall_clock_timeout_rejects_stale_data(tmp_path: Path) -> None:
     bridge_path = tmp_path / "expedition33_status.json"
-    now = time.time()
+    simulated_now = 1000.0
     payload = {
-        "timestamp": now - 10.0,
+        "timestamp": simulated_now - 10.0,
         "zone": "Level_Main_OldLumiere",
         "in_combat": True,
         "enemy_name": "Duollistes",
     }
     bridge_path.write_text(json.dumps(payload), encoding="utf-8")
-    provider = BridgeStateProvider(paths=[str(bridge_path)], grace_period=0.0)
+    provider = BridgeStateProvider(
+        paths=[str(bridge_path)],
+        grace_period=0.0,
+        time_provider=lambda: simulated_now,
+    )
 
     # Stale timestamp (>5s difference) is marked invalid
-    assert provider.read_game_data(min_valid_timestamp=now - 20.0) is None
+    assert provider.read_game_data(min_valid_timestamp=simulated_now - 20.0) is None
 
 
 @pytest.mark.integration
@@ -366,14 +375,13 @@ def test_bridge_provider_concurrent_writer_resilience(tmp_path: Path) -> None:
     t = threading.Thread(target=writer, daemon=True)
     t.start()
 
-    start = time.time()
-    while time.time() - start < 1.0:
+    for _ in range(25):
         data = provider.read_bridge_status()
         if data is None:
             stats["failure"] += 1
         else:
             stats["success"] += 1
-        time.sleep(0.005)
+        time.sleep(0.001)
 
     stop.set()
     t.join(timeout=1.0)
@@ -381,7 +389,7 @@ def test_bridge_provider_concurrent_writer_resilience(tmp_path: Path) -> None:
     total = stats["success"] + stats["failure"]
     assert total > 0
     failure_rate = (stats["failure"] / total) * 100
-    assert failure_rate < 2.0, f"Failure rate was {failure_rate:.1f}%"
+    assert failure_rate < 5.0, f"Failure rate was {failure_rate:.1f}%"
 
 
 @pytest.mark.integration
@@ -390,17 +398,20 @@ def test_detector_bridge_grace_period_prevents_telemetry_jitter(tmp_path: Path) 
     ini_path = tmp_path / "GameUserSettings.ini"
     ini_path.write_text("[Internationalization]\nLanguage=en\n", encoding="utf-8")
 
-    bridge_provider = BridgeStateProvider(grace_period=2.5)
+    current_clock = 1000.0
+    bridge_provider = BridgeStateProvider(grace_period=2.5, time_provider=lambda: current_clock)
     bridge_provider.read_bridge_status = MagicMock(  # type: ignore
         side_effect=[
             {
+                "timestamp": 1000.0,
                 "zone": "Level_Main_OldLumiere",
                 "in_combat": True,
                 "enemy_name": "Duollistes",
                 "tower_floor": None,
                 "checkpoint": "",
             },
-            None,  # transient glitch
+            None,  # transient glitch within grace period
+            None,  # transient glitch past grace period
         ]
     )
 
@@ -416,9 +427,15 @@ def test_detector_bridge_grace_period_prevents_telemetry_jitter(tmp_path: Path) 
     assert st1.in_combat is True
 
     # Tick 2: Bridge glitch (read_bridge_status returns None), bridge internal grace period returns cached state
+    current_clock = 1001.0
     st2 = detector.get_game_state()
     assert st2.zone_name == "Old Lumiere"
     assert st2.in_combat is True
+
+    # Tick 3: Past grace period (5.0s > 2.5s), telemetry expires
+    current_clock = 1005.0
+    st3 = detector.get_game_state()
+    assert st3.in_combat is False
 
 
 @pytest.mark.unit

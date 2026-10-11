@@ -27,27 +27,17 @@ class ExpeditionTrayApp:
 
     def __init__(
         self,
-        script_dir: str = "",
         orchestrator: AppOrchestrator | None = None,
+        script_dir: str = "",
     ):
-        self.script_dir = script_dir
+        del script_dir
         self._menu_lock = threading.Lock()
         self.icon: Any = None
         self._last_menu_state: tuple[Any, ...] | None = None
 
         self.orchestrator = orchestrator if orchestrator is not None else AppOrchestrator()
         self.orchestrator.subscribe_state_change(self.on_orchestrator_state_change)
-
-        existing_update = getattr(self.orchestrator, "on_update_available", None)
-        if existing_update is not None:
-
-            def chained_update(info: UpdateInfo) -> None:
-                existing_update(info)
-                self.on_update_available(info)
-
-            self.orchestrator.on_update_available = chained_update
-        else:
-            self.orchestrator.on_update_available = self.on_update_available
+        self.orchestrator.subscribe_update_available(self.on_update_available)
 
     def _safe_update_menu(self) -> None:
         if self.icon is not None:
@@ -138,9 +128,7 @@ class ExpeditionTrayApp:
     def action_select_game_folder(self, *_):
         folder = self._prompt_folder_selection()
         if folder:
-            success, msg = self.orchestrator.bridge_installer.install_bridge(folder)
-            if success:
-                self.orchestrator.check_and_auto_install_bridge(known_win64_dir=folder)
+            success, msg = self.orchestrator.install_bridge_to(folder)
             if self.icon is not None:
                 with contextlib.suppress(Exception):
                     self.icon.notify(

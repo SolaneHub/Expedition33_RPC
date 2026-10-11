@@ -42,6 +42,7 @@ class GameSessionSimulator:
         self.mock_proc = MagicMock()
         self.mock_proc.pid = self.pid
         self.mock_proc.name.return_value = self.process_name
+        self.mock_proc.exe.return_value = str(self.root_path / self.process_name)
         self.mock_proc.create_time.return_value = self.proc_start_time
         self.mock_proc.is_running.return_value = False
 

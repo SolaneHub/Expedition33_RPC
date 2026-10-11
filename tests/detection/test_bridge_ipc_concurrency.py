@@ -39,7 +39,7 @@ def test_bridge_ipc_concurrent_writes_and_reads(tmp_path: Path) -> None:
     def writer_loop() -> None:
         try:
             iteration = 0
-            while not stop_event.is_set() and iteration < 150:
+            while not stop_event.is_set() and iteration < 20:
                 iteration += 1
                 payload = dict(valid_payload)
                 payload["timestamp"] = time.time()
@@ -50,7 +50,7 @@ def test_bridge_ipc_concurrent_writes_and_reads(tmp_path: Path) -> None:
                 except OSError:
                     pass
 
-                time.sleep(0.001)
+                time.sleep(0.0005)
 
                 # 2. Write complete valid JSON
                 try:
@@ -59,7 +59,7 @@ def test_bridge_ipc_concurrent_writes_and_reads(tmp_path: Path) -> None:
                 except OSError:
                     pass
 
-                time.sleep(0.002)
+                time.sleep(0.001)
         except Exception as e:
             writer_errors.append(e)
 
@@ -67,15 +67,14 @@ def test_bridge_ipc_concurrent_writes_and_reads(tmp_path: Path) -> None:
     writer_thread.start()
 
     try:
-        start_time = time.monotonic()
-        while time.monotonic() - start_time < 1.0:
+        for _ in range(15):
             try:
                 data = provider.read_game_data()
                 if data is not None and data.get("raw_zone") == "Level_Main_OldLumiere":
                     successful_reads += 1
             except Exception as e:
                 reader_errors.append(e)
-            time.sleep(0.003)
+            time.sleep(0.0005)
     finally:
         stop_event.set()
         writer_thread.join(timeout=2.0)

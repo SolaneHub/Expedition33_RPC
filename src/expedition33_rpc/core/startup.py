@@ -2,7 +2,6 @@ import contextlib
 import os
 import sys
 from pathlib import Path
-from typing import Protocol
 
 try:
     import winreg
@@ -11,18 +10,6 @@ except ImportError:
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APP_NAME = "Expedition33_DiscordRPC"
-
-
-class StartupProtocol(Protocol):
-    """Protocol defining Windows autostart service behavior."""
-
-    def is_startup_enabled(self) -> bool: ...
-
-    def set_startup_enabled(self, enable: bool) -> bool: ...
-
-    def sync_startup_path(self) -> None: ...
-
-    def toggle_startup(self) -> bool: ...
 
 
 def get_current_executable_command() -> str:
@@ -101,30 +88,9 @@ def toggle_startup() -> bool:
     return new_state
 
 
-class WindowsStartupService:
-    """Default service implementing StartupProtocol using Windows registry."""
-
-    def is_startup_enabled(self) -> bool:
-        return is_startup_enabled()
-
-    def set_startup_enabled(self, enable: bool) -> bool:
-        return set_startup_enabled(enable)
-
-    def sync_startup_path(self) -> None:
-        sync_startup_path()
-
-    def toggle_startup(self) -> bool:
-        return toggle_startup()
-
-
-default_startup_service: StartupProtocol = WindowsStartupService()
-
 __all__ = [
     "RUN_KEY",
     "APP_NAME",
-    "StartupProtocol",
-    "WindowsStartupService",
-    "default_startup_service",
     "get_current_executable_command",
     "is_startup_enabled",
     "set_startup_enabled",

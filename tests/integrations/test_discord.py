@@ -226,7 +226,7 @@ def test_discord_ipc_client_connect_failure_graceful() -> None:
         else f"/tmp/nonexistent-discord-ipc-{unique_name}"
     )
     client = DiscordIPCClient(client_id="fail_client", custom_pipe_path=bogus_path)
-    assert client.connect() is False
+    assert client.connect(attempts=1) is False
     assert client.is_connected is False
 
 
@@ -299,9 +299,9 @@ def test_discord_ipc_client_and_orchestrator_freeze_chaos() -> None:
         client = DiscordIPCClient(
             client_id="chaos_test",
             custom_pipe_path=server.pipe_path,
-            timeout=0.25,
+            timeout=0.02,
         )
-        res = client.connect()
+        res = client.connect(attempts=1)
         duration = time.perf_counter() - start
 
         assert res is False
@@ -313,7 +313,7 @@ def test_discord_ipc_client_and_orchestrator_freeze_chaos() -> None:
         active_client = DiscordIPCClient(
             client_id="chaos_test_midsession",
             custom_pipe_path=server.pipe_path,
-            timeout=0.25,
+            timeout=0.02,
         )
         manager = DiscordRPCManager(client=active_client)
         orchestrator = AppOrchestrator(

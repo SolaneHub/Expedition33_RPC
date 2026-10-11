@@ -6,7 +6,6 @@ import shutil
 import zipfile
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Protocol
 
 import psutil
 
@@ -17,23 +16,6 @@ try:
     import winreg
 except ImportError:
     winreg = None
-
-
-class BridgeInstallerProtocol(Protocol):
-    """Protocol defining the UE4SS Combat Bridge installer service contract."""
-
-    def find_game_win64_directory(
-        self,
-        target_process_names: Iterable[str] | None = None,
-        known_win64_dir: Path | str | None = None,
-        known_exe_path: Path | str | None = None,
-    ) -> str | None: ...
-
-    def is_bridge_installed(self, win64_dir: Path | str | None = None) -> bool: ...
-
-    def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]: ...
-
-    def uninstall_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]: ...
 
 
 def find_game_win64_directory(
@@ -363,37 +345,7 @@ def uninstall_bridge(win64_dir: Path | str | None = None) -> tuple[bool, str]:
         return False, f"Error during uninstallation: {e}"
 
 
-class BridgeInstallerService:
-    """Concrete implementation of BridgeInstallerProtocol delegating to module functions."""
-
-    def find_game_win64_directory(
-        self,
-        target_process_names: Iterable[str] | None = None,
-        known_win64_dir: Path | str | None = None,
-        known_exe_path: Path | str | None = None,
-    ) -> str | None:
-        return find_game_win64_directory(
-            target_process_names=target_process_names,
-            known_win64_dir=known_win64_dir,
-            known_exe_path=known_exe_path,
-        )
-
-    def is_bridge_installed(self, win64_dir: Path | str | None = None) -> bool:
-        return is_bridge_installed(win64_dir=win64_dir)
-
-    def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
-        return install_bridge(win64_dir=win64_dir)
-
-    def uninstall_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
-        return uninstall_bridge(win64_dir=win64_dir)
-
-
-default_bridge_installer: BridgeInstallerProtocol = BridgeInstallerService()
-
 __all__ = [
-    "BridgeInstallerProtocol",
-    "BridgeInstallerService",
-    "default_bridge_installer",
     "find_game_win64_directory",
     "is_bridge_installed",
     "install_bridge",

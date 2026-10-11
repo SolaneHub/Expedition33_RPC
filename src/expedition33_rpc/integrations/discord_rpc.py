@@ -169,7 +169,7 @@ class DiscordIPCClient:
             body = self._read_exact(length)
             return DiscordFrameCodec.decode(header + body)
 
-    def connect(self) -> bool:
+    def connect(self, attempts: int | None = None) -> bool:
         """Attempts connection and protocol handshake with Discord IPC."""
         with self._lock:
             if self.is_connected:
@@ -192,9 +192,9 @@ class DiscordIPCClient:
                     self.close()
                     return False
 
+            num_attempts = attempts if attempts is not None else (5 if self.custom_pipe_path else 1)
             for path in self._candidate_pipe_paths():
-                attempts = 5 if self.custom_pipe_path else 1
-                for attempt in range(attempts):
+                for attempt in range(num_attempts):
                     sock: socket.socket | None = None
                     try:
                         if sys.platform == "win32":
@@ -221,7 +221,7 @@ class DiscordIPCClient:
                             with contextlib.suppress(Exception):
                                 sock.close()
                         self.close()
-                        if attempt < attempts - 1:
+                        if attempt < num_attempts - 1:
                             time.sleep(0.025)
                         continue
 

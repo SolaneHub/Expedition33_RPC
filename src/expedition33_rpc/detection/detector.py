@@ -22,7 +22,6 @@ from expedition33_rpc.detection.normalization import (
     is_continent_zone,
     is_menu_zone,
     resolve_tower_trial,
-    strip_accents,
 )
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
 
@@ -38,6 +37,8 @@ class ProcessLike(Protocol):
     def pid(self) -> int: ...
 
     def name(self) -> str: ...
+
+    def exe(self) -> str | None: ...
 
     def create_time(self) -> float: ...
 
@@ -189,12 +190,18 @@ class GameState:
 class BridgeStateProvider:
     """Reads real-time in-game telemetry provided by the UE4SS Lua bridge mod via IPC JSON."""
 
-    def __init__(self, paths: list[str] | None = None, grace_period: float = 2.5):
+    def __init__(
+        self,
+        paths: list[str] | None = None,
+        grace_period: float = 2.5,
+        time_provider: Callable[[], float] = time.time,
+    ):
         if paths is not None:
             self.paths = list(paths)
         else:
             self.paths = get_telemetry_file_paths()
         self.grace_period = grace_period
+        self.time_provider = time_provider
         self._last_valid_data: RawGameData | None = None
         self._last_valid_time: float = 0.0
 
@@ -215,10 +222,10 @@ class BridgeStateProvider:
                         if isinstance(data, dict):
                             return data
                     elif attempt < 5:
-                        time.sleep(0.005 * (attempt + 1))
+                        time.sleep(0.001 * (attempt + 1))
                 except (PermissionError, json.JSONDecodeError, OSError):
                     if attempt < 5:
-                        time.sleep(0.005 * (attempt + 1))
+                        time.sleep(0.001 * (attempt + 1))
                     continue
                 except Exception:
                     break
@@ -232,7 +239,7 @@ class BridgeStateProvider:
         if bridge:
             bridge_ts = bridge.get("timestamp")
             is_fresh = True
-            now = time.time()
+            now = self.time_provider()
             if bridge_ts is not None:
                 try:
                     ts_val = float(bridge_ts)
@@ -284,7 +291,7 @@ class BridgeStateProvider:
                     "checkpoint": checkpoint_str,
                 }
                 self._last_valid_data = data
-                self._last_valid_time = time.time()
+                self._last_valid_time = self.time_provider()
                 return data
             else:
                 self._last_valid_data = None
@@ -293,7 +300,7 @@ class BridgeStateProvider:
         # Transient glitch grace period encapsulated inside bridge provider
         if (
             self._last_valid_data is not None
-            and (time.time() - self._last_valid_time) < self.grace_period
+            and (self.time_provider() - self._last_valid_time) < self.grace_period
         ):
             return self._last_valid_data
 
@@ -365,8 +372,7 @@ class GameDetector:
         if self.game_win64_dir is not None:
             return
         try:
-            exe_func = getattr(proc, "exe", None)
-            exe = exe_func() if callable(exe_func) else exe_func
+            exe = proc.exe()
             if exe and isinstance(exe, str):
                 self.game_exe_path = os.path.normpath(exe)
                 candidate = os.path.dirname(self.game_exe_path)
@@ -596,11 +602,6 @@ __all__ = [
     "GameState",
     "BridgeStateProvider",
     "GameDetector",
-    "format_checkpoint_tag",
-    "format_enemy_name",
-    "format_zone_name",
-    "resolve_tower_trial",
-    "strip_accents",
     "TARGET_PROCESS_NAMES",
     "get_telemetry_file_path",
     "get_telemetry_file_paths",

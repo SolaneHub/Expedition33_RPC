@@ -44,11 +44,6 @@ class SettingsService:
                 pass
         return self.anti_spoiler
 
-    def load_settings(self) -> SettingsService:
-        """Loads and returns the current settings service."""
-        self.load()
-        return self
-
     def is_anti_spoiler_enabled(self) -> bool:
         """Checks if anti-spoiler mode is enabled."""
         return self.anti_spoiler

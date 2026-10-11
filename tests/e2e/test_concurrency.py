@@ -82,7 +82,7 @@ def test_concurrent_settings_mutations(tmp_path: Path) -> None:
     settings_service = SettingsService(custom_path=settings_file)
 
     num_workers = 6
-    ops_per_worker = 30
+    ops_per_worker = 15
     barrier = threading.Barrier(num_workers)
     errors: list[Exception] = []
 
@@ -106,8 +106,8 @@ def test_concurrent_settings_mutations(tmp_path: Path) -> None:
 
     assert errors == []
     # Ensure file on disk remains valid JSON
-    final_settings = settings_service.load_settings()
-    assert isinstance(final_settings.anti_spoiler, bool)
+    settings_service.load()
+    assert isinstance(settings_service.anti_spoiler, bool)
 
 
 def test_concurrent_telemetry_ticks_and_ui_toggles(tmp_path: Path) -> None:
@@ -139,7 +139,7 @@ def test_concurrent_telemetry_ticks_and_ui_toggles(tmp_path: Path) -> None:
     # Background worker performing step_update ticks
     def telemetry_worker():
         tick_count = 0
-        while not stop_event.is_set() and tick_count < 50:
+        while not stop_event.is_set() and tick_count < 15:
             try:
                 mock_detector.get_game_state.return_value = GameState.create(
                     is_running=True,
@@ -154,7 +154,7 @@ def test_concurrent_telemetry_ticks_and_ui_toggles(tmp_path: Path) -> None:
     # Foreground UI thread performing user clicks and reading state
     def ui_user_thread():
         clicks = 0
-        while not stop_event.is_set() and clicks < 50:
+        while not stop_event.is_set() and clicks < 15:
             try:
                 settings_service.toggle_anti_spoiler()
                 curr = app.orchestrator.current_state

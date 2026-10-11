@@ -107,34 +107,50 @@ def test_tray_menu_action_exit(tray_fixture) -> None:
 @pytest.mark.unit
 def test_tray_menu_action_select_game_folder(tray_fixture) -> None:
     app, orchestrator, harness, icon = tray_fixture
-    orchestrator.bridge_installer.install_bridge.return_value = (True, "Installed")
+    orchestrator.install_bridge_to.return_value = (True, "Installed")
 
     with patch.object(app, "_prompt_folder_selection", return_value="C:/CustomGame/Win64"):
         harness.invoke("Select Game Folder...")
-        orchestrator.bridge_installer.install_bridge.assert_called_once_with("C:/CustomGame/Win64")
-        orchestrator.check_and_auto_install_bridge.assert_called_once_with(
-            known_win64_dir="C:/CustomGame/Win64"
-        )
+        orchestrator.install_bridge_to.assert_called_once_with("C:/CustomGame/Win64")
         icon.update_menu.assert_called()
 
 
 @pytest.mark.unit
-def test_tray_menu_actions_responsiveness_benchmark(tmp_path: Path) -> None:
+def test_tray_menu_actions_responsiveness_benchmark(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verifies that tray menu rendering and user actions execute within a strict latency budget (<10ms)."""
     settings_path = tmp_path / "settings.json"
     settings_service = SettingsService(settings_path)
-    mock_installer = MagicMock()
-    mock_installer.is_bridge_installed.return_value = False
-    mock_installer.install_bridge.return_value = (True, "Installed")
-    mock_startup = MagicMock()
-    mock_startup.is_startup_enabled.return_value = False
-    mock_startup.toggle_startup.return_value = True
+
+    bridge_mock = MagicMock(return_value=(True, "Installed"))
+    is_installed_mock = MagicMock(return_value=False)
+    monkeypatch.setattr(
+        "expedition33_rpc.core.orchestrator.bridge_installer.install_bridge",
+        bridge_mock,
+    )
+    monkeypatch.setattr(
+        "expedition33_rpc.core.orchestrator.bridge_installer.uninstall_bridge",
+        MagicMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        "expedition33_rpc.core.orchestrator.bridge_installer.is_bridge_installed",
+        is_installed_mock,
+    )
+    monkeypatch.setattr(
+        "expedition33_rpc.core.orchestrator.startup.is_startup_enabled",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "expedition33_rpc.core.orchestrator.startup.toggle_startup",
+        lambda: True,
+    )
 
     real_orchestrator = AppOrchestrator(
         settings_service=settings_service,
         detector=GameDetector(bridge_provider=None),
-        bridge_installer_service=mock_installer,
-        startup_service=mock_startup,
+        auto_install_bridge=False,
+        sync_startup=False,
     )
 
     app = ExpeditionTrayApp(orchestrator=real_orchestrator)
@@ -143,7 +159,7 @@ def test_tray_menu_actions_responsiveness_benchmark(tmp_path: Path) -> None:
 
     menu = app.create_menu()
     harness = HeadlessTrayHarness(menu=menu, mock_icon=mock_icon)
-    mock_installer.is_bridge_installed.reset_mock()
+    is_installed_mock.reset_mock()
 
     # 1. Benchmark menu dynamic label evaluation (must be O(1) in-memory without disk scans)
     t0 = time.perf_counter()
@@ -153,7 +169,7 @@ def test_tray_menu_actions_responsiveness_benchmark(tmp_path: Path) -> None:
     assert menu_eval_duration_ms < 10.0, (
         f"Menu evaluation took {menu_eval_duration_ms:.2f}ms (>10ms)"
     )
-    assert mock_installer.is_bridge_installed.call_count == 0
+    assert is_installed_mock.call_count == 0
 
     # 2. Benchmark Anti-Spoiler toggle action
     t0 = time.perf_counter()
@@ -171,6 +187,7 @@ def test_tray_menu_actions_responsiveness_benchmark(tmp_path: Path) -> None:
     assert bridge_toggle_duration_ms < 10.0, (
         f"Bridge toggle action took {bridge_toggle_duration_ms:.2f}ms (>10ms)"
     )
+    bridge_mock.assert_called_once()
 
     # 4. Benchmark Exit action
     t0 = time.perf_counter()

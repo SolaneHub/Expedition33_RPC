@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import sys
@@ -212,9 +213,52 @@ def test_single_instance_cross_platform_guards() -> None:
         assert is_already_running() is False
 
 
+@pytest.mark.unit
+def test_single_instance_windows_mutex() -> None:
+    mock_kernel32 = MagicMock()
+    mock_windll = MagicMock()
+    mock_windll.kernel32 = mock_kernel32
+
+    # Case 1: First instance (last_error == 0)
+    mock_kernel32.GetLastError.return_value = 0
+    with (
+        patch("sys.platform", "win32"),
+        patch.object(ctypes, "windll", mock_windll, create=True),
+    ):
+        assert is_already_running() is False
+
+    # Case 2: Already running (ERROR_ALREADY_EXISTS = 183)
+    mock_kernel32.GetLastError.return_value = 183
+    with (
+        patch("sys.platform", "win32"),
+        patch.object(ctypes, "windll", mock_windll, create=True),
+    ):
+        assert is_already_running() is True
+
+    # Case 3: Access denied (ERROR_ACCESS_DENIED = 5)
+    mock_kernel32.GetLastError.return_value = 5
+    with (
+        patch("sys.platform", "win32"),
+        patch.object(ctypes, "windll", mock_windll, create=True),
+    ):
+        assert is_already_running() is True
+
+
 # ---------------------------------------------------------------------------
-# Smoke Test for main() Entrypoint
+# Smoke Test and Early Exit for main() Entrypoint
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_main_already_running_exits() -> None:
+    """Verifies that main() exits cleanly with status 0 if another instance is already running."""
+    with (
+        patch("sys.platform", "win32"),
+        patch("expedition33_rpc.core.app.is_already_running", return_value=True),
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
 
 
 @pytest.mark.integration
