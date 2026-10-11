@@ -14,7 +14,7 @@ from expedition33_rpc.detection.compat_paths import (
     get_telemetry_file_path,
     get_telemetry_file_paths,
 )
-from expedition33_rpc.detection.game_data import TARGET_PROCESS_NAME
+from expedition33_rpc.detection.game_data import TARGET_PROCESS_NAMES
 from expedition33_rpc.detection.normalization import (
     format_checkpoint_tag,
     format_enemy_name,
@@ -48,6 +48,15 @@ _UNSET = object()
 
 
 @dataclass(frozen=True)
+class GameProcessInfo:
+    """Immutable DTO holding process-level executable and filesystem locations."""
+
+    pid: int | None = None
+    exe_path: str | None = None
+    win64_dir: Path | None = None
+
+
+@dataclass(frozen=True)
 class GameState:
     """Immutable GameState DTO / Value Object representing normalized game presence."""
 
@@ -63,6 +72,17 @@ class GameState:
     raw_checkpoint: str = ""
     tower_floor: int | None = None
     tower_stage_trial: TowerTrial | None = None
+    process_info: GameProcessInfo | None = None
+
+    @property
+    def exe_path(self) -> str | None:
+        """Convenience property accessing the game executable path from process_info."""
+        return self.process_info.exe_path if self.process_info else None
+
+    @property
+    def win64_dir(self) -> Path | None:
+        """Convenience property accessing the game win64 directory from process_info."""
+        return self.process_info.win64_dir if self.process_info else None
 
     @classmethod
     def create(
@@ -82,6 +102,9 @@ class GameState:
         current_tower_trial: TowerTrial | None = None,
         zone_name: str | None = None,
         checkpoint_name: str | None = None,
+        process_info: GameProcessInfo | None = None,
+        exe_path: str | None = None,
+        win64_dir: Path | None = None,
     ) -> GameState:
         """Constructs an immutable GameState value object from raw telemetry inputs."""
         # 1. Zone name
@@ -119,6 +142,19 @@ class GameState:
                     lang=game_language,
                 )
 
+        # 4. Process info resolution
+        effective_process_info = process_info
+        if (
+            effective_process_info is None
+            and is_running
+            and (process_pid is not None or exe_path is not None or win64_dir is not None)
+        ):
+            effective_process_info = GameProcessInfo(
+                pid=process_pid,
+                exe_path=exe_path,
+                win64_dir=win64_dir,
+            )
+
         return cls(
             is_running=is_running,
             process_pid=process_pid,
@@ -132,6 +168,7 @@ class GameState:
             raw_checkpoint=raw_checkpoint,
             tower_floor=tower_floor,
             tower_stage_trial=trial_info,
+            process_info=effective_process_info,
         )
 
     def matches(self, other: GameState | None) -> bool:
@@ -271,7 +308,7 @@ class GameDetector:
         timer_tracker: ZoneTimerTracker | None = None,
         bridge_provider: BridgeStateProvider | None | object = _UNSET,
         process_scanner: Callable[[], Iterable[ProcessLike]] | None = None,
-        target_process_name: str | None = None,
+        target_process_names: Iterable[str] | str | None = None,
         game_user_settings_path: Path | str | None = None,
     ):
         self.cached_pid: int | None = None
@@ -288,11 +325,15 @@ class GameDetector:
         self._game_user_settings_path: Path | None = (
             Path(game_user_settings_path) if game_user_settings_path is not None else None
         )
-        self.target_process_name: str = (
-            target_process_name.strip().lower()
-            if target_process_name is not None
-            else TARGET_PROCESS_NAME
-        )
+        resolved_names: list[str] = []
+        if target_process_names is not None:
+            if isinstance(target_process_names, str):
+                resolved_names.append(target_process_names.strip().lower())
+            else:
+                resolved_names.extend(n.strip().lower() for n in target_process_names if n.strip())
+        else:
+            resolved_names.extend(TARGET_PROCESS_NAMES)
+        self.target_process_names: frozenset[str] = frozenset(resolved_names)
 
         # Components
         self.timer_tracker = timer_tracker if timer_tracker is not None else ZoneTimerTracker()
@@ -326,7 +367,7 @@ class GameDetector:
         try:
             exe_func = getattr(proc, "exe", None)
             exe = exe_func() if callable(exe_func) else exe_func
-            if exe and isinstance(exe, str) and os.path.exists(exe):
+            if exe and isinstance(exe, str):
                 self.game_exe_path = os.path.normpath(exe)
                 candidate = os.path.dirname(self.game_exe_path)
                 self.game_win64_dir = Path(candidate)
@@ -343,7 +384,7 @@ class GameDetector:
                         if (
                             p.pid == self.cached_pid
                             and p.is_running()
-                            and p.name().lower() == self.target_process_name
+                            and p.name().lower() in self.target_process_names
                         ):
                             self._resolve_and_cache_process_paths(p)
                             return p
@@ -352,7 +393,7 @@ class GameDetector:
             else:
                 try:
                     proc = psutil.Process(self.cached_pid)
-                    if proc.is_running() and proc.name().lower() == self.target_process_name:
+                    if proc.is_running() and proc.name().lower() in self.target_process_names:
                         self._resolve_and_cache_process_paths(proc)
                         return proc
                 except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
@@ -374,7 +415,7 @@ class GameDetector:
         for proc in procs:
             try:
                 proc_name = proc.name()
-                if proc_name and proc_name.lower() == self.target_process_name:
+                if proc_name and proc_name.lower() in self.target_process_names:
                     self.cached_pid = proc.pid
                     self._resolve_and_cache_process_paths(proc)
                     if not self.game_start_time:
@@ -524,6 +565,12 @@ class GameDetector:
             current_tower_trial=self.current_tower_trial,
         )
 
+        proc_info = GameProcessInfo(
+            pid=proc.pid,
+            exe_path=self.game_exe_path,
+            win64_dir=self.game_win64_dir,
+        )
+
         return GameState.create(
             is_running=True,
             process_pid=proc.pid,
@@ -537,11 +584,15 @@ class GameDetector:
             tower_floor=tower_floor,
             tower_stage_trial=self.current_tower_trial,
             current_tower_trial=self.current_tower_trial,
+            process_info=proc_info,
+            exe_path=self.game_exe_path,
+            win64_dir=self.game_win64_dir,
         )
 
 
 __all__ = [
     "ProcessLike",
+    "GameProcessInfo",
     "GameState",
     "BridgeStateProvider",
     "GameDetector",
@@ -550,7 +601,7 @@ __all__ = [
     "format_zone_name",
     "resolve_tower_trial",
     "strip_accents",
-    "TARGET_PROCESS_NAME",
+    "TARGET_PROCESS_NAMES",
     "get_telemetry_file_path",
     "get_telemetry_file_paths",
 ]

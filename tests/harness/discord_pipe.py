@@ -1,9 +1,11 @@
-import json
-import struct
 import threading
 from typing import Any
 
-from expedition33_rpc.integrations.discord_rpc import OP_FRAME, OP_HANDSHAKE
+from expedition33_rpc.integrations.discord_rpc import (
+    OP_FRAME,
+    OP_HANDSHAKE,
+    DiscordFrameCodec,
+)
 
 
 class DiscordPipeSimulator:
@@ -26,10 +28,8 @@ class DiscordPipeSimulator:
 
     def queue_response(self, data: dict[str, Any], op: int = OP_FRAME) -> None:
         """Pushes an IPC frame into the receive buffer for the client to read."""
-        payload = json.dumps(data).encode("utf-8")
-        header = struct.pack("<II", op, len(payload))
         with self._lock:
-            self.incoming_bytes.extend(header + payload)
+            self.incoming_bytes.extend(DiscordFrameCodec.encode(op, data))
 
     def write(self, data: bytes) -> int:
         """Called by the client when sending bytes into the pipe."""
@@ -37,18 +37,15 @@ class DiscordPipeSimulator:
             self.outgoing_bytes.extend(data)
             if self.auto_respond_set_activity:
                 is_handshake = False
-                if len(data) >= 8:
-                    op, _ = struct.unpack("<II", data[:8])
+                if len(data) >= DiscordFrameCodec.HEADER_SIZE:
+                    op, _ = DiscordFrameCodec.decode_header(data[: DiscordFrameCodec.HEADER_SIZE])
                     if op == OP_HANDSHAKE:
                         is_handshake = True
                 if is_handshake:
-                    payload = json.dumps({"cmd": "DISPATCH", "evt": "READY", "data": {}}).encode(
-                        "utf-8"
-                    )
+                    resp_payload = {"cmd": "DISPATCH", "evt": "READY", "data": {}}
                 else:
-                    payload = json.dumps({"cmd": "SET_ACTIVITY", "data": {}}).encode("utf-8")
-                header = struct.pack("<II", OP_FRAME, len(payload))
-                self.incoming_bytes.extend(header + payload)
+                    resp_payload = {"cmd": "SET_ACTIVITY", "data": {}}
+                self.incoming_bytes.extend(DiscordFrameCodec.encode(OP_FRAME, resp_payload))
         return len(data)
 
     def read(self, n: int = -1) -> bytes:
@@ -74,14 +71,18 @@ class DiscordPipeSimulator:
     def pop_last_frame_payload(self) -> dict[str, Any] | None:
         """Extracts and decodes the oldest pending frame written by the client."""
         with self._lock:
-            if len(self.outgoing_bytes) < 8:
+            if len(self.outgoing_bytes) < DiscordFrameCodec.HEADER_SIZE:
                 return None
-            _out_op, out_len = struct.unpack("<II", self.outgoing_bytes[:8])
-            if len(self.outgoing_bytes) < 8 + out_len:
+            _out_op, out_len = DiscordFrameCodec.decode_header(
+                bytes(self.outgoing_bytes[: DiscordFrameCodec.HEADER_SIZE])
+            )
+            total_frame_len = DiscordFrameCodec.HEADER_SIZE + out_len
+            if len(self.outgoing_bytes) < total_frame_len:
                 return None
-            raw_json = self.outgoing_bytes[8 : 8 + out_len].decode("utf-8")
-            del self.outgoing_bytes[: 8 + out_len]
-            return json.loads(raw_json)
+            frame_bytes = bytes(self.outgoing_bytes[:total_frame_len])
+            del self.outgoing_bytes[:total_frame_len]
+            _op, payload = DiscordFrameCodec.decode(frame_bytes)
+            return payload
 
     def drain_all_frames(self) -> list[tuple[int, dict[str, Any]]]:
         """Extracts and decodes all pending frames, verifying binary integrity."""
@@ -89,17 +90,18 @@ class DiscordPipeSimulator:
         with self._lock:
             idx = 0
             data = bytes(self.outgoing_bytes)
-            while idx + 8 <= len(data):
-                op, length = struct.unpack("<II", data[idx : idx + 8])
-                idx += 8
-                if idx + length > len(data):
+            while idx + DiscordFrameCodec.HEADER_SIZE <= len(data):
+                _op, length = DiscordFrameCodec.decode_header(
+                    data[idx : idx + DiscordFrameCodec.HEADER_SIZE]
+                )
+                total_frame_len = DiscordFrameCodec.HEADER_SIZE + length
+                if idx + total_frame_len > len(data):
                     raise ValueError(
                         f"Truncated frame payload: expected {length} bytes at offset {idx}"
                     )
-                payload_bytes = data[idx : idx + length]
-                idx += length
-                payload = json.loads(payload_bytes.decode("utf-8"))
-                frames.append((op, payload))
+                frame_bytes = data[idx : idx + total_frame_len]
+                idx += total_frame_len
+                frames.append(DiscordFrameCodec.decode(frame_bytes))
             if idx != len(data):
                 raise ValueError(
                     f"Incomplete trailing bytes in pipe: {len(data) - idx} bytes remaining"

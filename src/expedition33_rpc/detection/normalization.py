@@ -21,6 +21,20 @@ from expedition33_rpc.detection.game_data import (
 )
 
 
+def _normalize_alphanumeric_key(text: str) -> str:
+    """Strips all non-alphanumeric characters and converts to lowercase for O(1) key indexing."""
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+# Pre-compiled O(1) hash maps for normalized checkpoint tag resolution
+CHECKPOINT_HASH_MAP_EN: dict[str, str] = {
+    _normalize_alphanumeric_key(k): v for k, v in CHECKPOINT_NAMES_EN.items()
+}
+CHECKPOINT_HASH_MAP_IT: dict[str, str] = {
+    _normalize_alphanumeric_key(k): v for k, v in CHECKPOINT_NAMES_IT.items()
+}
+
+
 def strip_accents(text: str) -> str:
     """Removes diacritics/accents from text for consistent cross-matching (e.g. 'Sirene' -> 'Sirene')."""
     if not text:
@@ -229,23 +243,24 @@ def format_checkpoint_tag(
 
     name_dict = CHECKPOINT_NAMES_IT if lang.startswith("it") else CHECKPOINT_NAMES_EN
     fallback_dict = CHECKPOINT_NAMES_EN
-
-    # 1. Full dotted tag lookup (e.g. AncientSanctuary.RedForest, EsquieNest.Francois)
-    if "." in clean_tag:
-        res = name_dict.get(clean_tag) or fallback_dict.get(clean_tag)
-        if res:
-            return res
-        for k, v in name_dict.items():
-            if k.lower() == clean_tag.lower():
-                return v
-        for k, v in fallback_dict.items():
-            if k.lower() == clean_tag.lower():
-                return v
+    hash_map = CHECKPOINT_HASH_MAP_IT if lang.startswith("it") else CHECKPOINT_HASH_MAP_EN
+    fallback_hash_map = CHECKPOINT_HASH_MAP_EN
 
     clean_tag_lower = clean_tag.lower()
     suffix_lower = suffix.lower()
-    norm_suffix = re.sub(r"[^a-z0-9]", "", suffix_lower)
-    norm_clean = re.sub(r"[^a-z0-9]", "", clean_tag_lower)
+    norm_suffix = _normalize_alphanumeric_key(suffix_lower)
+    norm_clean = _normalize_alphanumeric_key(clean_tag_lower)
+
+    # 1. Full dotted tag lookup (e.g. AncientSanctuary.RedForest, EsquieNest.Francois)
+    if "." in clean_tag:
+        res = (
+            name_dict.get(clean_tag)
+            or fallback_dict.get(clean_tag)
+            or hash_map.get(norm_clean)
+            or fallback_hash_map.get(norm_clean)
+        )
+        if res:
+            return res
 
     # 2. Declarative contextual zone matching from game_data.json
     if zone:
@@ -267,16 +282,17 @@ def format_checkpoint_tag(
             if "suffixes" in rule and norm_suffix in rule["suffixes"]:
                 return rule["it"] if is_it else rule["en"]
 
-    # 3. Direct dictionary lookup by suffix / clean_tag
-    res = name_dict.get(suffix) or fallback_dict.get(suffix)
+    # 3. Direct dictionary lookup by suffix / clean_tag in O(1)
+    res = (
+        name_dict.get(suffix)
+        or fallback_dict.get(suffix)
+        or hash_map.get(norm_suffix)
+        or fallback_hash_map.get(norm_suffix)
+        or hash_map.get(norm_clean)
+        or fallback_hash_map.get(norm_clean)
+    )
     if res:
         return res
-    for k, v in name_dict.items():
-        if re.sub(r"[^a-z0-9]", "", k.lower()) in (norm_suffix, norm_clean):
-            return v
-    for k, v in fallback_dict.items():
-        if re.sub(r"[^a-z0-9]", "", k.lower()) in (norm_suffix, norm_clean):
-            return v
 
     # 4. Spacing fallback
     spaced = re.sub(r"([a-z])([A-Z])", r"\1 \2", suffix)
@@ -287,6 +303,8 @@ def format_checkpoint_tag(
 
 
 __all__ = [
+    "CHECKPOINT_HASH_MAP_EN",
+    "CHECKPOINT_HASH_MAP_IT",
     "strip_accents",
     "is_main_menu",
     "is_menu_zone",

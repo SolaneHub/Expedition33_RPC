@@ -47,7 +47,15 @@ _DEFAULT_MAIN_MENU_TOKENS: list[str] = [
     "entry",
 ]
 
-TARGET_PROCESS_NAME: str = str(_DATA.get("target_process_name", "")).strip().lower()
+_raw_process_names = _DATA.get("target_process_names")
+if isinstance(_raw_process_names, list) and _raw_process_names:
+    TARGET_PROCESS_NAMES: tuple[str, ...] = tuple(
+        str(n).strip().lower() for n in _raw_process_names if str(n).strip()
+    )
+elif isinstance(_raw_process_names, str) and _raw_process_names.strip():
+    TARGET_PROCESS_NAMES = (str(_raw_process_names).strip().lower(),)
+else:
+    TARGET_PROCESS_NAMES = ("sandfall-win64-shipping.exe", "sandfall-wingdk-shipping.exe")
 
 MAIN_MENU_TOKENS: frozenset[str] = frozenset(
     _DATA.get("main_menu_tokens") or _DEFAULT_MAIN_MENU_TOKENS
@@ -76,7 +84,7 @@ ENDLESS_TOWER_TRIALS: list[TrialDefinition] = _build_endless_tower_trials(
 )
 
 __all__ = [
-    "TARGET_PROCESS_NAME",
+    "TARGET_PROCESS_NAMES",
     "MAIN_MENU_TOKENS",
     "ZONE_NAME_OVERRIDES_EN",
     "ZONE_NAME_OVERRIDES_IT",

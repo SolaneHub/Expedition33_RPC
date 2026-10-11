@@ -44,10 +44,13 @@ def game_data_json() -> dict:
 
 def test_game_data_schema_and_catalog_integrity(game_data_json: dict) -> None:
     """Declarative structural validator verifying complete schema integrity and bilingual symmetry."""
-    # 1. Target process and menu tokens
-    proc = game_data_json.get("target_process_name")
-    assert isinstance(proc, str) and proc.endswith(".exe") and proc == proc.lower()
-    assert proc == "sandfall-win64-shipping.exe"
+    # 1. Target processes and menu tokens
+    procs = game_data_json.get("target_process_names")
+    assert isinstance(procs, list) and len(procs) >= 2
+    assert all(isinstance(p, str) and p.endswith(".exe") and p == p.lower() for p in procs)
+    assert "sandfall-win64-shipping.exe" in procs
+    assert "sandfall-wingdk-shipping.exe" in procs
+    assert "target_process_name" not in game_data_json
 
     tokens = game_data_json.get("main_menu_tokens")
     assert isinstance(tokens, list) and len(tokens) > 0
@@ -301,7 +304,7 @@ def test_native_game_data_structures_at_module_load() -> None:
         CONTEXTUAL_CHECKPOINTS,
         ENDLESS_TOWER_TRIALS,
         MAIN_MENU_TOKENS,
-        TARGET_PROCESS_NAME,
+        TARGET_PROCESS_NAMES,
         ZONE_NAME_OVERRIDES_EN,
         ZONE_NAME_OVERRIDES_IT,
         get_game_data,
@@ -309,8 +312,9 @@ def test_native_game_data_structures_at_module_load() -> None:
 
     data = get_game_data()
     assert isinstance(data, dict)
-    assert isinstance(TARGET_PROCESS_NAME, str)
-    assert TARGET_PROCESS_NAME == "sandfall-win64-shipping.exe"
+    assert isinstance(TARGET_PROCESS_NAMES, tuple)
+    assert "sandfall-win64-shipping.exe" in TARGET_PROCESS_NAMES
+    assert "sandfall-wingdk-shipping.exe" in TARGET_PROCESS_NAMES
     assert isinstance(MAIN_MENU_TOKENS, frozenset)
     assert isinstance(ZONE_NAME_OVERRIDES_EN, dict)
     assert isinstance(ZONE_NAME_OVERRIDES_IT, dict)

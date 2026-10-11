@@ -233,3 +233,84 @@ def test_find_game_win64_directory_parses_synthetic_libraryfolders_vdf(tmp_path:
         result = find_game_win64_directory()
         assert result is not None
         assert os.path.normpath(str(result)) == os.path.normpath(str(game_win64))
+
+
+def test_bridge_lua_syntax_validity() -> None:
+    """Verifies that main.lua inside bridge.zip contains valid Lua syntax with balanced blocks and delimiters."""
+    import shutil
+    import subprocess
+
+    bridge_zip_path = Path(get_resource_path("bridge.zip"))
+    with zipfile.ZipFile(bridge_zip_path, "r") as z:
+        lua_bytes = z.read("ue4ss/Mods/Expedition33RPC/scripts/main.lua")
+        lua_content = lua_bytes.decode("utf-8")
+
+    # If luac compiler is available in PATH, perform official compiler validation
+    luac_bin = shutil.which("luac")
+    if luac_bin:
+        res = subprocess.run(
+            [luac_bin, "-p", "-"],
+            input=lua_bytes,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert res.returncode == 0, f"luac syntax validation failed: {res.stderr}"
+
+    # Structural in-memory verification (block and delimiter balancing)
+    # Strip multi-line comments: --[[ ... ]]
+    clean = re.sub(r"--\[\[.*?\]\]", "", lua_content, flags=re.DOTALL)
+    # Strip single line comments: -- ...
+    clean = re.sub(r"--[^\r\n]*", "", clean)
+    # Strip multi-line strings: [[ ... ]]
+    clean = re.sub(r"\[\[.*?\]\]", '""', clean, flags=re.DOTALL)
+    # Strip string literals: "..." and '...'
+    clean = re.sub(r'"(?:[^"\\]|\\.)*"', '""', clean)
+    clean = re.sub(r"'(?:[^'\\]|\\.)*'", "''", clean)
+
+    # 1. Delimiter balance: (), [], {}
+    delim_stack: list[str] = []
+    delims = {"(": ")", "[": "]", "{": "}"}
+    for char in clean:
+        if char in delims:
+            delim_stack.append(char)
+        elif char in delims.values():
+            assert delim_stack, f"Unmatched closing delimiter: {char}"
+            top = delim_stack.pop()
+            assert delims[top] == char, f"Mismatched delimiter: {top} with {char}"
+    assert not delim_stack, f"Unclosed delimiters remaining: {delim_stack}"
+
+    # 2. Block structure balance: (function, if, do vs end; repeat vs until)
+    tokens = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", clean)
+    block_stack: list[str] = []
+    for tok in tokens:
+        if tok in ("function", "if", "do") or tok == "repeat":
+            block_stack.append(tok)
+        elif tok == "end":
+            assert block_stack, "Unexpected 'end' without opening block"
+            top = block_stack.pop()
+            assert top in ("function", "if", "do"), f"Unexpected 'end' matching {top}"
+        elif tok == "until":
+            assert block_stack, "Unexpected 'until' without opening repeat"
+            top = block_stack.pop()
+            assert top == "repeat", f"Unexpected 'until' matching {top}"
+    assert not block_stack, f"Unclosed blocks remaining: {block_stack}"
+
+
+def test_find_game_win64_directory_from_wingdk_process(tmp_path: Path) -> None:
+    """Verifies that find_game_win64_directory locates WinGDK binary directory from active process."""
+    fake_wingdk_dir = tmp_path / "Content" / "Sandfall" / "Binaries" / "WinGDK"
+    fake_wingdk_dir.mkdir(parents=True, exist_ok=True)
+    fake_exe = fake_wingdk_dir / "Sandfall-WinGDK-Shipping.exe"
+    fake_exe.touch()
+
+    mock_proc = MagicMock()
+    mock_proc.info = {
+        "name": "Sandfall-WinGDK-Shipping.exe",
+        "exe": str(fake_exe),
+    }
+
+    with patch("psutil.process_iter", return_value=[mock_proc]):
+        res = find_game_win64_directory()
+        assert res is not None
+        assert os.path.normpath(res) == os.path.normpath(str(fake_wingdk_dir))

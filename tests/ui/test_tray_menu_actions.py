@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from tests.harness.tray_harness import HeadlessTrayHarness
@@ -102,6 +102,20 @@ def test_tray_menu_action_exit(tray_fixture) -> None:
     harness.invoke("Exit")
     orchestrator.stop.assert_called_once()
     icon.stop.assert_called_once()
+
+
+@pytest.mark.unit
+def test_tray_menu_action_select_game_folder(tray_fixture) -> None:
+    app, orchestrator, harness, icon = tray_fixture
+    orchestrator.bridge_installer.install_bridge.return_value = (True, "Installed")
+
+    with patch.object(app, "_prompt_folder_selection", return_value="C:/CustomGame/Win64"):
+        harness.invoke("Select Game Folder...")
+        orchestrator.bridge_installer.install_bridge.assert_called_once_with("C:/CustomGame/Win64")
+        orchestrator.check_and_auto_install_bridge.assert_called_once_with(
+            known_win64_dir="C:/CustomGame/Win64"
+        )
+        icon.update_menu.assert_called()
 
 
 @pytest.mark.unit

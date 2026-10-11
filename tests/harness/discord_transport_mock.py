@@ -7,10 +7,8 @@ native Windows named pipes or Unix domain sockets.
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import socket
-import struct
 import sys
 import tempfile
 import threading
@@ -19,7 +17,11 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from expedition33_rpc.integrations.discord_rpc import OP_FRAME, OP_HANDSHAKE
+from expedition33_rpc.integrations.discord_rpc import (
+    OP_FRAME,
+    OP_HANDSHAKE,
+    DiscordFrameCodec,
+)
 
 if sys.platform == "win32":
     import _winapi  # type: ignore[import-not-found]
@@ -204,10 +206,10 @@ class MockDiscordServer:
 
                 try:
                     while self._running:
-                        header = self._win_read_exact(pipe_handle, 8)
-                        op, length = struct.unpack("<II", header)
+                        header = self._win_read_exact(pipe_handle, DiscordFrameCodec.HEADER_SIZE)
+                        _op, length = DiscordFrameCodec.decode_header(header)
                         body_bytes = self._win_read_exact(pipe_handle, length)
-                        payload = json.loads(body_bytes.decode("utf-8"))
+                        op, payload = DiscordFrameCodec.decode(header + body_bytes)
 
                         with self._lock:
                             self.received_frames.append((op, payload))
@@ -225,11 +227,8 @@ class MockDiscordServer:
 
                         if resp is not None:
                             resp_op, resp_payload = resp
-                            resp_data = json.dumps(resp_payload, separators=(",", ":")).encode(
-                                "utf-8"
-                            )
-                            resp_header = struct.pack("<II", resp_op, len(resp_data))
-                            _winapi.WriteFile(pipe_handle, resp_header + resp_data)
+                            resp_frame = DiscordFrameCodec.encode(resp_op, resp_payload)
+                            _winapi.WriteFile(pipe_handle, resp_frame)
                 except (BrokenPipeError, EOFError, OSError):
                     pass
                 finally:
@@ -292,10 +291,10 @@ class MockDiscordServer:
                 conn.settimeout(0.5)
                 try:
                     while self._running:
-                        header = self._sock_read_exact(conn, 8)
-                        op, length = struct.unpack("<II", header)
+                        header = self._sock_read_exact(conn, DiscordFrameCodec.HEADER_SIZE)
+                        _op, length = DiscordFrameCodec.decode_header(header)
                         body_bytes = self._sock_read_exact(conn, length)
-                        payload = json.loads(body_bytes.decode("utf-8"))
+                        op, payload = DiscordFrameCodec.decode(header + body_bytes)
 
                         with self._lock:
                             self.received_frames.append((op, payload))
@@ -313,11 +312,8 @@ class MockDiscordServer:
 
                         if resp is not None:
                             resp_op, resp_payload = resp
-                            resp_data = json.dumps(resp_payload, separators=(",", ":")).encode(
-                                "utf-8"
-                            )
-                            resp_header = struct.pack("<II", resp_op, len(resp_data))
-                            conn.sendall(resp_header + resp_data)
+                            resp_frame = DiscordFrameCodec.encode(resp_op, resp_payload)
+                            conn.sendall(resp_frame)
                 except (BrokenPipeError, EOFError, OSError):
                     pass
                 finally:

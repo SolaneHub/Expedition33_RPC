@@ -1,5 +1,8 @@
 {
-  "target_process_name": "sandfall-win64-shipping.exe",
+  "target_process_names": [
+    "sandfall-win64-shipping.exe",
+    "sandfall-wingdk-shipping.exe"
+  ],
   "main_menu_tokens": [
     "bootstrap",
     "entry",

@@ -36,17 +36,7 @@ class ExpeditionTrayApp:
         self._last_menu_state: tuple[Any, ...] | None = None
 
         self.orchestrator = orchestrator if orchestrator is not None else AppOrchestrator()
-
-        existing_state_change = getattr(self.orchestrator, "on_state_change", None)
-        if existing_state_change is not None:
-
-            def chained_state_change(st: GameState, sp: bool) -> None:
-                existing_state_change(st, sp)
-                self.on_orchestrator_state_change(st, sp)
-
-            self.orchestrator.on_state_change = chained_state_change
-        else:
-            self.orchestrator.on_state_change = self.on_orchestrator_state_change
+        self.orchestrator.subscribe_state_change(self.on_orchestrator_state_change)
 
         existing_update = getattr(self.orchestrator, "on_update_available", None)
         if existing_update is not None:
@@ -145,6 +135,39 @@ class ExpeditionTrayApp:
         self.orchestrator.toggle_bridge()
         self._safe_update_menu()
 
+    def action_select_game_folder(self, *_):
+        folder = self._prompt_folder_selection()
+        if folder:
+            success, msg = self.orchestrator.bridge_installer.install_bridge(folder)
+            if success:
+                self.orchestrator.check_and_auto_install_bridge(known_win64_dir=folder)
+            if self.icon is not None:
+                with contextlib.suppress(Exception):
+                    self.icon.notify(
+                        "Combat Bridge installed successfully!"
+                        if success
+                        else f"Installation failed: {msg}",
+                        "Expedition 33 RPC",
+                    )
+            self._safe_update_menu()
+
+    def _prompt_folder_selection(self) -> str | None:
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            selected = filedialog.askdirectory(
+                title="Select Expedition 33 Win64 or WinGDK Directory"
+            )
+            root.destroy()
+            return selected if selected else None
+        except Exception as e:
+            print(f"[TrayApp] Directory dialog error: {e}")
+            return None
+
     def menu_startup_toggle(self, *_) -> str:
         if self.orchestrator.is_startup_enabled():
             return "Start with Windows  [X]"
@@ -161,6 +184,7 @@ class ExpeditionTrayApp:
         self.orchestrator.trigger_update_action()
 
     def action_exit(self, *_):
+        self.orchestrator.unsubscribe_state_change(self.on_orchestrator_state_change)
         self.orchestrator.stop()
         if self.icon is not None:
             self.icon.stop()
@@ -176,6 +200,7 @@ class ExpeditionTrayApp:
             Menu.SEPARATOR,
             MenuItem(self.menu_anti_spoiler_toggle, self.action_toggle_anti_spoiler),
             MenuItem(self.menu_bridge_toggle, self.action_toggle_bridge),
+            MenuItem("Select Game Folder...", self.action_select_game_folder),
             MenuItem(self.menu_startup_toggle, self.action_toggle_startup),
             MenuItem(self.menu_update_status, self.action_update_click),
             Menu.SEPARATOR,

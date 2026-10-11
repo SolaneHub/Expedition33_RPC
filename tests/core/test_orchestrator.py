@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -31,26 +32,22 @@ class FakeBridgeInstaller:
         self.installed = installed
         self.install_result = install_result
         self.uninstall_result = uninstall_result
-        self.is_installed_call_count = 0
-        self.install_call_count = 0
 
     def find_game_win64_directory(
         self,
-        target_process_name: str | None = None,
+        target_process_names: Iterable[str] | None = None,
         known_win64_dir: str | Path | None = None,
-        known_exe_path: str | None = None,
+        known_exe_path: Path | str | None = None,
     ) -> str | None:
-        del target_process_name, known_win64_dir, known_exe_path
+        del target_process_names, known_win64_dir, known_exe_path
         return self.game_dir
 
     def is_bridge_installed(self, win64_dir: str | Path | None = None) -> bool:
         del win64_dir
-        self.is_installed_call_count += 1
         return self.installed
 
     def install_bridge(self, win64_dir: str | Path | None = None) -> tuple[bool, str]:
         del win64_dir
-        self.install_call_count += 1
         if self.install_result[0]:
             self.installed = True
         return self.install_result
@@ -219,8 +216,12 @@ def test_orchestrator_lifecycle_start_stop() -> None:
 @pytest.mark.unit
 def test_orchestrator_auto_install_bridge_on_process_detection() -> None:
     mock_detector = MagicMock(spec=GameDetector)
-    mock_detector.get_game_state.return_value = GameState.create(is_running=True, process_pid=1234)
-    mock_detector.win64_dir = Path("/mock/game/win64")
+    mock_detector.get_game_state.return_value = GameState.create(
+        is_running=True,
+        process_pid=1234,
+        win64_dir=Path("/mock/game/win64"),
+        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+    )
     mock_rpc = MagicMock(spec=DiscordRPCManager)
     fake_bridge = FakeBridgeInstaller(
         game_dir="/mock/game/win64",
@@ -252,10 +253,12 @@ def test_orchestrator_event_driven_bridge_check_eliminates_parasitic_io() -> Non
     """Verifies that bridge check runs on initial process detection and NOT on subsequent ticks (no parasitic I/O)."""
     mock_detector = MagicMock(spec=GameDetector)
     mock_detector.get_game_state.return_value = GameState.create(
-        is_running=True, process_pid=4242, start_time=1000.0
+        is_running=True,
+        process_pid=4242,
+        start_time=1000.0,
+        win64_dir=Path("/mock/game/win64"),
+        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
-    mock_detector.win64_dir = Path("/mock/game/win64")
-    mock_detector.exe_path = "/mock/game/win64/Sandfall-Win64-Shipping.exe"
     mock_rpc = MagicMock(spec=DiscordRPCManager)
     fake_bridge = FakeBridgeInstaller(game_dir="/mock/game/win64", installed=False)
 
@@ -270,16 +273,16 @@ def test_orchestrator_event_driven_bridge_check_eliminates_parasitic_io() -> Non
     # Tick 1: First time PID 4242 detected -> triggers check and auto installation
     orchestrator.step_update()
     assert fake_bridge.installed is True
-    assert fake_bridge.is_installed_call_count == 1
-    assert fake_bridge.install_call_count == 1
     assert orchestrator.is_bridge_installed() is True
 
-    # Ticks 2..10: Same PID 4242 is running -> NO parasitic I/O, call count MUST remain 1
+    # Ticks 2..10: Same PID 4242 is running -> cached state in-memory without probing
+    fake_bridge.installed = False
     for _ in range(9):
-        orchestrator.step_update()
+        st = orchestrator.step_update()
+        assert st is not None
+        assert st.is_running is True
 
-    assert fake_bridge.is_installed_call_count == 1
-    assert fake_bridge.install_call_count == 1
+    assert orchestrator.is_bridge_installed() is True
 
 
 @pytest.mark.unit
@@ -302,42 +305,51 @@ def test_orchestrator_event_driven_bridge_check_triggers_on_process_restart() ->
         is_running=True, process_pid=1001, start_time=500.0
     )
     orchestrator.step_update()
-    assert fake_bridge.is_installed_call_count == 1
+    assert orchestrator.is_bridge_installed() is True
 
-    # 2. Same process running -> cached, no additional call
+    # 2. Same process running -> cached in-memory without disk probe
+    fake_bridge.installed = False
     orchestrator.step_update()
-    assert fake_bridge.is_installed_call_count == 1
+    assert orchestrator.is_bridge_installed() is True
 
     # 3. Game closes
     mock_detector.get_game_state.return_value = GameState(is_running=False)
     orchestrator.step_update()
-    assert fake_bridge.is_installed_call_count == 1
 
-    # 4. Game restarts with new PID 2002 -> re-checks
+    # 4. Game restarts with new PID 2002 -> re-checks observable status
     mock_detector.get_game_state.return_value = GameState.create(
         is_running=True, process_pid=2002, start_time=600.0
     )
     orchestrator.step_update()
-    assert fake_bridge.is_installed_call_count == 2
+    assert orchestrator.is_bridge_installed() is False
 
     # 5. Fast restart: PID reused but start_time changed without intermediate stopped tick -> re-checks
+    fake_bridge.installed = True
     mock_detector.get_game_state.return_value = GameState.create(
         is_running=True, process_pid=2002, start_time=700.0
     )
     orchestrator.step_update()
-    assert fake_bridge.is_installed_call_count == 3
+    assert orchestrator.is_bridge_installed() is True
 
 
 @pytest.mark.unit
 def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> None:
     """Verifies that bridge check is NOT attempted on every tick when backoff cooldown is active."""
-    import time as time_mod
+    current_time = 1000.0
 
     mock_detector = MagicMock(spec=GameDetector)
-    mock_detector.get_game_state.return_value = GameState.create(is_running=True)
-    mock_detector.win64_dir = Path("/mock/game/win64")
+    mock_detector.get_game_state.return_value = GameState.create(
+        is_running=True,
+        process_pid=1234,
+        win64_dir=Path("/mock/game/win64"),
+        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+    )
     mock_rpc = MagicMock(spec=DiscordRPCManager)
-    fake_bridge = FakeBridgeInstaller(installed=False)
+    fake_bridge = FakeBridgeInstaller(
+        game_dir="/mock/game/win64",
+        installed=False,
+        install_result=(False, "Failed install"),
+    )
 
     orchestrator = AppOrchestrator(
         detector=mock_detector,
@@ -345,16 +357,38 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
         bridge_installer_service=fake_bridge,
         auto_install_bridge=True,
         sync_startup=False,
+        time_provider=lambda: current_time,
     )
-    fake_bridge.installed = False
-    orchestrator._bridge_installed = False
-    orchestrator.bridge_auto_installed = False
-    orchestrator.last_bridge_install_attempt = time_mod.monotonic()
-    orchestrator.bridge_install_cooldown = 60.0
 
+    # First attempt fails at t = 1000.0, backoff cooldown activated
     orchestrator.step_update()
-    assert fake_bridge.installed is False
-    assert orchestrator.bridge_auto_installed is False
+    assert orchestrator.is_bridge_installed() is False
+
+    # Second tick with new process at t = 1010.0 (within cooldown 60.0s)
+    # If the installer were improperly invoked, it would succeed now:
+    current_time = 1010.0
+    fake_bridge.install_result = (True, "Installed")
+    mock_detector.get_game_state.return_value = GameState.create(
+        is_running=True,
+        process_pid=5678,
+        win64_dir=Path("/mock/game/win64"),
+        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+    )
+    orchestrator.step_update()
+    # Throttled by cooldown - install is NOT re-attempted, status remains False
+    assert orchestrator.is_bridge_installed() is False
+
+    # Third tick after cooldown expires at t = 1070.0
+    current_time = 1070.0
+    mock_detector.get_game_state.return_value = GameState.create(
+        is_running=True,
+        process_pid=9999,
+        win64_dir=Path("/mock/game/win64"),
+        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+    )
+    orchestrator.step_update()
+    # Now allowed - installation succeeds and status reflects True
+    assert orchestrator.is_bridge_installed() is True
 
 
 @pytest.mark.unit
@@ -379,8 +413,8 @@ def test_orchestrator_bridge_auto_install_backoff_and_cooldown() -> None:
     res1 = orchestrator.check_and_auto_install_bridge(now=1000.0)
     assert res1 is False
     assert orchestrator.bridge_auto_installed is False
-    assert orchestrator.bridge_install_cooldown == 60.0
     assert fake_bridge.installed is False
+    assert orchestrator.is_bridge_installed() is False
 
     # 2. Immediate next attempt at t = 1002.0 (2 seconds later, polling tick)
     # Should be throttled by cooldown and NOT attempt re-extracting
@@ -389,20 +423,26 @@ def test_orchestrator_bridge_auto_install_backoff_and_cooldown() -> None:
     assert orchestrator.bridge_auto_installed is False
     assert fake_bridge.installed is False
 
-    # 3. Next attempt after 60s cooldown expires at t = 1065.0
-    # Fails again, cooldown doubles to 120.0s
+    # 3. Intermediate attempt at t = 1050.0 (still within first backoff window)
+    res_mid = orchestrator.check_and_auto_install_bridge(now=1050.0)
+    assert res_mid is False
+
+    # 4. Next attempt after first cooldown expires at t = 1065.0
+    # Fails again, cooldown doubles
     res3 = orchestrator.check_and_auto_install_bridge(now=1065.0)
     assert res3 is False
     assert orchestrator.bridge_auto_installed is False
-    assert orchestrator.bridge_install_cooldown == 120.0
 
-    # 4. Now simulate permission resolved at t = 1190.0 (past 120s cooldown)
+    # 5. Intermediate attempt at t = 1120.0 (within doubled cooldown window)
+    res_doubled_mid = orchestrator.check_and_auto_install_bridge(now=1120.0)
+    assert res_doubled_mid is False
+
+    # 6. Now simulate permission resolved at t = 1190.0 (past doubled cooldown)
     fake_bridge.install_result = (True, "Installed successfully")
     res4 = orchestrator.check_and_auto_install_bridge(now=1190.0)
     assert res4 is True
     assert orchestrator.bridge_auto_installed is True
     assert fake_bridge.installed is True
-    assert orchestrator.bridge_install_cooldown == 30.0
     assert orchestrator.is_bridge_installed() is True
 
 
@@ -430,14 +470,19 @@ def test_orchestrator_bridge_auto_install_early_boot_and_preinstalled() -> None:
     assert fake_bridge.installed is True
     assert orchestrator.is_bridge_installed() is True
 
-    # 2. toggle_bridge resets the attempt timestamp and cooldown
+    # 2. toggle_bridge uninstalls bridge and is immediately re-togglable without throttling
     toggle_res = orchestrator.toggle_bridge()
     assert toggle_res is False
     assert orchestrator.bridge_auto_installed is False
-    assert orchestrator.last_bridge_install_attempt == -float("inf")
-    assert orchestrator.bridge_install_cooldown == 30.0
     assert fake_bridge.installed is False
     assert orchestrator.is_bridge_installed() is False
+
+    fake_bridge.install_result = (True, "Installed")
+    toggle_res2 = orchestrator.toggle_bridge()
+    assert toggle_res2 is True
+    assert orchestrator.bridge_auto_installed is True
+    assert fake_bridge.installed is True
+    assert orchestrator.is_bridge_installed() is True
 
 
 @pytest.mark.unit

@@ -346,3 +346,68 @@ def test_discord_ipc_client_and_orchestrator_freeze_chaos() -> None:
         # Must not falsely register the failed state2 as successfully updated
         assert orchestrator.rpc_manager.last_update_state == safe_fingerprint
         assert "DeadlockZone" not in (orchestrator.rpc_manager.last_update_state or "")
+
+
+@pytest.mark.unit
+def test_discord_rpc_manager_is_stopping_prevents_connect() -> None:
+    """Verifies that connect() aborts immediately when is_stopping predicate reports shutdown."""
+    mock_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="stopping_test", transport=mock_pipe)
+
+    stopping = False
+    manager = DiscordRPCManager(client=client, is_stopping=lambda: stopping)
+
+    assert manager.connect() is True
+    assert manager.is_connected is True
+
+    # When stopping, connect returns False and does not re-establish connection
+    manager.disconnect()
+    stopping = True
+    assert manager.connect() is False
+    assert manager.is_connected is False
+
+
+@pytest.mark.unit
+def test_discord_rpc_manager_is_stopping_prevents_update_reconnect() -> None:
+    """Verifies that update_presence() aborts without calling connect() when application is stopping."""
+    mock_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="stopping_update_test", transport=mock_pipe)
+
+    stopping = True
+    manager = DiscordRPCManager(client=client, is_stopping=lambda: stopping)
+
+    state = GameState.create(is_running=True, zone_name="Old Lumiere")
+    # Must return False and not attempt connection when application is stopping
+    res = manager.update_presence(state)
+    assert res is False
+    assert manager.is_connected is False
+    assert len(mock_pipe.written_data) == 0
+
+
+@pytest.mark.unit
+def test_orchestrator_stop_sets_stopping_and_prevents_discord_reconnect() -> None:
+    """Verifies that stopping AppOrchestrator prevents Discord RPC from attempting reconnect."""
+    mock_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="orch_stopping_test", transport=mock_pipe)
+    manager = DiscordRPCManager(client=client)
+
+    orchestrator = AppOrchestrator(
+        rpc_manager=manager,
+        detector=GameDetector(bridge_provider=None),
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    orchestrator.start()
+    assert orchestrator.running is True
+    orchestrator.stop()
+
+    assert orchestrator.running is False
+    assert orchestrator.worker_thread is None
+
+    # After stop, step_update returns None and does not invoke Discord connect
+    mock_pipe.outgoing_bytes.clear()
+    state = orchestrator.step_update()
+    assert state is None
+    assert manager.is_connected is False
+    assert len(mock_pipe.written_data) == 0

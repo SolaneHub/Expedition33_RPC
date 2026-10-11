@@ -19,8 +19,6 @@ from expedition33_rpc.integrations.updater import (
     parse_version,
 )
 
-pytestmark = pytest.mark.integration
-
 
 class MockReleaseHTTPHandler(http.server.BaseHTTPRequestHandler):
     """In-process HTTP request handler with configurable status code and delay."""
@@ -92,6 +90,7 @@ def test_updater_initial_state() -> None:
     assert updater.get_status_text() == "Check for Updates"
 
 
+@pytest.mark.integration
 def test_check_for_updates_available(
     mock_release_server: tuple[str, type[MockReleaseHTTPHandler]],
 ) -> None:
@@ -123,6 +122,7 @@ def test_check_for_updates_available(
     assert callback_called is True
 
 
+@pytest.mark.integration
 def test_check_for_updates_up_to_date(
     mock_release_server: tuple[str, type[MockReleaseHTTPHandler]],
 ) -> None:
@@ -144,6 +144,7 @@ def test_check_for_updates_up_to_date(
     assert updater.get_status_text() == "Version 1.0.0  [Up to Date]"
 
 
+@pytest.mark.integration
 def test_check_for_updates_http_404(
     mock_release_server: tuple[str, type[MockReleaseHTTPHandler]],
 ) -> None:
@@ -160,6 +161,7 @@ def test_check_for_updates_http_404(
     assert updater.get_status_text() == "Update Check Failed  [Click to Retry]"
 
 
+@pytest.mark.integration
 def test_check_for_updates_http_500(
     mock_release_server: tuple[str, type[MockReleaseHTTPHandler]],
 ) -> None:
@@ -176,6 +178,7 @@ def test_check_for_updates_http_500(
     assert updater.get_status_text() == "Update Check Failed  [Click to Retry]"
 
 
+@pytest.mark.integration
 def test_check_for_updates_socket_timeout(
     mock_release_server: tuple[str, type[MockReleaseHTTPHandler]],
 ) -> None:
@@ -192,6 +195,7 @@ def test_check_for_updates_socket_timeout(
     assert updater.get_status_text() == "Update Check Failed  [Click to Retry]"
 
 
+@pytest.mark.integration
 def test_check_in_background(
     mock_release_server: tuple[str, type[MockReleaseHTTPHandler]],
 ) -> None:

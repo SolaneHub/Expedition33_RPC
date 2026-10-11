@@ -184,16 +184,39 @@ def test_cached_pid_reused_by_unrelated_process_discovers_new_game() -> None:
 
 
 @pytest.mark.unit
-def test_detector_custom_target_process_name_injection() -> None:
+def test_detector_custom_target_process_names_string_injection() -> None:
     proc = FakeProcess(pid=7777, name="MyCustomGame.exe")
     detector = GameDetector(
         process_scanner=lambda: [proc],
-        target_process_name="mycustomgame.exe",
+        target_process_names="mycustomgame.exe",
     )
-    assert detector.target_process_name == "mycustomgame.exe"
+    assert "mycustomgame.exe" in detector.target_process_names
     found = detector.find_game_process()
     assert found is not None
     assert found.pid == 7777
+
+
+@pytest.mark.unit
+def test_detector_custom_target_process_names_injection() -> None:
+    proc_b = FakeProcess(pid=8888, name="GameVariantB.exe")
+    detector = GameDetector(
+        process_scanner=lambda: [proc_b],
+        target_process_names=["gamevarianta.exe", "gamevariantb.exe"],
+    )
+    assert "gamevarianta.exe" in detector.target_process_names
+    assert "gamevariantb.exe" in detector.target_process_names
+    found = detector.find_game_process()
+    assert found is not None
+    assert found.pid == 8888
+
+
+@pytest.mark.unit
+def test_detector_discovers_wingdk_process() -> None:
+    proc_gdk = FakeProcess(pid=9999, name="Sandfall-WinGDK-Shipping.exe")
+    detector = GameDetector(process_scanner=lambda: [proc_gdk])
+    found = detector.find_game_process()
+    assert found is not None
+    assert found.pid == 9999
 
 
 # ---------------------------------------------------------------------------
@@ -472,3 +495,13 @@ def test_game_process_path_and_win64_dir_propagation(tmp_path: Path) -> None:
     assert detector.game_win64_dir == fake_exe.parent
     assert detector.exe_path == os.path.normpath(str(fake_exe))
     assert detector.win64_dir == fake_exe.parent
+
+    # Encapsulation contract: GameState emits process_info, win64_dir, and exe_path
+    state = detector.get_game_state()
+    assert state.is_running is True
+    assert state.process_info is not None
+    assert state.process_info.pid == 7777
+    assert state.process_info.win64_dir == fake_exe.parent
+    assert state.process_info.exe_path == os.path.normpath(str(fake_exe))
+    assert state.win64_dir == fake_exe.parent
+    assert state.exe_path == os.path.normpath(str(fake_exe))

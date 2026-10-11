@@ -4,12 +4,14 @@ import contextlib
 import os
 import shutil
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Protocol
 
 import psutil
 
 from expedition33_rpc.core.resources import get_resource_path
-from expedition33_rpc.detection.game_data import TARGET_PROCESS_NAME
+from expedition33_rpc.detection.game_data import TARGET_PROCESS_NAMES
 
 try:
     import winreg
@@ -17,8 +19,25 @@ except ImportError:
     winreg = None
 
 
+class BridgeInstallerProtocol(Protocol):
+    """Protocol defining the UE4SS Combat Bridge installer service contract."""
+
+    def find_game_win64_directory(
+        self,
+        target_process_names: Iterable[str] | None = None,
+        known_win64_dir: Path | str | None = None,
+        known_exe_path: Path | str | None = None,
+    ) -> str | None: ...
+
+    def is_bridge_installed(self, win64_dir: Path | str | None = None) -> bool: ...
+
+    def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]: ...
+
+    def uninstall_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]: ...
+
+
 def find_game_win64_directory(
-    target_process_name: str | None = None,
+    target_process_names: Iterable[str] | str | None = None,
     known_win64_dir: Path | str | None = None,
     known_exe_path: Path | str | None = None,
 ) -> str | None:
@@ -33,24 +52,31 @@ def find_game_win64_directory(
         )
         if os.path.isdir(candidate):
             return candidate
-    if target_process_name and os.path.isdir(target_process_name):
-        return os.path.normpath(target_process_name)
+    if (
+        target_process_names
+        and isinstance(target_process_names, str)
+        and os.path.isdir(target_process_names)
+    ):
+        return os.path.normpath(target_process_names)
 
-    target_name = (
-        target_process_name.strip().lower()
-        if target_process_name is not None
-        else TARGET_PROCESS_NAME
-    )
+    target_names: set[str] = set()
+    if target_process_names is not None:
+        if isinstance(target_process_names, str):
+            target_names.add(target_process_names.strip().lower())
+        else:
+            target_names.update(n.strip().lower() for n in target_process_names if n.strip())
+    else:
+        target_names.update(TARGET_PROCESS_NAMES)
 
     # 1. Check running processes
     for proc in psutil.process_iter(["name", "exe"]):
         try:
             name = proc.info.get("name")
-            if name and name.lower() == target_name:
+            if name and name.lower() in target_names:
                 exe_path = proc.info.get("exe")
                 if exe_path and os.path.exists(exe_path):
                     target_dir = os.path.dirname(os.path.abspath(exe_path))
-                    if os.path.basename(target_dir).lower() == "win64":
+                    if os.path.basename(target_dir).lower() in ("win64", "wingdk"):
                         return target_dir
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
@@ -111,10 +137,80 @@ def find_game_win64_directory(
         if os.path.isdir(win64_candidate):
             try:
                 for entry in os.listdir(win64_candidate):
-                    if entry.lower() == target_name:
+                    if entry.lower() in target_names:
                         return win64_candidate
             except OSError:
                 pass
+
+    # 3. Check Xbox PC Game Pass and Epic Games standard installation directories
+    for drive in ["C", "D", "E", "F", "G"]:
+        platform_candidates = [
+            os.path.join(
+                f"{drive}:\\",
+                "XboxGames",
+                "Clair Obscur Expedition 33",
+                "Content",
+                "Sandfall",
+                "Binaries",
+                "WinGDK",
+            ),
+            os.path.join(
+                f"{drive}:\\",
+                "XboxGames",
+                "Clair Obscur Expedition 33",
+                "Content",
+                "Sandfall",
+                "Binaries",
+                "Win64",
+            ),
+            os.path.join(
+                f"{drive}:\\",
+                "XboxGames",
+                "Expedition 33",
+                "Content",
+                "Sandfall",
+                "Binaries",
+                "WinGDK",
+            ),
+            os.path.join(
+                f"{drive}:\\",
+                "XboxGames",
+                "Expedition 33",
+                "Content",
+                "Sandfall",
+                "Binaries",
+                "Win64",
+            ),
+            os.path.join(
+                f"{drive}:\\",
+                "Program Files",
+                "Epic Games",
+                "Expedition 33",
+                "Sandfall",
+                "Binaries",
+                "Win64",
+            ),
+            os.path.join(
+                f"{drive}:\\",
+                "Program Files (x86)",
+                "Epic Games",
+                "Expedition 33",
+                "Sandfall",
+                "Binaries",
+                "Win64",
+            ),
+            os.path.join(
+                f"{drive}:\\", "Epic Games", "Expedition 33", "Sandfall", "Binaries", "Win64"
+            ),
+        ]
+        for candidate in platform_candidates:
+            if os.path.isdir(candidate):
+                try:
+                    for entry in os.listdir(candidate):
+                        if entry.lower() in target_names:
+                            return candidate
+                except OSError:
+                    pass
 
     return None
 
@@ -265,3 +361,41 @@ def uninstall_bridge(win64_dir: Path | str | None = None) -> tuple[bool, str]:
         return True, "Bridge uninstalled successfully."
     except Exception as e:
         return False, f"Error during uninstallation: {e}"
+
+
+class BridgeInstallerService:
+    """Concrete implementation of BridgeInstallerProtocol delegating to module functions."""
+
+    def find_game_win64_directory(
+        self,
+        target_process_names: Iterable[str] | None = None,
+        known_win64_dir: Path | str | None = None,
+        known_exe_path: Path | str | None = None,
+    ) -> str | None:
+        return find_game_win64_directory(
+            target_process_names=target_process_names,
+            known_win64_dir=known_win64_dir,
+            known_exe_path=known_exe_path,
+        )
+
+    def is_bridge_installed(self, win64_dir: Path | str | None = None) -> bool:
+        return is_bridge_installed(win64_dir=win64_dir)
+
+    def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+        return install_bridge(win64_dir=win64_dir)
+
+    def uninstall_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+        return uninstall_bridge(win64_dir=win64_dir)
+
+
+default_bridge_installer: BridgeInstallerProtocol = BridgeInstallerService()
+
+__all__ = [
+    "BridgeInstallerProtocol",
+    "BridgeInstallerService",
+    "default_bridge_installer",
+    "find_game_win64_directory",
+    "is_bridge_installed",
+    "install_bridge",
+    "uninstall_bridge",
+]
