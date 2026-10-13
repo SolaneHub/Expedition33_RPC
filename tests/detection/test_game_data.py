@@ -112,75 +112,65 @@ CHECKPOINT_CASES = [
     ("Abbest Cave", "Arena", "Entrance", "Entrata"),
     # 2. Ancient Sanctuary
     ("Ancient Sanctuary", "RedForest", "Entrance", "Entrata"),
-    ("Ancient Sanctuary", "GiantBellAlley", "Sanctuary Maze", "Labirinto del Santuario"),
-    ("Ancient Sanctuary", "Arena", "Giant Bell Alley", "Vicolo della Grande Campana"),
+    ("Ancient Sanctuary", "GiantBellAlley", "Sanctuary Maze", "Labirinto del santuario"),
+    ("Ancient Sanctuary", "Arena", "Giant Bell Alley", "Vicolo della campana gigante"),
     # 3. Crimson Forest
-    ("Crimson Forest", "Plazza", "Crimson Perch", "Posatoio Cremisi"),
+    ("Crimson Forest", "Plazza", "Crimson Perch", "Trespolo cremisi"),
     # 4. Endless Night Sanctuary
-    ("Endless Night Sanctuary", "Arena", "Warrior's Route", "Percorso del Guerriero"),
-    ("Endless Night Sanctuary", "Totem", "Night Totem", "Totem della Notte"),
+    ("Endless Night Sanctuary", "Arena", "Warrior's Route", "Itinerario del guerriero"),
+    ("Endless Night Sanctuary", "Totem", "Night Totem", "Totem della notte"),
     # 5. Esoteric Ruins
-    ("Esoteric Ruins", "Cliff Bottom", "Lumiere's Wrecks", "Relitti di Lumière"),
+    ("Esoteric Ruins", "Cliff Bottom", "Lumiere's Wrecks", "Rovine di Lumière"),
     # 6. Esquie's Nest
     ("Esquie's Nest", "GestralEntry", "Entrance", "Entrata"),
     ("Esquie's Nest", "Francois", "Francois' Cave", "Grotta di François"),
     # 7. Falling Leaves
-    ("Falling Leaves", "Crimson Perch", "Resinveil Grove", "Boschetto del Velo di Resina"),
-    ("Falling Leaves", "CenterPlazza", "Resinveil Grove", "Boschetto del Velo di Resina"),
+    ("Falling Leaves", "Crimson Perch", "Resinveil Grove", "Boschetto velo di resina"),
+    ("Falling Leaves", "CenterPlazza", "Resinveil Grove", "Boschetto velo di resina"),
     # 8. Forgotten Battlefield
-    ("Forgotten Battlefield", "Main Ruins", "Fort Ruins", "Rovine del Forte"),
-    ("Forgotten Battlefield", "Battlefield", "Vanguard Point", "Punto di Avanguardia"),
-    ("Forgotten Battlefield", "Side Battlefield", "Battlefield", "Campo di Battaglia"),
-    ("Forgotten Battlefield", "DuallistArena", "Ancient Bridge", "Ponte Antico"),
+    ("Forgotten Battlefield", "Main Ruins", "Fort Ruins", "Rovine della fortezza"),
+    ("Forgotten Battlefield", "Battlefield", "Vanguard Point", "Punto dell'avanguardia"),
+    ("Forgotten Battlefield", "Side Battlefield", "Battlefield", "Campo di battaglia"),
+    ("Forgotten Battlefield", "DuallistArena", "Ancient Bridge", "Ponte antico"),
     # 9. Frozen Hearts
-    ("Frozen Hearts", "Cave Station", "Icebound Terminal", "Capolinea Ghiacciato"),
-    ("Frozen Hearts", "Cave Forest", "Iced Heart", "Cuore Ghiacciato"),
-    (
-        "Frozen Hearts",
-        "Train Station",
-        "Icebound Train Station",
-        "Stazione Ferroviaria Ghiacciata",
-    ),
-    ("Frozen Hearts", "Frozenlakes", "Glacial Falls", "Cascate Glaciali"),
+    ("Frozen Hearts", "Cave Station", "Icebound Terminal", "Terminal congelato"),
+    ("Frozen Hearts", "Cave Forest", "Iced Heart", "Cuore congelato"),
+    ("Frozen Hearts", "Train Station", "Icebound Train Station", "Stazione ferroviaria congelata"),
+    ("Frozen Hearts", "Frozenlakes", "Glacial Falls", "Cascate glaciali"),
     # 10. Gestral Village
     ("Gestral Village", "Village Entry", "Entrance", "Entrata"),
     # 11. Inside the Monolith
-    ("Inside the Monolith", "Spring Meadows", "Tainted Meadows", "Prati Corrotti"),
-    ("Inside the Monolith", "Goblu", "Tainted Waters", "Acque Corrotte"),
-    ("Inside the Monolith", "Ancient Sanctuary", "Tainted Sanctuary", "Santuario Corrotto"),
-    ("Inside the Monolith", "Sea Cliff", "Tainted Cliffs", "Scogliere Corrotte"),
+    ("Inside the Monolith", "Spring Meadows", "Tainted Meadows", "Radure contaminate"),
+    ("Inside the Monolith", "Goblu", "Tainted Waters", "Acque contaminate"),
+    ("Inside the Monolith", "Ancient Sanctuary", "Tainted Sanctuary", "Santuario contaminato"),
+    ("Inside the Monolith", "Sea Cliff", "Tainted Cliffs", "Scogliera contaminata"),
     (
         "Inside the Monolith",
         "Forgotten Battlefield",
         "Tainted Battlefield",
-        "Campo di Battaglia Corrotto",
+        "Campo di battaglia contaminato",
     ),
-    ("Inside the Monolith", "Monoco Mountain", "Tainted Hearts", "Cuori Corrotti"),
-    ("Inside the Monolith", "Lumiere", "Tainted Lumiere", "Lumière Corrotta"),
+    ("Inside the Monolith", "Monoco Mountain", "Tainted Hearts", "Cuorgelati contaminati"),
+    ("Inside the Monolith", "Lumiere", "Tainted Lumiere", "Lumière contaminata"),
     # 12. Lumiere Act 3
     ("Lumiere", "Dock", "Harbour", "Porto"),
-    ("Lumiere", "Big Plazza", "Central Plaza", "Piazza Centrale"),
-    ("Lumiere", "Crumbling Buildings", "Shattered Alley", "Vicolo Frantumato"),
+    ("Lumiere", "Big Plazza", "Central Plaza", "Piazza centrale"),
+    ("Lumiere", "Crumbling Buildings", "Shattered Alley", "Vicolo in rovina"),
     ("Lumiere", "Opera", "Opera House", "Teatro dell'Opera"),
     ("Lumiere", "Manor Gardens", "Lumiere's Gardens", "Giardini di Lumière"),
-    (
-        "Lumiere",
-        "Train Station Ruins",
-        "Crooked Tower Walkway",
-        "Passerella della Torre Storta",
-    ),
+    ("Lumiere", "Train Station Ruins", "Crooked Tower Walkway", "Sentiero della Torre ritorta"),
     # 13. Monoco's Station
     ("Monoco's Station", "Inside Station", "Monoco's Station", "Stazione di Monoco"),
     # 14. Old Lumiere
     ("Old Lumiere", "Broken Buildings", "Entrance", "Entrata"),
-    ("Old Lumiere", "Manor Arena", "Manor Gardens", "Giardini del Maniero"),
-    ("Old Lumiere", "Lune Path", "Right Street", "Via Destra"),
-    ("Old Lumiere", "Maelle Path", "Left Street", "Via Sinistra"),
-    ("Old Lumiere", "Alpha Arena", "Train Station Ruins", "Rovine della Stazione"),
+    ("Old Lumiere", "Manor Arena", "Manor Gardens", "Giardini della villa"),
+    ("Old Lumiere", "Lune Path", "Right Street", "Strada destra"),
+    ("Old Lumiere", "Maelle Path", "Left Street", "Strada sinistra"),
+    ("Old Lumiere", "Alpha Arena", "Train Station Ruins", "Rovine della stazione ferroviaria"),
     # 15. Painting Workshop
-    ("Painting Workshop", "Broken Lampmaster", "Broken Conception", "Concezione Spezzata"),
+    ("Painting Workshop", "Broken Lampmaster", "Broken Conception", "Concezione spezzata"),
     # 16. Renoir's Drafts
-    ("Renoir's Drafts", "Golden Tree", "Golden Tree", "Albero Dorato"),
+    ("Renoir's Drafts", "Golden Tree", "Golden Tree", "Albero dorato"),
     # 17. Siren's Dress
     ("Siren's Dress", "Inside", "Glissando", "Glissando"),
     # 18. Spring Meadows
@@ -188,29 +178,29 @@ CHECKPOINT_CASES = [
         "Spring Meadows",
         "Old Expeditioner Camp",
         "Abandoned Expeditioner Camp",
-        "Accampamento Abbandonato",
+        "Accampamento abbandonato degli esploratori",
     ),
     # 19. Stone Wave Cliffs
     ("Stone Wave Cliffs", "Zeppelin Entry", "Entrance", "Entrata"),
-    ("Stone Wave Cliffs", "Village", "Old Farm", "Vecchia Fattoria"),
-    ("Stone Wave Cliffs", "Caves", "Tide Caverns", "Caverne della Marea"),
+    ("Stone Wave Cliffs", "Village", "Old Farm", "Vecchia fattoria"),
+    ("Stone Wave Cliffs", "Caves", "Tide Caverns", "Grotte della marea"),
     # 20. Stone Wave Cliffs Cave
     ("Stone Wave Cliffs Cave", "Vista", "Entrance", "Entrata"),
     # 21. Sunless Cliffs
-    ("Sunless Cliffs", "Cave", "Chroma Portal", "Portale Chroma"),
+    ("Sunless Cliffs", "Cave", "Chroma Portal", "Portale di chroma"),
     # 22. The Canvas
     ("The Canvas", "Broken Conception", "Entrance", "Entrata"),
     # 23. The Reacher
     ("The Reacher", "Mountain Top", "Peak", "Cima"),
-    ("The Reacher", "Fog Area", "Foggy Area", "Zona Nebbiosa"),
+    ("The Reacher", "Fog Area", "Foggy Area", "Area nebbiosa"),
     # 24. Visages
-    ("Visages", "Visages Arena", "Peak", "Picco"),
-    ("Visages", "Sadness", "Sadness Vale", "Valle della Tristezza"),
-    ("Visages", "Anger", "Anger Vale", "Valle della Rabbia"),
-    ("Visages", "Joy", "Joy Vale", "Valle della Gioia"),
+    ("Visages", "Visages Arena", "Peak", "Cima"),
+    ("Visages", "Sadness", "Sadness Vale", "Valle della tristezza"),
+    ("Visages", "Anger", "Anger Vale", "Valle dell'ira"),
+    ("Visages", "Joy", "Joy Vale", "Valle della gioia"),
     # 25. Yellow Harvest
-    ("Yellow Harvest", "Lake", "Harvester's Hollow", "Conca del Mietitore"),
-    ("Yellow Harvest", "Arena", "Yellow Spire Wrecks", "Relitti della Guglia Gialla"),
+    ("Yellow Harvest", "Lake", "Harvester's Hollow", "Fossa del Mietitore"),
+    ("Yellow Harvest", "Arena", "Yellow Spire Wrecks", "Relitto dei pinnacoli cerei"),
 ]
 
 
@@ -281,8 +271,9 @@ def test_detector_resolves_structured_bridge_payload_end_to_end(tmp_path: Path) 
 
 def test_normalization_pure_string_menu_and_continent_detection() -> None:
     # Pure string menu checks
-    assert is_menu_zone(raw_zone="MainMenu") is True
-    assert is_menu_zone(raw_zone="bootstrap") is True
+    assert is_menu_zone(raw_zone="Level_MainMenu") is True
+    assert is_menu_zone(raw_zone="WBP_MM_MainMenu") is True
+    assert is_menu_zone(raw_zone="WBP_MM_TitleScreen") is True
     assert is_menu_zone(zone_name="Main Menu") is True
     assert is_menu_zone(zone_name="Nel menu principale") is True
     assert is_menu_zone(raw_zone="Level_Forest", zone_name="Forest") is False
@@ -322,3 +313,139 @@ def test_native_game_data_structures_at_module_load() -> None:
     assert isinstance(CHECKPOINT_NAMES_IT, dict)
     assert isinstance(CONTEXTUAL_CHECKPOINTS, list)
     assert isinstance(ENDLESS_TOWER_TRIALS, list)
+
+
+def test_all_20_languages_schema_and_symmetry(game_data_json: dict) -> None:
+    """Verifies that all 20 official languages are populated with strict key symmetry."""
+    from expedition33_rpc.detection.game_data import (
+        ALL_SUPPORTED_LANGUAGES,
+        CHECKPOINT_NAMES_BY_LANG,
+        TOWER_STAGES_BY_LANG,
+        ZONE_NAME_OVERRIDES_BY_LANG,
+    )
+
+    assert len(ALL_SUPPORTED_LANGUAGES) == 20
+
+    zone_by_lang = game_data_json.get("zone_name_overrides_by_lang", {})
+    cp_by_lang = game_data_json.get("checkpoint_names_by_lang", {})
+    stages_by_lang = game_data_json.get("tower_stages_by_lang", {})
+
+    assert isinstance(zone_by_lang, dict)
+    assert isinstance(cp_by_lang, dict)
+    assert isinstance(stages_by_lang, dict)
+
+    master_cp_keys = set(game_data_json["checkpoint_names_en"].keys())
+
+    for lang in ALL_SUPPORTED_LANGUAGES:
+        # 1. Zone overrides exist and have non-empty values
+        assert lang in zone_by_lang, f"Missing zone overrides for language {lang}"
+        assert len(zone_by_lang[lang]) >= 200, f"Insufficient zone overrides for language {lang}"
+        assert all(isinstance(v, str) and len(v) > 0 for v in zone_by_lang[lang].values())
+
+        # 2. Checkpoints maintain 100% key symmetry across all 20 languages
+        assert lang in cp_by_lang, f"Missing checkpoints for language {lang}"
+        lang_keys = set(cp_by_lang[lang].keys())
+        assert lang_keys == master_cp_keys, (
+            f"Checkpoint asymmetry in {lang}: missing {master_cp_keys - lang_keys}, extra {lang_keys - master_cp_keys}"
+        )
+        assert all(isinstance(v, str) and len(v) > 0 for v in cp_by_lang[lang].values())
+
+        # 3. Tower stages exist with all 33 trials
+        assert lang in stages_by_lang, f"Missing tower stages for language {lang}"
+        assert len(stages_by_lang[lang]) == 33, (
+            f"Expected 33 tower stages for {lang}, got {len(stages_by_lang[lang])}"
+        )
+
+    # Also verify runtime module constants
+    assert len(ZONE_NAME_OVERRIDES_BY_LANG) == 20
+    assert len(CHECKPOINT_NAMES_BY_LANG) == 20
+    assert len(TOWER_STAGES_BY_LANG) == 20
+
+
+def test_normalize_language_code() -> None:
+    """Verifies that all language formats map to canonical Unreal Engine language tags."""
+    from expedition33_rpc.detection.normalization import normalize_language_code
+
+    assert normalize_language_code("en") == "en-US"
+    assert normalize_language_code("en-US") == "en-US"
+    assert normalize_language_code("it") == "it"
+    assert normalize_language_code("it-IT") == "it"
+    assert normalize_language_code("fr") == "fr-FR"
+    assert normalize_language_code("fr-FR") == "fr-FR"
+    assert normalize_language_code("de") == "de"
+    assert normalize_language_code("de-DE") == "de"
+    assert normalize_language_code("es") == "es"
+    assert normalize_language_code("es-ES") == "es"
+    assert normalize_language_code("es-419") == "es-419"
+    assert normalize_language_code("es-MX") == "es-419"
+    assert normalize_language_code("pt-BR") == "pt-BR"
+    assert normalize_language_code("pt") == "pt-BR"
+    assert normalize_language_code("ja") == "ja"
+    assert normalize_language_code("ko") == "ko"
+    assert normalize_language_code("zh-Hans") == "zh-Hans"
+    assert normalize_language_code("zh-CN") == "zh-Hans"
+    assert normalize_language_code("zh-Hant") == "zh-Hant"
+    assert normalize_language_code("zh-TW") == "zh-Hant"
+    assert normalize_language_code("ru") == "ru"
+    assert normalize_language_code("pl") == "pl"
+    assert normalize_language_code("ar") == "ar"
+    assert normalize_language_code("cs") == "cs"
+    assert normalize_language_code("tr") == "tr"
+    assert normalize_language_code("uk") == "uk"
+    assert normalize_language_code("th") == "th"
+    assert normalize_language_code("vi") == "vi"
+    assert normalize_language_code("id") == "id"
+    # Fallback to English
+    assert normalize_language_code("") == "en-US"
+    assert normalize_language_code("unknown_lang") == "en-US"
+
+
+def test_multi_language_zone_and_checkpoint_formatting() -> None:
+    """Verifies that format_zone_name and format_checkpoint_tag output real in-game names across languages."""
+    from expedition33_rpc.detection.normalization import format_checkpoint_tag, format_zone_name
+
+    # 1. Zone formatting for Old Lumière across distinct language families
+    assert format_zone_name("Level_OldLumiere_Main", lang="en-US") == "Old Lumière"
+    assert format_zone_name("Level_OldLumiere_Main", lang="it") == "Vecchia Lumière"
+    assert format_zone_name("Level_OldLumiere_Main", lang="fr") == "Vieille Lumière"
+    assert format_zone_name("Level_OldLumiere_Main", lang="de") == "Alt-Lumière"
+    assert format_zone_name("Level_OldLumiere_Main", lang="es") == "Vieja Lumière"
+    assert format_zone_name("Level_OldLumiere_Main", lang="ja") == "旧ルミエール"
+    assert format_zone_name("Level_OldLumiere_Main", lang="zh-CN") == "卢明旧城"
+    assert format_zone_name("Level_OldLumiere_Main", lang="zh-TW") == "盧明舊城"
+    assert format_zone_name("Level_OldLumiere_Main", lang="ru") == "Старый Люмьер"
+    assert format_zone_name("Level_OldLumiere_Main", lang="ar") == "لوميير القديمة"
+
+    # 2. The Continent across languages
+    assert format_zone_name("Level_WorldMap", lang="en-US") == "The Continent"
+    assert format_zone_name("Level_WorldMap", lang="it") == "Il continente"
+    assert format_zone_name("Level_WorldMap", lang="fr") == "Continent"
+    assert format_zone_name("Level_WorldMap", lang="de") == "Der Kontinent"
+    assert format_zone_name("Level_WorldMap", lang="ja") == "大陸"
+    assert format_zone_name("Level_WorldMap", lang="zh-Hans") == "大陆"
+    assert format_zone_name("Level_WorldMap", lang="ar") == "القارة"
+
+    # 3. Checkpoint formatting across languages
+    assert (
+        format_checkpoint_tag("Level.SpawnPoint.EsquieNest.Francois", lang="en") == "François' Cave"
+    )
+    assert (
+        format_checkpoint_tag("Level.SpawnPoint.EsquieNest.Francois", lang="it")
+        == "Grotta di François"
+    )
+    assert (
+        format_checkpoint_tag("Level.SpawnPoint.EsquieNest.Francois", lang="fr")
+        == "Grotte de François"
+    )
+    assert (
+        format_checkpoint_tag("Level.SpawnPoint.EsquieNest.Francois", lang="de")
+        == "François' Höhle"
+    )
+    assert (
+        format_checkpoint_tag("Level.SpawnPoint.EsquieNest.Francois", lang="ja")
+        == "フランソワの洞窟"
+    )
+    assert (
+        format_checkpoint_tag("Level.SpawnPoint.EsquieNest.Francois", lang="zh-CN")
+        == "弗朗索瓦的洞穴"
+    )

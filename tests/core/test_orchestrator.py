@@ -64,19 +64,19 @@ def test_orchestrator_step_update_coordinates_subsystems(tmp_path: Path) -> None
 
         assert result is not None
         assert result.is_running is True
-        assert result.zone_name == "Old Lumiere"
+        assert result.zone_name == "Old Lumière"
 
         # Assert frame emitted on mock Discord channel
         frame = pipe.pop_last_frame_payload()
         assert frame is not None
         assert frame["cmd"] == "SET_ACTIVITY"
         assert frame["args"]["pid"] == 1234
-        assert "Old Lumiere" in frame["args"]["activity"]["state"]
+        assert "Old Lumière" in frame["args"]["activity"]["state"]
         assert frame["args"]["activity"]["details"] == "Exploring"
 
         # Assert external subscriber notification
         assert len(state_changed_events) == 1
-        assert state_changed_events[0][0].zone_name == "Old Lumiere"
+        assert state_changed_events[0][0].zone_name == "Old Lumière"
         assert state_changed_events[0][1] is False
 
 
@@ -660,7 +660,7 @@ def test_orchestrator_session_simulator_telemetry_flow(tmp_path: Path) -> None:
         session.start_game(pid=8888).enter_zone("Level_Main_OldLumiere", checkpoint="Entrance")
         st2 = orchestrator.step_update()
         assert st2 is not None and st2.is_running is True
-        assert st2.zone_name == "Old Lumiere"
+        assert st2.zone_name == "Old Lumière"
         assert st2.checkpoint_name == "Entrance"
         assert len(observed_states) == 2
 
@@ -669,7 +669,7 @@ def test_orchestrator_session_simulator_telemetry_flow(tmp_path: Path) -> None:
         assert frame_explore["cmd"] == "SET_ACTIVITY"
         assert frame_explore["args"]["pid"] == 8888
         assert frame_explore["args"]["activity"]["details"] == "Exploring"
-        assert "Old Lumiere" in frame_explore["args"]["activity"]["state"]
+        assert "Old Lumière" in frame_explore["args"]["activity"]["state"]
 
         # 3. Trigger combat
         session.trigger_combat("Duollistes")
@@ -759,7 +759,7 @@ def test_orchestrator_callbacks_dispatch(tmp_path: Path) -> None:
         st = orchestrator.step_update()
         assert st is not None
         assert len(state_calls) == 1
-        assert state_calls[0][0].zone_name == "Old Lumiere"
+        assert state_calls[0][0].zone_name == "Old Lumière"
 
         sample_info = UpdateInfo(tag_name="v2.0.0", version_tuple=(2, 0, 0), html_url="")
         orchestrator.on_update_check_complete(sample_info)

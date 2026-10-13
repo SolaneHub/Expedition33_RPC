@@ -252,7 +252,9 @@ class BridgeStateProvider:
 
             if is_fresh:
                 raw_zone = (
-                    bridge.get("zone") if bridge.get("zone") is not None else bridge.get("raw_zone")
+                    bridge.get("raw_zone")
+                    if bridge.get("raw_zone") is not None
+                    else bridge.get("zone")
                 )
                 raw_zone_str = str(raw_zone) if raw_zone is not None else ""
 

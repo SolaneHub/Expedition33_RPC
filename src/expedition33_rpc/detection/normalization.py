@@ -10,11 +10,14 @@ import unicodedata
 from typing import Any
 
 from expedition33_rpc.detection.game_data import (
+    ALL_SUPPORTED_LANGUAGES,
+    CHECKPOINT_NAMES_BY_LANG,
     CHECKPOINT_NAMES_EN,
     CHECKPOINT_NAMES_IT,
     CONTEXTUAL_CHECKPOINTS,
     ENDLESS_TOWER_TRIALS,
     MAIN_MENU_TOKENS,
+    ZONE_NAME_OVERRIDES_BY_LANG,
     ZONE_NAME_OVERRIDES_EN,
     ZONE_NAME_OVERRIDES_IT,
     TowerTrial,
@@ -26,13 +29,71 @@ def _normalize_alphanumeric_key(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
-# Pre-compiled O(1) hash maps for normalized checkpoint tag resolution
-CHECKPOINT_HASH_MAP_EN: dict[str, str] = {
-    _normalize_alphanumeric_key(k): v for k, v in CHECKPOINT_NAMES_EN.items()
+def normalize_language_code(lang: str | None) -> str:
+    """Normalizes raw language codes (e.g. 'it-IT', 'fr_FR', 'zh-CN') to canonical game language codes."""
+    if not lang:
+        return "en-US"
+    c = lang.strip().lower().replace("_", "-")
+    match c:
+        case "en" | "en-us" | "en-gb":
+            return "en-US"
+        case "it" | "it-it":
+            return "it"
+        case "fr" | "fr-fr" | "fr-ca":
+            return "fr-FR"
+        case "de" | "de-de" | "de-at" | "de-ch":
+            return "de"
+        case "es-419" | "es-mx" | "es-ar" | "es-co" | "es-cl" | "es-latam":
+            return "es-419"
+        case "es" | "es-es":
+            return "es"
+        case "pt-br" | "pt":
+            return "pt-BR"
+        case "ja" | "ja-jp":
+            return "ja"
+        case "ko" | "ko-kr":
+            return "ko"
+        case "zh-hans" | "zh-cn" | "zh-sg" | "zh":
+            return "zh-Hans"
+        case "zh-hant" | "zh-tw" | "zh-hk":
+            return "zh-Hant"
+        case "ru" | "ru-ru":
+            return "ru"
+        case "pl" | "pl-pl":
+            return "pl"
+        case "ar" | "ar-sa" | "ar-ae" | "ar-eg":
+            return "ar"
+        case "cs" | "cs-cz":
+            return "cs"
+        case "tr" | "tr-tr":
+            return "tr"
+        case "uk" | "uk-ua":
+            return "uk"
+        case "th" | "th-th":
+            return "th"
+        case "vi" | "vi-vn":
+            return "vi"
+        case "id" | "id-id":
+            return "id"
+        case _:
+            prefix = c.split("-")[0]
+            for canon in ALL_SUPPORTED_LANGUAGES:
+                if canon.lower().startswith(prefix):
+                    return canon
+            return "en-US"
+
+
+# Pre-compiled O(1) hash maps for normalized checkpoint tag resolution across all languages
+CHECKPOINT_HASH_MAPS_BY_LANG: dict[str, dict[str, str]] = {
+    lang: {_normalize_alphanumeric_key(k): v for k, v in table.items()}
+    for lang, table in CHECKPOINT_NAMES_BY_LANG.items()
 }
-CHECKPOINT_HASH_MAP_IT: dict[str, str] = {
-    _normalize_alphanumeric_key(k): v for k, v in CHECKPOINT_NAMES_IT.items()
-}
+CHECKPOINT_HASH_MAP_EN: dict[str, str] = CHECKPOINT_HASH_MAPS_BY_LANG.get(
+    "en-US", {_normalize_alphanumeric_key(k): v for k, v in CHECKPOINT_NAMES_EN.items()}
+)
+CHECKPOINT_HASH_MAP_IT: dict[str, str] = CHECKPOINT_HASH_MAPS_BY_LANG.get(
+    "it", {_normalize_alphanumeric_key(k): v for k, v in CHECKPOINT_NAMES_IT.items()}
+)
 
 
 def strip_accents(text: str) -> str:
@@ -50,7 +111,7 @@ def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
     display_lower = (zone_display or "").lower().strip()
     if raw_lower in MAIN_MENU_TOKENS:
         return True
-    if any(k in raw_lower for k in ("mainmenu", "bootstrap", "titlescreen", "frontend")):
+    if any(k in raw_lower for k in ("mainmenu", "titlescreen")):
         return True
     return "menu" in raw_lower or "menu" in display_lower
 
@@ -162,11 +223,13 @@ def resolve_tower_trial(
 
 def format_zone_name(raw_name: str, lang: str = "en") -> str:
     """Converts internal Unreal Engine map names (e.g. Level_Sirene_Main_V2) to player-friendly titles."""
+    canon_lang = normalize_language_code(lang)
+
     if not raw_name:
-        return "In esplorazione" if lang.startswith("it") else "Exploring"
+        return "In esplorazione" if canon_lang == "it" else "Exploring"
 
     if is_main_menu(raw_name):
-        return "Nel menu principale" if lang.startswith("it") else "Main Menu"
+        return "Nel menu principale" if canon_lang == "it" else "Main Menu"
 
     continent_names = {
         "main",
@@ -177,8 +240,11 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
         "level_worldmap_main",
         "level_worldmap_main_v2",
     }
+    lang_overrides = ZONE_NAME_OVERRIDES_BY_LANG.get(canon_lang) or (
+        ZONE_NAME_OVERRIDES_IT if canon_lang == "it" else ZONE_NAME_OVERRIDES_EN
+    )
     if raw_name.lower().strip() in continent_names or "worldmap" in raw_name.lower():
-        return "Il Continente" if lang.startswith("it") else "The Continent"
+        return lang_overrides.get("worldmap", "The Continent")
 
     cleaned = raw_name
     for prefix in [
@@ -207,20 +273,20 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
     normalized = spaced.strip().lower()
 
     if normalized in ("main", "world map", "worldmap"):
-        return "Il Continente" if lang.startswith("it") else "The Continent"
+        return lang_overrides.get("worldmap", "The Continent")
 
-    # Check official overrides
-    if lang.startswith("it"):
-        override = ZONE_NAME_OVERRIDES_IT.get(normalized) or ZONE_NAME_OVERRIDES_IT.get(
-            cleaned.lower().strip()
-        )
-        if override:
-            return override
-    override = ZONE_NAME_OVERRIDES_EN.get(normalized) or ZONE_NAME_OVERRIDES_EN.get(
-        cleaned.lower().strip()
-    )
+    # Check official overrides for active language
+    override = lang_overrides.get(normalized) or lang_overrides.get(cleaned.lower().strip())
     if override:
         return override
+
+    # Fallback to English overrides
+    if canon_lang != "en-US":
+        en_override = ZONE_NAME_OVERRIDES_EN.get(normalized) or ZONE_NAME_OVERRIDES_EN.get(
+            cleaned.lower().strip()
+        )
+        if en_override:
+            return en_override
 
     return spaced.strip()
 
@@ -241,9 +307,14 @@ def format_checkpoint_tag(
     if suffix in ("WorldMap", "Generic", "Dynamic", "Editor", "todelete", "None", "Default"):
         return ""
 
-    name_dict = CHECKPOINT_NAMES_IT if lang.startswith("it") else CHECKPOINT_NAMES_EN
+    canon_lang = normalize_language_code(lang)
+    name_dict = CHECKPOINT_NAMES_BY_LANG.get(canon_lang) or (
+        CHECKPOINT_NAMES_IT if canon_lang == "it" else CHECKPOINT_NAMES_EN
+    )
     fallback_dict = CHECKPOINT_NAMES_EN
-    hash_map = CHECKPOINT_HASH_MAP_IT if lang.startswith("it") else CHECKPOINT_HASH_MAP_EN
+    hash_map = CHECKPOINT_HASH_MAPS_BY_LANG.get(canon_lang) or (
+        CHECKPOINT_HASH_MAP_IT if canon_lang == "it" else CHECKPOINT_HASH_MAP_EN
+    )
     fallback_hash_map = CHECKPOINT_HASH_MAP_EN
 
     clean_tag_lower = clean_tag.lower()
@@ -265,7 +336,6 @@ def format_checkpoint_tag(
     # 2. Declarative contextual zone matching from game_data.json
     if zone:
         z_norm = strip_accents(zone).lower()
-        is_it = lang.startswith("it")
         for rule in CONTEXTUAL_CHECKPOINTS:
             if not any(k in z_norm for k in rule.get("zone_keywords", [])):
                 continue
@@ -277,10 +347,15 @@ def format_checkpoint_tag(
                 k in clean_tag_lower for k in rule["tag_contains"]
             ):
                 continue
-            if "contains" in rule and any(k in norm_suffix for k in rule["contains"]):
-                return rule["it"] if is_it else rule["en"]
-            if "suffixes" in rule and norm_suffix in rule["suffixes"]:
-                return rule["it"] if is_it else rule["en"]
+            if ("contains" in rule and any(k in norm_suffix for k in rule["contains"])) or (
+                "suffixes" in rule and norm_suffix in rule["suffixes"]
+            ):
+                by_lang = rule.get("by_lang")
+                if isinstance(by_lang, dict) and canon_lang in by_lang:
+                    return by_lang[canon_lang]
+                if canon_lang == "it":
+                    return rule.get("it", rule.get("en", ""))
+                return rule.get("en", "")
 
     # 3. Direct dictionary lookup by suffix / clean_tag in O(1)
     res = (
@@ -298,13 +373,15 @@ def format_checkpoint_tag(
     spaced = re.sub(r"([a-z])([A-Z])", r"\1 \2", suffix)
     spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", spaced).strip()
     if spaced.lower() in ("entry", "entrance"):
-        return "Entrata" if lang.startswith("it") else "Entrance"
+        return name_dict.get("entrance", "Entrata" if canon_lang == "it" else "Entrance")
     return spaced
 
 
 __all__ = [
     "CHECKPOINT_HASH_MAP_EN",
     "CHECKPOINT_HASH_MAP_IT",
+    "CHECKPOINT_HASH_MAPS_BY_LANG",
+    "normalize_language_code",
     "strip_accents",
     "is_main_menu",
     "is_menu_zone",

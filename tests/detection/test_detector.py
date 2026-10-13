@@ -268,7 +268,7 @@ def test_bridge_provider_rejects_corrupted_or_partial_json(tmp_path: Path) -> No
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("menu_token", ["MainMenu", "bootstrap", "map_game_bootstrap"])
+@pytest.mark.parametrize("menu_token", ["MainMenu", "Level_MainMenu", "WBP_MM_MainMenu"])
 def test_main_menu_detection(tmp_path: Path, menu_token: str) -> None:
     mock_proc = FakeProcess(pid=9999, name="Sandfall-Win64-Shipping.exe")
     ini_path = tmp_path / "GameUserSettings.ini"
@@ -423,13 +423,13 @@ def test_detector_bridge_grace_period_prevents_telemetry_jitter(tmp_path: Path) 
 
     # Tick 1: Bridge succeeds
     st1 = detector.get_game_state()
-    assert st1.zone_name == "Old Lumiere"
+    assert st1.zone_name == "Old Lumière"
     assert st1.in_combat is True
 
     # Tick 2: Bridge glitch (read_bridge_status returns None), bridge internal grace period returns cached state
     current_clock = 1001.0
     st2 = detector.get_game_state()
-    assert st2.zone_name == "Old Lumiere"
+    assert st2.zone_name == "Old Lumière"
     assert st2.in_combat is True
 
     # Tick 3: Past grace period (5.0s > 2.5s), telemetry expires
@@ -466,20 +466,20 @@ def test_bridge_retains_checkpoint_across_ticks_for_same_zone() -> None:
     # First tick: bridge is active, checkpoint supplied
     bridge_provider.read_game_data.return_value["checkpoint"] = "Entrance"
     st1 = detector.get_game_state()
-    assert st1.zone_name == "Old Lumiere"
+    assert st1.zone_name == "Old Lumière"
     assert st1.checkpoint_name == "Entrance"
 
     # Second tick: bridge returns empty checkpoint for the same zone;
     # it must retain the last known checkpoint
     bridge_provider.read_game_data.return_value["checkpoint"] = ""
     st2 = detector.get_game_state()
-    assert st2.zone_name == "Old Lumiere"
+    assert st2.zone_name == "Old Lumière"
     assert st2.checkpoint_name == "Entrance"
 
     # Third tick: zone changes to Monolith with empty checkpoint; checkpoint should cleanly reset
     bridge_provider.read_game_data.return_value["raw_zone"] = "Level_Main_Monolith"
     st3 = detector.get_game_state()
-    assert st3.zone_name == "Monolith"
+    assert st3.zone_name == "The Monolith"
     assert st3.checkpoint_name == ""
 
 

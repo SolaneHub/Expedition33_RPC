@@ -33,9 +33,9 @@ pytestmark = pytest.mark.unit
 
 
 def test_is_menu_zone() -> None:
-    assert is_menu_zone(GameState.create(raw_zone="MainMenu")) is True
-    assert is_menu_zone(GameState.create(raw_zone="bootstrap")) is True
-    assert is_menu_zone(GameState.create(raw_zone="map_game_bootstrap")) is True
+    assert is_menu_zone(GameState.create(raw_zone="Level_MainMenu")) is True
+    assert is_menu_zone(GameState.create(raw_zone="WBP_MM_MainMenu")) is True
+    assert is_menu_zone(GameState.create(raw_zone="WBP_MM_TitleScreen")) is True
     assert is_menu_zone(GameState.create(zone_name="Main Menu")) is True
     assert is_menu_zone(GameState.create(zone_name="Nel menu principale")) is True
     assert is_menu_zone(GameState.create(raw_zone="Level_Forest", zone_name="Forest")) is False
@@ -76,10 +76,10 @@ def test_format_tray_title() -> None:
         == "Expedition 33 RPC (Waiting for game...)"
     )
 
-    menu_en = GameState.create(is_running=True, raw_zone="MainMenu", game_language="en")
+    menu_en = GameState.create(is_running=True, raw_zone="Level_MainMenu", game_language="en")
     assert format_tray_title(menu_en) == "Expedition 33: In Main Menu"
 
-    menu_it = GameState.create(is_running=True, raw_zone="MainMenu", game_language="it")
+    menu_it = GameState.create(is_running=True, raw_zone="Level_MainMenu", game_language="it")
     assert format_tray_title(menu_it) == "Expedition 33: Nel menu principale"
 
     spoiler_combat = GameState.create(is_running=True, in_combat=True, zone_name="Secret Area")
@@ -115,13 +115,13 @@ def test_format_tray_zone_and_combat_status() -> None:
     assert format_tray_combat_status(running, anti_spoiler=True) == "Status: In Combat"
     assert format_tray_combat_status(running, anti_spoiler=False) == "Combat: Fighting Boss"
 
-    menu = GameState.create(is_running=True, raw_zone="MainMenu", game_language="en")
+    menu = GameState.create(is_running=True, raw_zone="Level_MainMenu", game_language="en")
     assert format_tray_zone_status(menu) == "Location: In Main Menu"
     assert format_tray_zone_status(menu, anti_spoiler=True) == "Location: In Main Menu"
     assert format_tray_combat_status(menu) == "Status: Main Menu"
     assert format_tray_combat_status(menu, anti_spoiler=True) == "Status: Main Menu"
 
-    menu_it = GameState.create(is_running=True, raw_zone="MainMenu", game_language="it")
+    menu_it = GameState.create(is_running=True, raw_zone="Level_MainMenu", game_language="it")
     assert format_tray_zone_status(menu_it, anti_spoiler=True) == "Location: Nel menu principale"
     assert format_tray_combat_status(menu_it, anti_spoiler=True) == "Status: Nel menu principale"
 
@@ -156,6 +156,52 @@ def test_format_presence_boundary_limits() -> None:
     det_over, st_over = format_presence(over_state)
     assert len(det_over) <= 128
     assert len(st_over) <= 128
+
+
+def test_format_presence_across_languages() -> None:
+    """Verifies format_presence outputs accurately localized details and state across language families."""
+    # French (fr-FR)
+    state_fr = GameState.create(
+        is_running=True, zone_name="Vieille Lumière", in_combat=False, game_language="fr-FR"
+    )
+    assert format_presence(state_fr) == ("En exploration", "Vieille Lumière")
+
+    # German (de) Combat with Enemy
+    state_de = GameState.create(
+        is_running=True,
+        zone_name="Alt-Lumière",
+        in_combat=True,
+        enemy_name="Goblu",
+        game_language="de",
+    )
+    assert format_presence(state_de) == ("Kämpft gegen: Goblu", "Alt-Lumière")
+
+    # Japanese (ja) Main Menu
+    state_ja = GameState.create(is_running=True, raw_zone="Level_MainMenu", game_language="ja")
+    assert format_presence(state_ja) == ("メインメニュー", "タイトル画面")
+
+    # Russian (ru) Anti-Spoiler
+    state_ru = GameState.create(
+        is_running=True, zone_name="Скрытая локация", in_combat=True, game_language="ru"
+    )
+    assert format_presence(state_ru, anti_spoiler=True) == ("В бою", "Скрытая локация")
+
+    # Simplified Chinese (zh-Hans) Tower Stage & Floor
+    state_zh = GameState.create(
+        is_running=True,
+        zone_name="克莱尔之塔",
+        tower_stage_trial=(1, 2),
+        game_language="zh-Hans",
+    )
+    assert format_presence(state_zh) == ("探索中", "克莱尔之塔 (第1层，试炼2)")
+
+    state_zh_floor = GameState.create(
+        is_running=True,
+        zone_name="无尽之塔",
+        tower_floor=7,
+        game_language="zh-Hans",
+    )
+    assert format_presence(state_zh_floor) == ("探索中", "无尽之塔 (第7层)")
 
 
 # ---------------------------------------------------------------------------

@@ -51,7 +51,7 @@ def test_full_lifecycle_simulation(session: GameSessionSimulator, simulated_disc
     pipe, _client, rpc_manager = simulated_discord
 
     # 1. Game Launch into Main Menu
-    session.start_game().enter_zone("Level_Bootstrap")
+    session.start_game().enter_zone("Level_MainMenu")
     state1 = session.get_game_state()
     assert state1.is_running is True
     assert state1.zone_name == "Main Menu"
@@ -65,20 +65,20 @@ def test_full_lifecycle_simulation(session: GameSessionSimulator, simulated_disc
     assert activity1["state"] == "Title Screen"
     assert activity1["assets"]["large_image"] == "logo"
 
-    # 2. Transition into Combat (Old Lumiere vs Duollistes)
+    # 2. Transition into Combat (Old Lumière vs Duollistes)
     session.enter_zone("Level_Main_OldLumiere", checkpoint="Entrance").trigger_combat("Duollistes")
     state2 = session.get_game_state()
     assert state2.is_running is True
     assert state2.in_combat is True
     assert state2.enemy_name == "Duollistes"
-    assert state2.zone_name == "Old Lumiere"
+    assert state2.zone_name == "Old Lumière"
 
     rpc_manager.update(state2, anti_spoiler=False)
     frame2 = pipe.pop_last_frame_payload()
     assert frame2 is not None
     activity2 = frame2["args"]["activity"]
     assert activity2["details"] == "Fighting: Duollistes"
-    assert "Old Lumiere" in activity2["state"]
+    assert "Old Lumière" in activity2["state"]
     assert activity2["assets"]["large_image"] == "logo"
 
     # 3. Victory & Exploration with Checkpoint
@@ -92,7 +92,7 @@ def test_full_lifecycle_simulation(session: GameSessionSimulator, simulated_disc
     assert frame3 is not None
     activity3 = frame3["args"]["activity"]
     assert activity3["details"] == "Exploring"
-    assert "Old Lumiere (Manor Gardens)" in activity3["state"]
+    assert "Old Lumière (Manor Gardens)" in activity3["state"]
 
     # 4. Anti-Spoiler Protection Enabled
     rpc_manager.invalidate()  # Force update
@@ -133,7 +133,7 @@ def test_timeline_menu_to_combat_and_return_to_menu(
     # 2. Transition to Exploration
     session.enter_zone("Level_Main_OldLumiere")
     st2 = session.get_game_state()
-    assert st2.zone_name == "Old Lumiere"
+    assert st2.zone_name == "Old Lumière"
     assert st2.in_combat is False
     rpc_manager.update(st2, anti_spoiler=False)
     frame2 = pipe.pop_last_frame_payload()
@@ -151,7 +151,7 @@ def test_timeline_menu_to_combat_and_return_to_menu(
     assert frame3["args"]["activity"]["details"] == "Fighting: Duollistes"
 
     # 4. Exit to Main Menu
-    session.enter_zone("Level_Bootstrap")
+    session.enter_zone("Level_MainMenu")
     st4 = session.get_game_state()
     assert "Main Menu" in st4.zone_name
     assert st4.in_combat is False
@@ -167,11 +167,11 @@ def test_timeline_death_reload_telemetry(session: GameSessionSimulator) -> None:
     """Simulates player death in combat and checkpoint reload via Bridge telemetry without process restart."""
     session.start_game()
 
-    # 1. Initial state: exploring Old Lumiere at Campfire checkpoint
+    # 1. Initial state: exploring Old Lumière at Campfire checkpoint
     session.enter_zone("Level_Main_OldLumiere", checkpoint="Campfire")
     st1 = session.get_game_state()
     assert st1.is_running is True
-    assert st1.zone_name == "Old Lumiere"
+    assert st1.zone_name == "Old Lumière"
     assert st1.checkpoint_name == "Campfire"
 
     # 2. Player enters combat and dies
@@ -184,7 +184,7 @@ def test_timeline_death_reload_telemetry(session: GameSessionSimulator) -> None:
     session.leave_combat(checkpoint="Manor Gardens")
     st2 = session.get_game_state()
     assert st2.is_running is True
-    assert st2.zone_name == "Old Lumiere"
+    assert st2.zone_name == "Old Lumière"
     assert st2.checkpoint_name == "Manor Gardens"
     assert st2.in_combat is False
 
@@ -233,7 +233,7 @@ def test_fluent_game_session_simulation_chaining(session: GameSessionSimulator) 
     state = session.get_game_state()
     assert state.is_running is True
     assert state.in_combat is False
-    assert state.zone_name == "Old Lumiere"
+    assert state.zone_name == "Old Lumière"
     assert state.checkpoint_name == "Entrance"
 
     # 2. Trigger combat with Boss
@@ -255,7 +255,7 @@ def test_fluent_game_session_simulation_chaining(session: GameSessionSimulator) 
     session.leave_combat().set_checkpoint("Level.SpawnPoint.EsquieNest.Francois")
     post_state = session.get_game_state()
     assert post_state.in_combat is False
-    assert post_state.checkpoint_name == "Francois' Cave"
+    assert post_state.checkpoint_name == "François' Cave"
 
     # 5. Stop game
     session.stop_game()
@@ -293,7 +293,7 @@ def test_unified_orchestrator_e2e_simulation(tmp_path: Path) -> None:
         state_explore = orchestrator.step_update()
         assert state_explore is not None
         assert state_explore.is_running is True
-        assert state_explore.zone_name == "Old Lumiere"
+        assert state_explore.zone_name == "Old Lumière"
         assert state_explore.checkpoint_name == "Entrance"
 
         # Verify wire-level frame transmitted through MockDiscordServer
@@ -308,7 +308,7 @@ def test_unified_orchestrator_e2e_simulation(tmp_path: Path) -> None:
         assert activity_frame[1]["cmd"] == "SET_ACTIVITY"
         args = activity_frame[1]["args"]
         assert args["pid"] == 7777
-        assert "Old Lumiere" in args["activity"]["state"]
+        assert "Old Lumière" in args["activity"]["state"]
         assert args["activity"]["details"] == "Exploring"
 
         # 3. Enter combat with boss encounter
