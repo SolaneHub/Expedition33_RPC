@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.9.0] - 2026-10-13
+
+### Added
+- **Universal 20-Language Localization**:
+  - Extracted and normalized official in-game strings across all 20 officially supported languages directly from Unreal Engine `.locres` binary catalogs: English (`en`), Italian (`it`), French (`fr`), German (`de`), Spanish (`es`), Latin American Spanish (`es-419`), Japanese (`ja`), Korean (`ko`), Polish (`pl`), Brazilian Portuguese (`pt-BR`), Russian (`ru`), Simplified Chinese (`zh-Hans`), Traditional Chinese (`zh-Hant`), and more.
+  - Guaranteed 100% key symmetry across all 765 checkpoint tags and 48 exploration zones in all 20 languages.
+  - Fully mapped all 33 Endless Tower stages and trials from game data table `ST_BattleTowerStages` with localized stage and trial titles across all languages.
+  - Localized Discord Rich Presence details and state presentation templates across all 20 languages.
+- **SSOT Asset Catalog Architecture & Code Style Standards**:
+  - Consolidated presentation templates, localized strings, and domain dictionaries into `src/expedition33_rpc/assets/game_data.json` as the Single Source of Truth (SSOT).
+  - Integrated Prettier formatting (`.prettierrc.json`, `.prettierignore`) and added automated Prettier validation in GitHub Actions CI.
+- **Concurrency & IPC Hardening (`FILE_SHARE_DELETE`)**:
+  - Enforced Win32 `FILE_SHARE_DELETE` sharing flags on Windows file handles when reading bridge telemetry files, eliminating race condition locks during concurrent file writes by the game's Lua thread.
+- **Lua Bridge Integrity & Syntax Validation**:
+  - Embedded updated authentic UI token names inside the bundled `bridge.zip` asset.
+  - Added automated Lua tokenizer and AST syntax validator harness (`tests/harness/lua_validator.py`) to prevent bridge script regressions during build time.
+
+### Changed
+- **Dependency Injection & Callback Modernization**:
+  - Completed explicit Protocol-based Dependency Injection across `AppOrchestrator`, `GameDetector`, and UI layers.
+  - Streamlined orchestrator communication from generic multi-consumer pub/sub buses to direct, typed 1-to-1 event callbacks.
+  - Expanded automated test suite to 148 unit, integration, and E2E tests.
+
 ## [v1.8.0] - 2026-10-12
 
 ### Added

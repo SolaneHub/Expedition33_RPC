@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.8.0-blue.svg" alt="Release"></a>
+  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.9.0-blue.svg" alt="Release"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python"></a>
   <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform"></a>
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/badge/code%20style-ruff-000000.svg" alt="Code Style: Ruff"></a>
@@ -54,10 +54,13 @@
 
 - **Continuous Autonomous Detection**: Runs quietly in the system tray and establishes a Discord Rich Presence session the moment the game begins running (`SandFall-Win64-Shipping.exe` or `SandFall-WinGDK-Shipping.exe`), cleanly disconnecting when the game closes.
 - **Multi-Target Process Unification**: First-class simultaneous support for both **Steam** (`SandFall-Win64-Shipping.exe`) and **PC Game Pass / Microsoft Store** (`SandFall-WinGDK-Shipping.exe`) game editions with dynamic process resolution.
+- **Universal 20-Language Localization**: Full native presence support across all 20 officially supported game languages extracted directly from Unreal Engine `.locres` binary catalogs: English (`en`), Italian (`it`), French (`fr`), German (`de`), Spanish (`es`), Latin American Spanish (`es-419`), Japanese (`ja`), Korean (`ko`), Polish (`pl`), Brazilian Portuguese (`pt-BR`), Russian (`ru`), Simplified Chinese (`zh-Hans`), Traditional Chinese (`zh-Hant`), and more.
+- **100% Checkpoint & Trial Symmetry**: All **765 official checkpoint tags** and all **33 Endless Tower stages & trials** are fully mapped with localized titles across all 20 languages.
+- **Single Source of Truth (SSOT) Asset Catalog**: Centralized localization templates and domain data into `assets/game_data.json`, formatted with Prettier.
+- **Thread-Safe Telemetry Concurrency**: Enforced Win32 `FILE_SHARE_DELETE` flags on bridge telemetry file reads to eliminate Windows file locking collisions during concurrent Lua writes.
 - **Pure Real-Time Telemetry Pipeline**: A headless, non-intrusive Lua bridge powered by [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) that hooks directly into `AC_jRPG_BattleManager_C` on the game thread. Detects battle transitions with zero latency and extracts live enemy/boss titles without memory scanning. Employs a strict 5.0-second wall-clock freshness window to instantly expire stale combat or zone telemetry when the game or battle concludes.
 - **Cross-Platform Telemetry Paths**: Built-in compatibility path resolution (`compat_paths.py`) supporting Windows, Linux, and Steam Deck Proton/Wine environments.
 - **Lightweight Native Discord IPC Client**: Replaced third-party client wrappers with an in-house asynchronous wire client featuring intelligent rate-limiting, thread-safe cache invalidation, and automatic reconnection backoff.
-- **Exhaustive Expedition Flag Mapping**: All **115 official in-game Expedition Flags** across **48 zones** (from *Spring Meadows* to *The Monolith*, *Verso's Drafts*, and *The Reacher*) are mapped with sub-area disambiguation and multi-tier resolution.
 - **Official Zone Normalization**: Translates raw internal Unreal Engine map assets (`Level_Goblu_Main` -> *Flying Waters*, `Level_SeaCliff` -> *Stone Wave Cliffs*, `Level_CleasFlyingHouse` -> *Flying Manor*, `Level_SimonArea` -> *The Abyss*) into clean player-facing names.
 - **Endless Tower & Super Boss Intelligence**: Automatically resolves trials, stages, and Super Bosses (*Simon the Divergent Star*, *Clea Unleashed*, *Duollistes*, *Painted Love*).
 - **Unified Anti-Spoiler Mode**: One-click tray toggle to shield against spoilers when streaming or playing with friends.
@@ -68,12 +71,15 @@
 
 <h2 id="presence-matrix">🎮 What Appears on Your Discord Profile</h2>
 
-The status adjusts dynamically depending on whether your game language is set to **English** or **Italian**:
+The status adjusts dynamically depending on your in-game language across all **20 supported languages** (English, French, Italian, German, Spanish, Japanese, Korean, Russian, etc.):
 
 | State | Details (Top Line) | State (Bottom Line) | Image Tooltip | Elapsed Timer |
 | :--- | :--- | :--- | :--- | :--- |
 | **Exploration (EN)** | `Exploring` | `<Zone Name> (<Flag Name>)` *(e.g. `Sirene (Dancing Classes)`)* | `Clair Obscur: Expedition 33` | Active session duration |
 | **Exploration (IT)** | `In esplorazione` | `<Nome Zona> (<Nome Bandiera>)` *(es. `Sirène (Dancing Classes)`)* | `Clair Obscur: Expedition 33` | Durata sessione attiva |
+| **Exploration (FR)** | `En exploration` | `<Nom de zone> (<Nom de drapeau>)` *(ex. `Sirène (Dancing Classes)`)* | `Clair Obscur: Expedition 33` | Durée de session active |
+| **Exploration (DE)** | `Erkundung` | `<Zonenname> (<Flaggenname>)` | `Clair Obscur: Expedition 33` | Aktive Sitzungsdauer |
+| **Exploration (JA)** | `探索中` | `<ゾーン名> (<フラグ名>)` | `Clair Obscur: Expedition 33` | セッション経過時間 |
 | **Combat Encounter (EN)** | `Fighting: <Enemy / Boss>` | `<Zone Name> (<Flag Name>)` | `Clair Obscur: Expedition 33` | Active session duration |
 | **Combat Encounter (IT)** | `In combattimento con: <Nemico>` | `<Nome Zona> (<Nome Bandiera>)` | `Clair Obscur: Expedition 33` | Durata sessione attiva |
 | **Endless Tower (EN)** | `Fighting: <Boss / Enemy>` | `Endless Tower (Stage <X>, Trial <Y>)` | `Clair Obscur: Expedition 33` | Active session duration |
@@ -287,7 +293,7 @@ We welcome bug reports, feature suggestions, and questions from the community! I
 1. **Check Existing Issues**: Search [open issues](https://github.com/SolaneHub/Expedition33_RPC/issues) and [closed issues](https://github.com/SolaneHub/Expedition33_RPC/issues?q=is%3Aissue+is%3Aclosed) to see if the topic has already been addressed.
 2. **Update to Latest Version**: Verify that you are running the latest release from [Releases](https://github.com/SolaneHub/Expedition33_RPC/releases/latest) or through the in-app automatic updater.
 3. **Provide Context**: When reporting a bug, please include:
-   - Application version (e.g. `v1.8.0`)
+   - Application version (e.g. `v1.9.0`)
    - Game edition (Steam, PC Game Pass / Xbox, etc.)
    - Combat Bridge status (Installed via tray or automatic deployment)
    - Windows OS version
