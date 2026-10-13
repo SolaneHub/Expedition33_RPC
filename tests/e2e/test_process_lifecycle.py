@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import time
 import uuid
 from pathlib import Path
 
@@ -24,18 +23,26 @@ def test_single_instance_windows_mutex_subprocess() -> None:
     env["PYTHONPATH"] = str(repo_root / "src")
     env["EXPEDITION33_MUTEX_NAME"] = test_mutex
 
-    # 1. Spawn primary process running -m expedition33_rpc which acquires the mutex
+    # 1. Spawn primary process which acquires the mutex and notifies readiness
+    holder_script = (
+        "import time, sys\n"
+        "from expedition33_rpc.core.platform import is_already_running\n"
+        "assert is_already_running() is False\n"
+        "print('ACQUIRED', flush=True)\n"
+        "time.sleep(10.0)\n"
+    )
+
     proc1 = subprocess.Popen(
-        [sys.executable, "-m", "expedition33_rpc"],
+        [sys.executable, "-c", holder_script],
         env=env,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        text=True,
     )
 
     try:
-        # Give proc1 time to acquire the mutex and enter its main loop
-        time.sleep(1.0)
-        assert proc1.poll() is None, f"Primary process terminated prematurely: {proc1.poll()}"
+        assert proc1.stdout is not None
+        line = proc1.stdout.readline().strip()
+        assert line == "ACQUIRED"
 
         # 2. Spawn secondary process via -m expedition33_rpc - must detect mutex and exit with 0
         proc2 = subprocess.Popen(
@@ -48,15 +55,13 @@ def test_single_instance_windows_mutex_subprocess() -> None:
         returncode = proc2.wait(timeout=5.0)
         assert returncode == 0, f"Secondary process exited with non-zero code {returncode}"
     finally:
-        # Clean termination of primary process
-        proc1.terminate()
-        try:
-            proc1.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            proc1.kill()
-            proc1.wait(timeout=5.0)
+        proc1.kill()
+        proc1.wait(timeout=5.0)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX advisory file locks require non-win32 platform"
+)
 def test_posix_file_lock_subprocess_concurrency(tmp_path: Path) -> None:
     """Verifies advisory process file locking concurrency between two real OS subprocesses."""
     lock_file = tmp_path / "test_lifecycle.lock"
@@ -89,27 +94,72 @@ def test_posix_file_lock_subprocess_concurrency(tmp_path: Path) -> None:
         line = proc1.stdout.readline().strip()
         assert line == "LOCKED"
 
-        if sys.platform != "win32":
-            # On POSIX, verify second process fails to acquire lock
-            check_script = (
-                "from pathlib import Path\n"
-                "from expedition33_rpc.core.platform import acquire_posix_file_lock\n"
-                f"lock_path = Path(r'{lock_file}')\n"
-                "locked = acquire_posix_file_lock(lock_path)\n"
-                "sys.exit(0 if not locked else 1)\n"
-            )
-            proc2 = subprocess.run(
-                [sys.executable, "-c", check_script],
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=5.0,
-            )
-            assert proc2.returncode == 0
+        # On POSIX, verify second process fails to acquire lock
+        check_script = (
+            "import sys\n"
+            "from pathlib import Path\n"
+            "from expedition33_rpc.core.platform import acquire_posix_file_lock\n"
+            f"lock_path = Path(r'{lock_file}')\n"
+            "locked = acquire_posix_file_lock(lock_path)\n"
+            "sys.exit(0 if not locked else 1)\n"
+        )
+        proc2 = subprocess.run(
+            [sys.executable, "-c", check_script],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+        assert proc2.returncode == 0
     finally:
-        proc1.terminate()
-        try:
-            proc1.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            proc1.kill()
-            proc1.wait(timeout=5.0)
+        proc1.kill()
+        proc1.wait(timeout=5.0)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX advisory file locks require non-win32 platform"
+)
+def test_single_instance_posix_app_subprocess(tmp_path: Path) -> None:
+    """Verifies at OS kernel level that a secondary instance exits immediately with 0 on POSIX lock collision."""
+    repo_root = Path(__file__).resolve().parents[2]
+    lock_file = tmp_path / "test_app_instance.lock"
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(repo_root / "src")
+    env["EXPEDITION33_LOCK_FILE"] = str(lock_file)
+    env["PYSTRAY_BACKEND"] = "dummy"
+
+    # 1. Spawn primary process which acquires the lock file and notifies readiness
+    holder_script = (
+        "import time, sys\n"
+        "from expedition33_rpc.core.platform import is_already_running\n"
+        "assert is_already_running() is False\n"
+        "print('ACQUIRED', flush=True)\n"
+        "time.sleep(10.0)\n"
+    )
+
+    proc1 = subprocess.Popen(
+        [sys.executable, "-c", holder_script],
+        env=env,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        assert proc1.stdout is not None
+        line = proc1.stdout.readline().strip()
+        assert line == "ACQUIRED"
+
+        # 2. Spawn secondary process via -m expedition33_rpc - must detect lock and exit with 0
+        proc2 = subprocess.Popen(
+            [sys.executable, "-m", "expedition33_rpc"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        returncode = proc2.wait(timeout=5.0)
+        assert returncode == 0, f"Secondary process exited with non-zero code {returncode}"
+    finally:
+        proc1.kill()
+        proc1.wait(timeout=5.0)

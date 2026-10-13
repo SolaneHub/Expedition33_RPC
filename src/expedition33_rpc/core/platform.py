@@ -92,10 +92,19 @@ def is_already_running(
         )
         global _MUTEX_HANDLE
         kernel32 = ctypes.windll.kernel32
-        _MUTEX_HANDLE = kernel32.CreateMutexW(None, False, target_name)
+        handle = kernel32.CreateMutexW(None, False, target_name)
         last_error = kernel32.GetLastError()
         # ERROR_ALREADY_EXISTS = 183, ERROR_ACCESS_DENIED = 5
-        return last_error in (183, 5)
+        if last_error in (183, 5):
+            if handle:
+                with contextlib.suppress(Exception):
+                    kernel32.CloseHandle(handle)
+            return True
+        if _MUTEX_HANDLE is not None and handle != _MUTEX_HANDLE:
+            with contextlib.suppress(Exception):
+                kernel32.CloseHandle(_MUTEX_HANDLE)
+        _MUTEX_HANDLE = handle
+        return False
 
     return not acquire_posix_file_lock(lock_path=lock_path)
 
@@ -119,13 +128,55 @@ def acquire_posix_file_lock(lock_path: Path | str | None = None) -> bool:
         if lock_path is None
         else Path(lock_path)
     )
+
+    # If this process already holds this exact lock file, consider it successfully acquired
+    if _FLOCK_FILE is not None and not getattr(_FLOCK_FILE, "closed", False):
+        try:
+            if Path(_FLOCK_FILE.name).resolve() == target_path.resolve():
+                return True
+        except Exception:
+            pass
+        release_posix_file_lock()
+
+    f: Any = None
     try:
-        f = open(target_path, "w")  # noqa: SIM115
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        f = open(target_path, "a+")  # noqa: SIM115
+        fcntl_mod: Any = fcntl
+        fcntl_mod.flock(f, fcntl_mod.LOCK_EX | fcntl_mod.LOCK_NB)
         _FLOCK_FILE = f
         return True
     except (BlockingIOError, OSError):
+        if f is not None:
+            with contextlib.suppress(Exception):
+                f.close()
         return False
+
+
+def release_posix_file_lock() -> None:
+    """Releases the POSIX advisory file lock held by the current process, if any."""
+    global _FLOCK_FILE
+    if _FLOCK_FILE is not None:
+        with contextlib.suppress(Exception):
+            import fcntl
+
+            fcntl_mod: Any = fcntl
+            fcntl_mod.flock(_FLOCK_FILE, fcntl_mod.LOCK_UN)
+        with contextlib.suppress(Exception):
+            _FLOCK_FILE.close()
+        _FLOCK_FILE = None
+
+
+def release_single_instance_lock() -> None:
+    """Releases any single-instance mutex or file lock held by this process."""
+    global _MUTEX_HANDLE
+    if _MUTEX_HANDLE is not None:
+        if sys.platform == "win32":
+            with contextlib.suppress(Exception):
+                kernel32 = ctypes.windll.kernel32
+                kernel32.CloseHandle(_MUTEX_HANDLE)
+        _MUTEX_HANDLE = None
+    release_posix_file_lock()
 
 
 def acquire_single_instance_lock(
@@ -218,6 +269,8 @@ __all__ = [
     "acquire_single_instance_lock",
     "is_already_running",
     "read_file_shared_text",
+    "release_posix_file_lock",
+    "release_single_instance_lock",
     "winreg",
     "winreg_delete_value",
     "winreg_read_value",

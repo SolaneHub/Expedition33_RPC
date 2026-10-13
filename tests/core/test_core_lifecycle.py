@@ -12,7 +12,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from expedition33_rpc.core import startup
-from expedition33_rpc.core.app import is_already_running, main
+from expedition33_rpc.core.app import main
+from expedition33_rpc.core.platform import (
+    acquire_posix_file_lock,
+    is_already_running,
+    release_posix_file_lock,
+    release_single_instance_lock,
+)
 from expedition33_rpc.core.resources import get_resource_path
 from expedition33_rpc.core.settings import SettingsService
 
@@ -203,11 +209,74 @@ def test_get_resource_path_frozen_meipass(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_single_instance_cross_platform_guards() -> None:
-    with patch("sys.platform", "darwin"):
-        assert is_already_running() is False
-    with patch("sys.platform", "linux"):
-        assert is_already_running() is False
+def test_single_instance_cross_platform_guards(tmp_path: Path) -> None:
+    try:
+        with (
+            patch.dict(os.environ, {"EXPEDITION33_LOCK_FILE": str(tmp_path / "darwin.lock")}),
+            patch("sys.platform", "darwin"),
+        ):
+            assert is_already_running() is False
+        release_single_instance_lock()
+
+        with (
+            patch.dict(os.environ, {"EXPEDITION33_LOCK_FILE": str(tmp_path / "linux.lock")}),
+            patch("sys.platform", "linux"),
+        ):
+            assert is_already_running() is False
+        release_single_instance_lock()
+
+        with (
+            patch("sys.platform", "linux"),
+            patch("expedition33_rpc.core.platform.acquire_posix_file_lock", return_value=False),
+        ):
+            assert is_already_running() is True
+    finally:
+        release_single_instance_lock()
+
+
+@pytest.mark.unit
+def test_posix_file_lock_lifecycle_and_cleanup(tmp_path: Path) -> None:
+    """Verifies that POSIX flock lifecycle, idempotency, fd leaks, and release work cleanly."""
+    mock_fcntl = MagicMock()
+    mock_fcntl.LOCK_EX = 2
+    mock_fcntl.LOCK_NB = 4
+    mock_fcntl.LOCK_UN = 8
+
+    test_lock = tmp_path / "lifecycle.lock"
+
+    try:
+        with (
+            patch.dict(sys.modules, {"fcntl": mock_fcntl}),
+            patch("sys.platform", "linux"),
+        ):
+            # 1. Acquire lock cleanly
+            assert acquire_posix_file_lock(test_lock) is True
+            assert mock_fcntl.flock.called
+
+            # 2. Idempotent re-acquisition in same process returns True
+            assert acquire_posix_file_lock(test_lock) is True
+
+            # 3. Switching lock paths closes old file and acquires new one
+            other_lock = tmp_path / "other.lock"
+            assert acquire_posix_file_lock(other_lock) is True
+
+            # 4. Release closes file and calls LOCK_UN
+            release_posix_file_lock()
+            assert mock_fcntl.flock.call_args[0][1] == mock_fcntl.LOCK_UN
+
+            # 5. Subsequent release is a safe no-op
+            release_posix_file_lock()
+
+            # 6. Verify fd is NOT leaked when flock raises BlockingIOError
+            mock_fcntl.flock.side_effect = BlockingIOError("Lock collision")
+            with patch("builtins.open") as mock_open:
+                mock_file = MagicMock()
+                mock_open.return_value = mock_file
+                result = acquire_posix_file_lock(tmp_path / "failed.lock")
+                assert result is False
+                assert mock_file.close.called
+    finally:
+        release_single_instance_lock()
 
 
 @pytest.mark.unit
@@ -224,13 +293,16 @@ def test_single_instance_windows_mutex() -> None:
     ):
         assert is_already_running() is False
 
-    # Case 2: Already running (ERROR_ALREADY_EXISTS = 183)
+    # Case 2: Already running (ERROR_ALREADY_EXISTS = 183) - closes duplicate handle
     mock_kernel32.GetLastError.return_value = 183
+    mock_dup_handle = MagicMock()
+    mock_kernel32.CreateMutexW.return_value = mock_dup_handle
     with (
         patch("sys.platform", "win32"),
         patch.object(ctypes, "windll", mock_windll, create=True),
     ):
         assert is_already_running() is True
+        mock_kernel32.CloseHandle.assert_called_with(mock_dup_handle)
 
     # Case 3: Access denied (ERROR_ACCESS_DENIED = 5)
     mock_kernel32.GetLastError.return_value = 5
@@ -265,6 +337,22 @@ def test_main_smoke_test_invocation() -> None:
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 0
+
+
+@pytest.mark.integration
+def test_main_runs_and_releases_lock() -> None:
+    """Verifies that normal main() execution releases the single instance lock upon exit."""
+    mock_app = MagicMock()
+    mock_orchestrator = MagicMock()
+    with (
+        patch("expedition33_rpc.core.app.is_already_running", return_value=False),
+        patch("expedition33_rpc.core.orchestrator.AppOrchestrator", return_value=mock_orchestrator),
+        patch("expedition33_rpc.ui.tray_app.ExpeditionTrayApp", return_value=mock_app),
+        patch("expedition33_rpc.core.app.release_single_instance_lock") as mock_release,
+    ):
+        main()
+        mock_app.run.assert_called_once()
+        mock_release.assert_called_once()
 
 
 @pytest.mark.unit

@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from typing import Any
+
+if (
+    sys.platform not in ("win32", "darwin")
+    and not os.environ.get("DISPLAY")
+    and not os.environ.get("WAYLAND_DISPLAY")
+):
+    os.environ.setdefault("PYSTRAY_BACKEND", "dummy")
 
 from pystray import Menu, MenuItem
 

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from expedition33_rpc.core.app import is_already_running, main
+    from expedition33_rpc.core.platform import release_single_instance_lock
     from expedition33_rpc.core.resources import get_resource_path
     from expedition33_rpc.core.settings import SettingsService
     from expedition33_rpc.core.startup import (
@@ -19,6 +20,10 @@ def __getattr__(name: str) -> Any:
             import expedition33_rpc.core.app as app
 
             return getattr(app, name)
+        case "release_single_instance_lock":
+            import expedition33_rpc.core.platform as platform
+
+            return getattr(platform, name)
         case "get_resource_path":
             import expedition33_rpc.core.resources as res
 
@@ -39,6 +44,7 @@ __all__ = [
     "main",
     "get_resource_path",
     "is_already_running",
+    "release_single_instance_lock",
     "SettingsService",
     "is_startup_enabled",
     "set_startup_enabled",

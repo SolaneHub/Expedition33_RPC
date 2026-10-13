@@ -43,9 +43,13 @@ jobs:
 
       - name: Fast Unit Tests Fail-Fast
         run: uv run pytest -m unit
+        env:
+          PYSTRAY_BACKEND: dummy
 
       - name: Run Tests (pytest)
         run: uv run pytest
+        env:
+          PYSTRAY_BACKEND: dummy
 
       - name: Build Standalone Executable
         if: matrix.os == 'windows-latest'

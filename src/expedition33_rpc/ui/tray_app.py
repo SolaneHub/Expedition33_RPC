@@ -4,8 +4,16 @@ from __future__ import annotations
 
 import contextlib
 import os
+import sys
 import threading
 from typing import Any
+
+if (
+    sys.platform not in ("win32", "darwin")
+    and not os.environ.get("DISPLAY")
+    and not os.environ.get("WAYLAND_DISPLAY")
+):
+    os.environ.setdefault("PYSTRAY_BACKEND", "dummy")
 
 import pystray
 from PIL import Image

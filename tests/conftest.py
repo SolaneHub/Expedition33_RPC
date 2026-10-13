@@ -1,7 +1,19 @@
+from __future__ import annotations
+
+import os
+import sys
 from pathlib import Path
 
+# On Linux/POSIX systems without an active display server, use headless dummy pystray backend
+if (
+    sys.platform not in ("win32", "darwin")
+    and not os.environ.get("DISPLAY")
+    and not os.environ.get("WAYLAND_DISPLAY")
+):
+    os.environ.setdefault("PYSTRAY_BACKEND", "dummy")
+
 import pytest
-from tests.harness import DiscordPipeSimulator
+from tests.harness.discord_pipe import DiscordPipeSimulator
 
 from expedition33_rpc.core.settings import SettingsService
 
