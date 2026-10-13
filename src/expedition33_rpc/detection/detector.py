@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import sys
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -11,10 +13,11 @@ from typing import Any, Protocol, runtime_checkable
 import psutil
 
 from expedition33_rpc.detection.compat_paths import (
+    get_game_user_settings_path,
     get_telemetry_file_path,
     get_telemetry_file_paths,
 )
-from expedition33_rpc.detection.game_data import TARGET_PROCESS_NAMES
+from expedition33_rpc.detection.game_data import LOCALIZED_PRESENTATION, TARGET_PROCESS_NAMES
 from expedition33_rpc.detection.normalization import (
     format_checkpoint_tag,
     format_enemy_name,
@@ -111,8 +114,6 @@ class GameState:
         # 1. Zone name
         if zone_name is not None:
             resolved_zone = zone_name
-        elif not raw_zone:
-            resolved_zone = "In esplorazione" if game_language.startswith("it") else "Exploring"
         else:
             resolved_zone = format_zone_name(raw_zone, game_language)
 
@@ -187,6 +188,74 @@ class GameState:
         )
 
 
+if sys.platform == "win32":
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    _GENERIC_READ = 0x80000000
+    _FILE_SHARE_READ = 0x00000001
+    _FILE_SHARE_WRITE = 0x00000002
+    _FILE_SHARE_DELETE = 0x00000004
+    _OPEN_EXISTING = 3
+    _FILE_ATTRIBUTE_NORMAL = 0x80
+    _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+    _windll: Any = getattr(ctypes, "windll", None)
+    _kernel32: Any = getattr(_windll, "kernel32", None) if _windll is not None else None
+    if _kernel32 is not None:
+        _kernel32.CreateFileW.restype = wintypes.HANDLE
+        _kernel32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        _kernel32.CloseHandle.restype = wintypes.BOOL
+        _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+
+def _read_file_shared_text(path: str) -> str:
+    """Reads a file allowing concurrent read, write, and delete on Windows NTFS (avoiding WinError 32)."""
+    if sys.platform == "win32" and _kernel32 is not None:
+        try:
+            handle = _kernel32.CreateFileW(
+                path,
+                _GENERIC_READ,
+                _FILE_SHARE_READ | _FILE_SHARE_WRITE | _FILE_SHARE_DELETE,
+                None,
+                _OPEN_EXISTING,
+                _FILE_ATTRIBUTE_NORMAL,
+                None,
+            )
+            if handle in (_INVALID_HANDLE_VALUE, None, 0, -1, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
+                err = ctypes.GetLastError()
+                raise OSError(None, ctypes.FormatError(err), path, err)
+            try:
+                fd = msvcrt.open_osfhandle(handle, os.O_RDONLY)
+            except Exception:
+                _kernel32.CloseHandle(handle)
+                raise
+            try:
+                with open(fd, encoding="utf-8") as f:
+                    return f.read()
+            except Exception:
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+                raise
+        except OSError:
+            raise
+        except Exception:
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+    else:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+
 class BridgeStateProvider:
     """Reads real-time in-game telemetry provided by the UE4SS Lua bridge mod via IPC JSON."""
 
@@ -215,8 +284,7 @@ class BridgeStateProvider:
                 continue
             for attempt in range(6):
                 try:
-                    with open(p, encoding="utf-8") as f:
-                        content = f.read().strip()
+                    content = _read_file_shared_text(p).strip()
                     if content:
                         data = json.loads(content)
                         if isinstance(data, dict):
@@ -440,7 +508,7 @@ class GameDetector:
 
     def get_game_language(self, ini_path: Path | str | None = None) -> str:
         """Extracts configured UI language from GameUserSettings.ini with mtime caching."""
-        target_ini = ini_path or self._game_user_settings_path
+        target_ini = ini_path or self._game_user_settings_path or get_game_user_settings_path()
         if target_ini is None:
             target_ini = os.path.expandvars(
                 r"%LOCALAPPDATA%\Sandfall\Saved\Config\Windows\GameUserSettings.ini"
@@ -560,10 +628,13 @@ class GameDetector:
         # Determine zone key and update state timing machine
         zone_key = raw_zone.strip() or "Exploring"
         self.last_zone = zone_key
-        if zone_key in (
-            "Exploring",
-            "In esplorazione",
-        ) and self.timer_tracker.current_zone_id not in (None, "Exploring", "In esplorazione"):
+        exploring_tokens = {
+            s.get("exploring", "Exploring") for s in LOCALIZED_PRESENTATION.values()
+        } | {"Exploring"}
+        if zone_key in exploring_tokens and self.timer_tracker.current_zone_id not in (
+            None,
+            *exploring_tokens,
+        ):
             zone_key = self.timer_tracker.current_zone_id
 
         effective_start = self.timer_tracker.update(

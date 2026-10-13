@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
 import time
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.harness import LuaSyntaxError, validate_lua_syntax
 
 from expedition33_rpc.core.resources import get_resource_path
 from expedition33_rpc.detection.detector import BridgeStateProvider
@@ -236,16 +239,13 @@ def test_find_game_win64_directory_parses_synthetic_libraryfolders_vdf(tmp_path:
 
 
 def test_bridge_lua_syntax_validity() -> None:
-    """Verifies that main.lua inside bridge.zip contains valid Lua syntax with balanced blocks and delimiters."""
-    import shutil
-    import subprocess
-
+    """Verifies that main.lua inside bridge.zip contains valid Lua syntax using an AST validator and compiler."""
     bridge_zip_path = Path(get_resource_path("bridge.zip"))
     with zipfile.ZipFile(bridge_zip_path, "r") as z:
         lua_bytes = z.read("ue4ss/Mods/Expedition33RPC/scripts/main.lua")
         lua_content = lua_bytes.decode("utf-8")
 
-    # If luac compiler is available in PATH, perform official compiler validation
+    # 1. If luac compiler is available in PATH, perform official compiler validation
     luac_bin = shutil.which("luac")
     if luac_bin:
         res = subprocess.run(
@@ -257,44 +257,12 @@ def test_bridge_lua_syntax_validity() -> None:
         )
         assert res.returncode == 0, f"luac syntax validation failed: {res.stderr}"
 
-    # Structural in-memory verification (block and delimiter balancing)
-    # Strip multi-line comments: --[[ ... ]]
-    clean = re.sub(r"--\[\[.*?\]\]", "", lua_content, flags=re.DOTALL)
-    # Strip single line comments: -- ...
-    clean = re.sub(r"--[^\r\n]*", "", clean)
-    # Strip multi-line strings: [[ ... ]]
-    clean = re.sub(r"\[\[.*?\]\]", '""', clean, flags=re.DOTALL)
-    # Strip string literals: "..." and '...'
-    clean = re.sub(r'"(?:[^"\\]|\\.)*"', '""', clean)
-    clean = re.sub(r"'(?:[^'\\]|\\.)*'", "''", clean)
+    # 2. Comprehensive in-memory AST and grammar validation
+    validate_lua_syntax(lua_content)
 
-    # 1. Delimiter balance: (), [], {}
-    delim_stack: list[str] = []
-    delims = {"(": ")", "[": "]", "{": "}"}
-    for char in clean:
-        if char in delims:
-            delim_stack.append(char)
-        elif char in delims.values():
-            assert delim_stack, f"Unmatched closing delimiter: {char}"
-            top = delim_stack.pop()
-            assert delims[top] == char, f"Mismatched delimiter: {top} with {char}"
-    assert not delim_stack, f"Unclosed delimiters remaining: {delim_stack}"
-
-    # 2. Block structure balance: (function, if, do vs end; repeat vs until)
-    tokens = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", clean)
-    block_stack: list[str] = []
-    for tok in tokens:
-        if tok in ("function", "if", "do") or tok == "repeat":
-            block_stack.append(tok)
-        elif tok == "end":
-            assert block_stack, "Unexpected 'end' without opening block"
-            top = block_stack.pop()
-            assert top in ("function", "if", "do"), f"Unexpected 'end' matching {top}"
-        elif tok == "until":
-            assert block_stack, "Unexpected 'until' without opening repeat"
-            top = block_stack.pop()
-            assert top == "repeat", f"Unexpected 'until' matching {top}"
-    assert not block_stack, f"Unclosed blocks remaining: {block_stack}"
+    # 3. Verify that the validator catches actual syntax errors (no false negatives)
+    with pytest.raises(LuaSyntaxError):
+        validate_lua_syntax("function broken() return")  # missing end
 
 
 def test_find_game_win64_directory_from_wingdk_process(tmp_path: Path) -> None:

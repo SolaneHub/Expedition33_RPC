@@ -6,8 +6,6 @@ from expedition33_rpc.detection.detector import (
     GameState,
 )
 from expedition33_rpc.detection.game_data import (
-    CHECKPOINT_NAMES_EN,
-    CHECKPOINT_NAMES_IT,
     ENDLESS_TOWER_TRIALS,
     TARGET_PROCESS_NAMES,
 )
@@ -31,7 +29,5 @@ __all__ = [
     "resolve_tower_trial",
     "strip_accents",
     "TARGET_PROCESS_NAMES",
-    "CHECKPOINT_NAMES_EN",
-    "CHECKPOINT_NAMES_IT",
     "ENDLESS_TOWER_TRIALS",
 ]

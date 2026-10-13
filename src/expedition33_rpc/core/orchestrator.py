@@ -5,8 +5,9 @@ from __future__ import annotations
 import contextlib
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 from expedition33_rpc.core import startup
 from expedition33_rpc.core.settings import SettingsService
@@ -16,8 +17,83 @@ from expedition33_rpc.integrations.discord_rpc import DiscordRPCManager
 from expedition33_rpc.integrations.updater import AppUpdater, UpdateInfo, UpdateState
 
 
+@runtime_checkable
+class BridgeInstallerProtocol(Protocol):
+    """Protocol defining the bridge installer operations."""
+
+    def find_game_win64_directory(
+        self,
+        target_process_names: Iterable[str] | str | None = None,
+        known_win64_dir: Path | str | None = None,
+        known_exe_path: Path | str | None = None,
+    ) -> str | None: ...
+
+    def is_bridge_installed(self, win64_dir: Path | str | None = None) -> bool: ...
+
+    def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]: ...
+
+    def uninstall_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]: ...
+
+
+@runtime_checkable
+class StartupProtocol(Protocol):
+    """Protocol defining Windows autostart management operations."""
+
+    def is_startup_enabled(self) -> bool: ...
+
+    def set_startup_enabled(self, enable: bool) -> bool: ...
+
+    def sync_startup_path(self) -> None: ...
+
+    def toggle_startup(self) -> bool: ...
+
+
+class _DefaultBridgeInstaller:
+    """Default adapter delegating to expedition33_rpc.integrations.bridge_installer module."""
+
+    def find_game_win64_directory(
+        self,
+        target_process_names: Iterable[str] | str | None = None,
+        known_win64_dir: Path | str | None = None,
+        known_exe_path: Path | str | None = None,
+    ) -> str | None:
+        return bridge_installer.find_game_win64_directory(
+            target_process_names=target_process_names,
+            known_win64_dir=known_win64_dir,
+            known_exe_path=known_exe_path,
+        )
+
+    def is_bridge_installed(self, win64_dir: Path | str | None = None) -> bool:
+        return bridge_installer.is_bridge_installed(win64_dir=win64_dir)
+
+    def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+        return bridge_installer.install_bridge(win64_dir=win64_dir)
+
+    def uninstall_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+        return bridge_installer.uninstall_bridge(win64_dir=win64_dir)
+
+
+class _DefaultStartupService:
+    """Default adapter delegating to expedition33_rpc.core.startup module."""
+
+    def is_startup_enabled(self) -> bool:
+        return startup.is_startup_enabled()
+
+    def set_startup_enabled(self, enable: bool) -> bool:
+        return startup.set_startup_enabled(enable)
+
+    def sync_startup_path(self) -> None:
+        startup.sync_startup_path()
+
+    def toggle_startup(self) -> bool:
+        return startup.toggle_startup()
+
+
 class AppOrchestrator:
     """Headless controller coordinating telemetry detection, Discord RPC, auto-updates, and settings."""
+
+    on_state_change: Callable[[GameState, bool], None] | None = None
+    on_update_available: Callable[[UpdateInfo], None] | None = None
 
     def __init__(
         self,
@@ -25,6 +101,8 @@ class AppOrchestrator:
         rpc_manager: DiscordRPCManager | None = None,
         updater: AppUpdater | None = None,
         settings_service: SettingsService | None = None,
+        bridge_installer: BridgeInstallerProtocol | None = None,
+        startup_service: StartupProtocol | None = None,
         auto_install_bridge: bool = False,
         sync_startup: bool = False,
         on_state_change: Callable[[GameState, bool], None] | None = None,
@@ -41,6 +119,12 @@ class AppOrchestrator:
             updater
             if updater is not None
             else AppUpdater(on_state_change=self._on_updater_state_change)
+        )
+        self.bridge_installer: BridgeInstallerProtocol = (
+            bridge_installer if bridge_installer is not None else _DefaultBridgeInstaller()
+        )
+        self.startup_service: StartupProtocol = (
+            startup_service if startup_service is not None else _DefaultStartupService()
         )
 
         self.auto_install_bridge = auto_install_bridge
@@ -61,22 +145,15 @@ class AppOrchestrator:
         else:
             self.rpc_manager = DiscordRPCManager(is_stopping=self._is_stopping)
 
-        # Observer pattern for UI / state listeners
-        self._state_subscribers: list[Callable[[GameState, bool], None]] = []
-        self._update_subscribers: list[Callable[[UpdateInfo], None]] = []
-        self._subscribers_lock = threading.Lock()
-        if on_state_change is not None:
-            self.subscribe_state_change(on_state_change)
-        if on_update_available is not None:
-            self.subscribe_update_available(on_update_available)
+        # 1-to-1 event callbacks
+        self.on_state_change: Callable[[GameState, bool], None] | None = on_state_change
+        self.on_update_available: Callable[[UpdateInfo], None] | None = on_update_available
 
         # Current state - immutable GameState DTO, assignment is atomic
         self.current_state = GameState()
         self.bridge_auto_installed = False
 
-        self.bridge_install_min_cooldown: float = 30.0
-        self.bridge_install_max_cooldown: float = 300.0
-        self.bridge_install_cooldown: float = self.bridge_install_min_cooldown
+        self.bridge_install_cooldown: float = 30.0
         self.last_bridge_install_attempt: float = -float("inf")
 
         self._bridge_installed: bool = False
@@ -84,82 +161,51 @@ class AppOrchestrator:
         self._last_detected_start_time: float | None = None
 
         if self.sync_startup:
-            startup.sync_startup_path()
+            self.startup_service.sync_startup_path()
 
     def _is_stopping(self) -> bool:
         return self._stop_event.is_set() or (self._started and not self.running)
 
-    @property
-    def on_state_change(self) -> Callable[[GameState, bool], None] | None:
-        with self._subscribers_lock:
-            return self._state_subscribers[0] if self._state_subscribers else None
-
-    @on_state_change.setter
-    def on_state_change(self, callback: Callable[[GameState, bool], None] | None) -> None:
-        with self._subscribers_lock:
-            if callback is None:
-                self._state_subscribers.clear()
-            elif callback not in self._state_subscribers:
-                self._state_subscribers.append(callback)
-
     def subscribe_state_change(self, callback: Callable[[GameState, bool], None]) -> None:
-        """Subscribes an observer callback to receive game state changes."""
-        with self._subscribers_lock:
-            if callback not in self._state_subscribers:
-                self._state_subscribers.append(callback)
+        """Sets the observer callback to receive game state changes."""
+        self.on_state_change = callback
 
-    def unsubscribe_state_change(self, callback: Callable[[GameState, bool], None]) -> None:
-        """Unsubscribes an observer callback from game state changes."""
-        with self._subscribers_lock:
-            if callback in self._state_subscribers:
-                self._state_subscribers.remove(callback)
-
-    @property
-    def on_update_available(self) -> Callable[[UpdateInfo], None] | None:
-        with self._subscribers_lock:
-            return self._update_subscribers[0] if self._update_subscribers else None
-
-    @on_update_available.setter
-    def on_update_available(self, callback: Callable[[UpdateInfo], None] | None) -> None:
-        with self._subscribers_lock:
-            if callback is None:
-                self._update_subscribers.clear()
-            elif callback not in self._update_subscribers:
-                self._update_subscribers.append(callback)
+    def unsubscribe_state_change(
+        self, callback: Callable[[GameState, bool], None] | None = None
+    ) -> None:
+        """Unsubscribes the observer callback from game state changes."""
+        if callback is None or self.on_state_change == callback:
+            self.on_state_change = None
 
     def subscribe_update_available(self, callback: Callable[[UpdateInfo], None]) -> None:
-        """Subscribes an observer callback to receive update notifications."""
-        with self._subscribers_lock:
-            if callback not in self._update_subscribers:
-                self._update_subscribers.append(callback)
+        """Sets the observer callback to receive update notifications."""
+        self.on_update_available = callback
 
-    def unsubscribe_update_available(self, callback: Callable[[UpdateInfo], None]) -> None:
-        """Unsubscribes an observer callback from update notifications."""
-        with self._subscribers_lock:
-            if callback in self._update_subscribers:
-                self._update_subscribers.remove(callback)
+    def unsubscribe_update_available(
+        self, callback: Callable[[UpdateInfo], None] | None = None
+    ) -> None:
+        """Unsubscribes the observer callback from update notifications."""
+        if callback is None or self.on_update_available == callback:
+            self.on_update_available = None
 
     def _on_updater_state_change(self) -> None:
         pass
 
     def on_update_check_complete(self, update_info: UpdateInfo | None) -> None:
-        if update_info:
-            with self._subscribers_lock:
-                subscribers = list(self._update_subscribers)
-            for sub in subscribers:
-                try:
-                    sub(update_info)
-                except Exception as e:
-                    print(f"[Orchestrator] Update listener error: {e}")
+        if update_info is not None and self.on_update_available is not None:
+            try:
+                self.on_update_available(update_info)
+            except Exception as e:
+                print(f"[Orchestrator] Update listener error: {e}")
 
     def install_bridge_to(self, folder: str | Path) -> tuple[bool, str]:
         """Atomically installs the bridge to the specified folder and updates internal state."""
         try:
-            success, msg = bridge_installer.install_bridge(folder)
+            target_path = Path(folder) if isinstance(folder, str) else folder
+            success, msg = self.bridge_installer.install_bridge(target_path)
             if success:
                 self.bridge_auto_installed = True
                 self._bridge_installed = True
-                self.bridge_install_cooldown = self.bridge_install_min_cooldown
             return success, msg
         except Exception as e:
             return False, f"Bridge installation error: {e}"
@@ -170,7 +216,7 @@ class AppOrchestrator:
         known_win64_dir: str | None = None,
         known_exe_path: str | None = None,
     ) -> bool:
-        """Checks game installation directory and automatically deploys the bridge mod with backoff."""
+        """Checks game installation directory and automatically deploys the bridge mod with deterministic cooldown."""
         current_time = self.time_provider() if now is None else now
         if current_time - self.last_bridge_install_attempt < self.bridge_install_cooldown:
             return False
@@ -181,35 +227,24 @@ class AppOrchestrator:
                 str(self.current_state.win64_dir) if self.current_state.win64_dir else None
             )
             target_exe = known_exe_path or self.current_state.exe_path
-            game_dir = bridge_installer.find_game_win64_directory(
+            game_dir = self.bridge_installer.find_game_win64_directory(
                 known_win64_dir=target_dir, known_exe_path=target_exe
             )
             if game_dir:
-                if bridge_installer.is_bridge_installed(game_dir):
+                if self.bridge_installer.is_bridge_installed(game_dir):
                     self.bridge_auto_installed = True
                     self._bridge_installed = True
-                    self.bridge_install_cooldown = self.bridge_install_min_cooldown
                     return True
 
-                success, msg = bridge_installer.install_bridge(game_dir)
+                success, msg = self.bridge_installer.install_bridge(game_dir)
                 if success:
                     self.bridge_auto_installed = True
                     self._bridge_installed = True
-                    self.bridge_install_cooldown = self.bridge_install_min_cooldown
                     print(f"[Orchestrator] Automatically deployed Combat Bridge to: {game_dir}")
                     return True
                 else:
-                    self.bridge_install_cooldown = min(
-                        self.bridge_install_cooldown * 2, self.bridge_install_max_cooldown
-                    )
-                    print(
-                        f"[Orchestrator] Combat Bridge auto-install failed ({msg}), "
-                        f"backing off for {self.bridge_install_cooldown:.1f}s"
-                    )
+                    print(f"[Orchestrator] Combat Bridge auto-install failed: {msg}")
         except Exception as e:
-            self.bridge_install_cooldown = min(
-                self.bridge_install_cooldown * 2, self.bridge_install_max_cooldown
-            )
             print(f"[Orchestrator] Bridge auto-install check failed: {e}")
         return False
 
@@ -253,16 +288,16 @@ class AppOrchestrator:
                     )
                 else:
                     with contextlib.suppress(Exception):
-                        self._bridge_installed = bridge_installer.is_bridge_installed(target_dir)
+                        self._bridge_installed = self.bridge_installer.is_bridge_installed(
+                            target_dir
+                        )
 
             self._last_detected_pid = current_pid
             self._last_detected_start_time = current_start_time if current_pid is not None else None
 
-            with self._subscribers_lock:
-                subscribers = list(self._state_subscribers)
-            for sub in subscribers:
+            if self.on_state_change is not None:
                 try:
-                    sub(state, anti_spoiler)
+                    self.on_state_change(state, anti_spoiler)
                 except Exception as e:
                     print(f"[Orchestrator] State change callback error: {e}")
 
@@ -314,27 +349,26 @@ class AppOrchestrator:
         """Checks if the UE4SS Lua bridge mod is installed from in-memory cache in O(1)."""
         if force_probe:
             with contextlib.suppress(Exception):
-                self._bridge_installed = bridge_installer.is_bridge_installed(
+                self._bridge_installed = self.bridge_installer.is_bridge_installed(
                     self.current_state.win64_dir
                 )
         return self._bridge_installed
 
     def is_startup_enabled(self) -> bool:
         """Checks if Windows autostart is enabled."""
-        return startup.is_startup_enabled()
+        return self.startup_service.is_startup_enabled()
 
     def toggle_bridge(self) -> bool:
         """Installs or uninstalls the UE4SS Lua bridge mod."""
         self.last_bridge_install_attempt = -float("inf")
-        self.bridge_install_cooldown = self.bridge_install_min_cooldown
         target_dir = self.current_state.win64_dir
         if self.is_bridge_installed():
-            bridge_installer.uninstall_bridge(target_dir)
+            self.bridge_installer.uninstall_bridge(target_dir)
             self.bridge_auto_installed = False
             self._bridge_installed = False
             return False
         else:
-            success, _msg = bridge_installer.install_bridge(target_dir)
+            success, _msg = self.bridge_installer.install_bridge(target_dir)
             if success:
                 self.bridge_auto_installed = True
                 self._bridge_installed = True
@@ -342,7 +376,7 @@ class AppOrchestrator:
 
     def toggle_startup(self) -> bool:
         """Toggles Windows autostart configuration."""
-        return startup.toggle_startup()
+        return self.startup_service.toggle_startup()
 
     def is_rpc_connected(self) -> bool:
         """Returns True if the Discord IPC wire client is actively connected."""
@@ -374,4 +408,4 @@ class AppOrchestrator:
             )
 
 
-__all__ = ["AppOrchestrator"]
+__all__ = ["AppOrchestrator", "BridgeInstallerProtocol", "StartupProtocol"]

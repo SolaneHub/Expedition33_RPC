@@ -57,8 +57,9 @@ def test_game_data_schema_and_catalog_integrity(game_data_json: dict) -> None:
     assert all(isinstance(tok, str) and len(tok) > 0 for tok in tokens)
 
     # 2. Checkpoint dictionary symmetry
-    en_checkpoints = game_data_json.get("checkpoint_names_en", {})
-    it_checkpoints = game_data_json.get("checkpoint_names_it", {})
+    cp_by_lang_raw = game_data_json.get("checkpoint_names_by_lang", {})
+    en_checkpoints = cp_by_lang_raw.get("en-US", {})
+    it_checkpoints = cp_by_lang_raw.get("it", {})
     assert isinstance(en_checkpoints, dict) and isinstance(it_checkpoints, dict)
 
     en_keys = set(en_checkpoints.keys())
@@ -80,10 +81,19 @@ def test_game_data_schema_and_catalog_integrity(game_data_json: dict) -> None:
         assert isinstance(rule.get("zone_keywords"), list) and len(rule["zone_keywords"]) > 0
         assert any(k in rule for k in criteria_keys)
 
-    # 4. Semantic zone aliases must be purged
+    # 4. Semantic zone aliases and legacy tables must be purged
     assert "semantic_zone_aliases" not in game_data_json
     assert "save_reader_ignored_zone_words" not in game_data_json
     assert "save_reader_ignored_cp_words" not in game_data_json
+    assert "zone_name_overrides_en" not in game_data_json
+    assert "zone_name_overrides_it" not in game_data_json
+    assert "checkpoint_names_en" not in game_data_json
+    assert "checkpoint_names_it" not in game_data_json
+
+    # 4b. Localized presentation strings present in SSOT catalog
+    loc_pres = game_data_json.get("localized_presentation", {})
+    assert isinstance(loc_pres, dict) and len(loc_pres) >= 20
+    assert "en-US" in loc_pres and "it" in loc_pres
 
     # 5. Endless tower trial definitions
     trials = game_data_json.get("endless_tower_trials", [])
@@ -290,14 +300,12 @@ def test_normalization_pure_string_menu_and_continent_detection() -> None:
 def test_native_game_data_structures_at_module_load() -> None:
     """Verifies that catalog constants are loaded as native/immutable types at module load."""
     from expedition33_rpc.detection.game_data import (
-        CHECKPOINT_NAMES_EN,
-        CHECKPOINT_NAMES_IT,
+        CHECKPOINT_NAMES_BY_LANG,
         CONTEXTUAL_CHECKPOINTS,
         ENDLESS_TOWER_TRIALS,
         MAIN_MENU_TOKENS,
         TARGET_PROCESS_NAMES,
-        ZONE_NAME_OVERRIDES_EN,
-        ZONE_NAME_OVERRIDES_IT,
+        ZONE_NAME_OVERRIDES_BY_LANG,
         get_game_data,
     )
 
@@ -307,12 +315,26 @@ def test_native_game_data_structures_at_module_load() -> None:
     assert "sandfall-win64-shipping.exe" in TARGET_PROCESS_NAMES
     assert "sandfall-wingdk-shipping.exe" in TARGET_PROCESS_NAMES
     assert isinstance(MAIN_MENU_TOKENS, frozenset)
-    assert isinstance(ZONE_NAME_OVERRIDES_EN, dict)
-    assert isinstance(ZONE_NAME_OVERRIDES_IT, dict)
-    assert isinstance(CHECKPOINT_NAMES_EN, dict)
-    assert isinstance(CHECKPOINT_NAMES_IT, dict)
+    assert isinstance(ZONE_NAME_OVERRIDES_BY_LANG, dict)
+    assert isinstance(CHECKPOINT_NAMES_BY_LANG, dict)
     assert isinstance(CONTEXTUAL_CHECKPOINTS, list)
     assert isinstance(ENDLESS_TOWER_TRIALS, list)
+
+    import expedition33_rpc.detection as detection
+    import expedition33_rpc.detection.game_data as gd
+    import expedition33_rpc.detection.normalization as norm
+
+    for legacy in (
+        "ZONE_NAME_OVERRIDES_EN",
+        "ZONE_NAME_OVERRIDES_IT",
+        "CHECKPOINT_NAMES_EN",
+        "CHECKPOINT_NAMES_IT",
+    ):
+        assert not hasattr(gd, legacy), f"{legacy} should not be in game_data"
+        assert not hasattr(detection, legacy), f"{legacy} should not be in detection"
+
+    for legacy_map in ("CHECKPOINT_HASH_MAP_EN", "CHECKPOINT_HASH_MAP_IT"):
+        assert not hasattr(norm, legacy_map), f"{legacy_map} should not be in normalization"
 
 
 def test_all_20_languages_schema_and_symmetry(game_data_json: dict) -> None:
@@ -334,7 +356,7 @@ def test_all_20_languages_schema_and_symmetry(game_data_json: dict) -> None:
     assert isinstance(cp_by_lang, dict)
     assert isinstance(stages_by_lang, dict)
 
-    master_cp_keys = set(game_data_json["checkpoint_names_en"].keys())
+    master_cp_keys = set(cp_by_lang["en-US"].keys())
 
     for lang in ALL_SUPPORTED_LANGUAGES:
         # 1. Zone overrides exist and have non-empty values
@@ -402,7 +424,11 @@ def test_normalize_language_code() -> None:
 
 def test_multi_language_zone_and_checkpoint_formatting() -> None:
     """Verifies that format_zone_name and format_checkpoint_tag output real in-game names across languages."""
-    from expedition33_rpc.detection.normalization import format_checkpoint_tag, format_zone_name
+    from expedition33_rpc.detection.normalization import (
+        format_checkpoint_tag,
+        format_zone_name,
+        is_main_menu,
+    )
 
     # 1. Zone formatting for Old Lumière across distinct language families
     assert format_zone_name("Level_OldLumiere_Main", lang="en-US") == "Old Lumière"
@@ -424,6 +450,13 @@ def test_multi_language_zone_and_checkpoint_formatting() -> None:
     assert format_zone_name("Level_WorldMap", lang="ja") == "大陸"
     assert format_zone_name("Level_WorldMap", lang="zh-Hans") == "大陆"
     assert format_zone_name("Level_WorldMap", lang="ar") == "القارة"
+
+    # 2b. Main menu across languages
+    assert format_zone_name("Level_MainMenu", lang="en-US") == "Main Menu"
+    assert format_zone_name("Level_MainMenu", lang="it") == "Nel menu principale"
+    assert format_zone_name("Level_MainMenu", lang="fr") == "Menu principal"
+    assert format_zone_name("Level_MainMenu", lang="de") == "Hauptmenü"
+    assert format_zone_name("Level_MainMenu", lang="ja") == "メインメニュー"
 
     # 3. Checkpoint formatting across languages
     assert (
@@ -449,3 +482,15 @@ def test_multi_language_zone_and_checkpoint_formatting() -> None:
         format_checkpoint_tag("Level.SpawnPoint.EsquieNest.Francois", lang="zh-CN")
         == "弗朗索瓦的洞穴"
     )
+
+    # 4. Multilingual main menu recognition from display strings
+    assert is_main_menu(None, "Hauptmenü") is True
+    assert is_main_menu(None, "Menu principal") is True
+    assert is_main_menu(None, "Nel menu principale") is True
+    assert is_main_menu(None, "Main Menu") is True
+
+    # 5. Generic entrance tag spacing fallback across languages
+    assert format_checkpoint_tag("Level.SpawnPoint.Generic.Entry", lang="en-US") == "Entrance"
+    assert format_checkpoint_tag("Level.SpawnPoint.Generic.Entry", lang="it") == "Entrata"
+    assert format_checkpoint_tag("Level.SpawnPoint.Generic.Entry", lang="fr") == "Entrée"
+    assert format_checkpoint_tag("Level.SpawnPoint.Generic.Entry", lang="de") == "Eingang"

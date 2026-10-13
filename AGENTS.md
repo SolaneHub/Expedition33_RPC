@@ -15,8 +15,8 @@ All tasks are managed with [`uv`](https://github.com/astral-sh/uv).
 | **Run integration tests** | `uv run pytest -m integration` |
 | **Run all tests** | `uv run pytest` |
 | **Lint code** | `uv run ruff check` |
-| **Check formatting** | `uv run ruff format --check` |
-| **Auto-format code** | `uv run ruff format` |
+| **Check formatting** | `uv run ruff format --check` and `npx prettier --check src/expedition33_rpc/assets/game_data.json` |
+| **Auto-format code** | `uv run ruff format` and `npx prettier --write src/expedition33_rpc/assets/game_data.json` |
 | **Type check** | `uv run pyright` |
 | **Run application** | `uv run python main.py` |
 | **Build executable** | `uv run python build_exe.py` |

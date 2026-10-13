@@ -12,14 +12,11 @@ from typing import Any
 from expedition33_rpc.detection.game_data import (
     ALL_SUPPORTED_LANGUAGES,
     CHECKPOINT_NAMES_BY_LANG,
-    CHECKPOINT_NAMES_EN,
-    CHECKPOINT_NAMES_IT,
     CONTEXTUAL_CHECKPOINTS,
     ENDLESS_TOWER_TRIALS,
+    LOCALIZED_PRESENTATION,
     MAIN_MENU_TOKENS,
     ZONE_NAME_OVERRIDES_BY_LANG,
-    ZONE_NAME_OVERRIDES_EN,
-    ZONE_NAME_OVERRIDES_IT,
     TowerTrial,
 )
 
@@ -88,12 +85,6 @@ CHECKPOINT_HASH_MAPS_BY_LANG: dict[str, dict[str, str]] = {
     lang: {_normalize_alphanumeric_key(k): v for k, v in table.items()}
     for lang, table in CHECKPOINT_NAMES_BY_LANG.items()
 }
-CHECKPOINT_HASH_MAP_EN: dict[str, str] = CHECKPOINT_HASH_MAPS_BY_LANG.get(
-    "en-US", {_normalize_alphanumeric_key(k): v for k, v in CHECKPOINT_NAMES_EN.items()}
-)
-CHECKPOINT_HASH_MAP_IT: dict[str, str] = CHECKPOINT_HASH_MAPS_BY_LANG.get(
-    "it", {_normalize_alphanumeric_key(k): v for k, v in CHECKPOINT_NAMES_IT.items()}
-)
 
 
 def strip_accents(text: str) -> str:
@@ -111,9 +102,13 @@ def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
     display_lower = (zone_display or "").lower().strip()
     if raw_lower in MAIN_MENU_TOKENS:
         return True
-    if any(k in raw_lower for k in ("mainmenu", "titlescreen")):
+    norm_display = strip_accents(display_lower)
+    if "menu" in raw_lower or "menu" in norm_display:
         return True
-    return "menu" in raw_lower or "menu" in display_lower
+    return any(
+        table.get("mainmenu", "").lower() == display_lower
+        for table in ZONE_NAME_OVERRIDES_BY_LANG.values()
+    )
 
 
 def is_menu_zone(
@@ -226,10 +221,17 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
     canon_lang = normalize_language_code(lang)
 
     if not raw_name:
-        return "In esplorazione" if canon_lang == "it" else "Exploring"
+        strings = LOCALIZED_PRESENTATION.get(canon_lang, LOCALIZED_PRESENTATION.get("en-US", {}))
+        return strings.get("exploring", "Exploring")
 
     if is_main_menu(raw_name):
-        return "Nel menu principale" if canon_lang == "it" else "Main Menu"
+        if canon_lang == "it":
+            return "Nel menu principale"
+        lang_overrides = ZONE_NAME_OVERRIDES_BY_LANG.get(canon_lang) or {}
+        if "mainmenu" in lang_overrides:
+            return lang_overrides["mainmenu"]
+        strings = LOCALIZED_PRESENTATION.get(canon_lang, LOCALIZED_PRESENTATION.get("en-US", {}))
+        return strings.get("in_menu", "Main Menu")
 
     continent_names = {
         "main",
@@ -240,8 +242,8 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
         "level_worldmap_main",
         "level_worldmap_main_v2",
     }
-    lang_overrides = ZONE_NAME_OVERRIDES_BY_LANG.get(canon_lang) or (
-        ZONE_NAME_OVERRIDES_IT if canon_lang == "it" else ZONE_NAME_OVERRIDES_EN
+    lang_overrides = ZONE_NAME_OVERRIDES_BY_LANG.get(canon_lang) or ZONE_NAME_OVERRIDES_BY_LANG.get(
+        "en-US", {}
     )
     if raw_name.lower().strip() in continent_names or "worldmap" in raw_name.lower():
         return lang_overrides.get("worldmap", "The Continent")
@@ -282,9 +284,8 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
 
     # Fallback to English overrides
     if canon_lang != "en-US":
-        en_override = ZONE_NAME_OVERRIDES_EN.get(normalized) or ZONE_NAME_OVERRIDES_EN.get(
-            cleaned.lower().strip()
-        )
+        en_overrides = ZONE_NAME_OVERRIDES_BY_LANG.get("en-US", {})
+        en_override = en_overrides.get(normalized) or en_overrides.get(cleaned.lower().strip())
         if en_override:
             return en_override
 
@@ -308,14 +309,10 @@ def format_checkpoint_tag(
         return ""
 
     canon_lang = normalize_language_code(lang)
-    name_dict = CHECKPOINT_NAMES_BY_LANG.get(canon_lang) or (
-        CHECKPOINT_NAMES_IT if canon_lang == "it" else CHECKPOINT_NAMES_EN
-    )
-    fallback_dict = CHECKPOINT_NAMES_EN
-    hash_map = CHECKPOINT_HASH_MAPS_BY_LANG.get(canon_lang) or (
-        CHECKPOINT_HASH_MAP_IT if canon_lang == "it" else CHECKPOINT_HASH_MAP_EN
-    )
-    fallback_hash_map = CHECKPOINT_HASH_MAP_EN
+    fallback_dict = CHECKPOINT_NAMES_BY_LANG.get("en-US", {})
+    name_dict = CHECKPOINT_NAMES_BY_LANG.get(canon_lang) or fallback_dict
+    fallback_hash_map = CHECKPOINT_HASH_MAPS_BY_LANG.get("en-US", {})
+    hash_map = CHECKPOINT_HASH_MAPS_BY_LANG.get(canon_lang) or fallback_hash_map
 
     clean_tag_lower = clean_tag.lower()
     suffix_lower = suffix.lower()
@@ -351,10 +348,13 @@ def format_checkpoint_tag(
                 "suffixes" in rule and norm_suffix in rule["suffixes"]
             ):
                 by_lang = rule.get("by_lang")
-                if isinstance(by_lang, dict) and canon_lang in by_lang:
-                    return by_lang[canon_lang]
-                if canon_lang == "it":
-                    return rule.get("it", rule.get("en", ""))
+                if isinstance(by_lang, dict):
+                    if canon_lang in by_lang:
+                        return by_lang[canon_lang]
+                    if "en-US" in by_lang:
+                        return by_lang["en-US"]
+                if canon_lang == "it" and "it" in rule:
+                    return rule["it"]
                 return rule.get("en", "")
 
     # 3. Direct dictionary lookup by suffix / clean_tag in O(1)
@@ -373,13 +373,11 @@ def format_checkpoint_tag(
     spaced = re.sub(r"([a-z])([A-Z])", r"\1 \2", suffix)
     spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", spaced).strip()
     if spaced.lower() in ("entry", "entrance"):
-        return name_dict.get("entrance", "Entrata" if canon_lang == "it" else "Entrance")
+        return name_dict.get("entrance") or fallback_dict.get("entrance", "Entrance")
     return spaced
 
 
 __all__ = [
-    "CHECKPOINT_HASH_MAP_EN",
-    "CHECKPOINT_HASH_MAP_IT",
     "CHECKPOINT_HASH_MAPS_BY_LANG",
     "normalize_language_code",
     "strip_accents",

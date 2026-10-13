@@ -35,6 +35,9 @@ jobs:
       - name: Format Check (Ruff)
         run: uv run ruff format --check
 
+      - name: Format Check (Prettier - game_data.json)
+        run: npx prettier --check src/expedition33_rpc/assets/game_data.json
+
       - name: Type Check (Pyright)
         run: uv run pyright
 

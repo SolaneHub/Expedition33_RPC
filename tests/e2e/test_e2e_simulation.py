@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from tests.harness import (
@@ -402,3 +403,93 @@ def test_bridge_heartbeat_timeout_clears_zombie_combat_presence(tmp_path: Path) 
         assert latest_activity["details"] == "Exploring"
 
         orchestrator.stop()
+
+
+def test_async_concurrent_orchestrator_e2e_simulation(tmp_path: Path) -> None:
+    """Verifies real concurrent lifecycle where orchestrator runs asynchronously on a background worker thread."""
+    pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    ipc_client = DiscordIPCClient(client_id="123456789", transport=pipe)
+    rpc_manager = DiscordRPCManager(client=ipc_client)
+    assert rpc_manager.connect() is True
+    pipe.outgoing_bytes.clear()
+
+    settings = SettingsService(custom_path=tmp_path / "settings_async_e2e.json")
+    received_frames: list[dict[str, Any]] = []
+
+    with GameSessionSimulator(base_dir=tmp_path) as session:
+        orchestrator = AppOrchestrator(
+            detector=session.detector,
+            rpc_manager=rpc_manager,
+            settings_service=settings,
+            auto_install_bridge=False,
+            sync_startup=False,
+            polling_interval=0.05,
+        )
+
+        def poll_frames_until(predicate: Any, timeout: float = 3.0) -> dict[str, Any]:
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                while True:
+                    payload = pipe.pop_last_frame_payload()
+                    if payload is None:
+                        break
+                    received_frames.append(payload)
+                    if predicate(payload):
+                        return payload
+                time.sleep(0.02)
+            raise TimeoutError(f"Condition not met within {timeout}s. Received: {received_frames}")
+
+        orchestrator.start()
+        assert orchestrator.running is True
+        assert orchestrator.worker_thread is not None
+        assert orchestrator.worker_thread.is_alive()
+
+        try:
+            # 1. Start game and explore
+            session.start_game(pid=9999).enter_zone("Level_Main_OldLumiere", checkpoint="Entrance")
+            frame_explore = poll_frames_until(
+                lambda f: (
+                    f.get("cmd") == "SET_ACTIVITY"
+                    and f.get("args", {}).get("pid") == 9999
+                    and "Old Lumière" in f.get("args", {}).get("activity", {}).get("state", "")
+                    and f.get("args", {}).get("activity", {}).get("details") == "Exploring"
+                )
+            )
+            assert frame_explore is not None
+
+            # 2. Trigger combat concurrently
+            session.trigger_combat("Duollistes")
+            frame_combat = poll_frames_until(
+                lambda f: (
+                    f.get("cmd") == "SET_ACTIVITY"
+                    and f.get("args", {}).get("activity", {}).get("details")
+                    == "Fighting: Duollistes"
+                )
+            )
+            assert frame_combat is not None
+
+            # 3. Leave combat concurrently
+            session.leave_combat(checkpoint="Manor Gardens")
+            frame_peace = poll_frames_until(
+                lambda f: (
+                    f.get("cmd") == "SET_ACTIVITY"
+                    and f.get("args", {}).get("activity", {}).get("details") == "Exploring"
+                    and "Manor Gardens" in f.get("args", {}).get("activity", {}).get("state", "")
+                )
+            )
+            assert frame_peace is not None
+
+            # 4. Stop game concurrently
+            session.stop_game()
+            frame_stop = poll_frames_until(
+                lambda f: (
+                    f.get("cmd") == "SET_ACTIVITY" and f.get("args", {}).get("activity") is None
+                )
+            )
+            assert frame_stop is not None
+        finally:
+            orchestrator.stop()
+            assert orchestrator.running is False
+            if orchestrator.worker_thread is not None:
+                assert not orchestrator.worker_thread.is_alive()
+            assert not rpc_manager.is_connected

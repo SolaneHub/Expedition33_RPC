@@ -6,10 +6,12 @@ import contextlib
 import dataclasses
 import json
 import os
+import sys
 import threading
 import time
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,6 +20,7 @@ from expedition33_rpc.detection.detector import (
     BridgeStateProvider,
     GameDetector,
     GameState,
+    _read_file_shared_text,
 )
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
 
@@ -522,3 +525,122 @@ def test_game_process_path_and_win64_dir_propagation(tmp_path: Path) -> None:
     assert state.process_info.exe_path == os.path.normpath(str(fake_exe))
     assert state.win64_dir == fake_exe.parent
     assert state.exe_path == os.path.normpath(str(fake_exe))
+
+
+@pytest.mark.integration
+def test_read_file_shared_text_basic_and_error(tmp_path: Path) -> None:
+    p = tmp_path / "test.json"
+    p.write_text('{"status": "ok"}', encoding="utf-8")
+    assert _read_file_shared_text(str(p)) == '{"status": "ok"}'
+
+    with pytest.raises(OSError):
+        _read_file_shared_text(str(tmp_path / "nonexistent.json"))
+
+
+@pytest.mark.integration
+def test_read_file_shared_text_windows_deletion_resilience(tmp_path: Path) -> None:
+    # 1. Standard open on Windows blocks deletion while open (reproducing WinError 32)
+    p = tmp_path / "locked.json"
+    p.write_text('{"locked": true}', encoding="utf-8")
+    if sys.platform == "win32":
+        with open(p, encoding="utf-8"), pytest.raises(PermissionError):
+            os.remove(p)
+
+    # 2. FILE_SHARE_DELETE permits unlinking while the handle is open
+    p_shared = tmp_path / "shared.json"
+    p_shared.write_text('{"shared": true}', encoding="utf-8")
+    if sys.platform == "win32":
+        import ctypes
+        import msvcrt
+
+        windll: Any = getattr(ctypes, "windll", None)
+        k32: Any = getattr(windll, "kernel32", None) if windll is not None else None
+        assert k32 is not None
+        handle = k32.CreateFileW(
+            str(p_shared),
+            0x80000000,
+            1 | 2 | 4,  # FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+            None,
+            3,
+            0x80,
+            None,
+        )
+        assert handle not in (-1, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF, None)
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY)
+        with open(fd, encoding="utf-8") as f:
+            # File unlinks successfully while the handle is open without WinError 32
+            p_shared.unlink()
+            assert not p_shared.exists()
+            assert f.read() == '{"shared": true}'
+
+    # 3. High-churn concurrent write/delete/read loop
+    churn_path = tmp_path / "churn.json"
+    churn_path.write_text('{"cycle": 0}', encoding="utf-8")
+    stop_event = threading.Event()
+    errors: list[Exception] = []
+
+    def writer_churn() -> None:
+        try:
+            for i in range(25):
+                if stop_event.is_set():
+                    break
+                with contextlib.suppress(OSError):
+                    churn_path.write_text(f'{{"cycle": {i}}}', encoding="utf-8")
+                time.sleep(0.0005)
+                with contextlib.suppress(OSError):
+                    churn_path.unlink(missing_ok=True)
+                time.sleep(0.0005)
+        except Exception as e:
+            errors.append(e)
+
+    writer_thread = threading.Thread(target=writer_churn, daemon=True)
+    writer_thread.start()
+
+    try:
+        for _ in range(30):
+            with contextlib.suppress(OSError):
+                _read_file_shared_text(str(churn_path))
+            time.sleep(0.0005)
+    finally:
+        stop_event.set()
+        writer_thread.join(timeout=2.0)
+
+    assert not errors, f"Writer churn raised unexpected exceptions: {errors}"
+
+
+@pytest.mark.integration
+def test_game_detector_get_game_language_caching(tmp_path: Path) -> None:
+    ini = tmp_path / "GameUserSettings.ini"
+    ini.write_text("[Internationalization]\nLanguage=it\n", encoding="utf-8")
+
+    detector = GameDetector()
+    lang = detector.get_game_language(ini)
+    assert lang == "it"
+
+    # Reading again returns cached value
+    assert detector.get_game_language(ini) == "it"
+
+    # Update file content and mtime
+    time.sleep(0.01)
+    ini.write_text("[Internationalization]\nLanguage=fr\n", encoding="utf-8")
+    new_mtime = ini.stat().st_mtime + 1.0
+    os.utime(ini, (new_mtime, new_mtime))
+
+    assert detector.get_game_language(ini) == "fr"
+
+
+@pytest.mark.integration
+def test_game_detector_get_game_language_injected_path(tmp_path: Path) -> None:
+    ini = tmp_path / "GameUserSettings.ini"
+    ini.write_text("[Internationalization]\nLanguage=de\n", encoding="utf-8")
+
+    detector = GameDetector(game_user_settings_path=ini)
+    assert detector.get_game_language() == "de"
+
+
+@pytest.mark.unit
+def test_game_detector_get_game_language_fallback_when_missing(tmp_path: Path) -> None:
+    missing = tmp_path / "nonexistent_settings.ini"
+    detector = GameDetector(game_user_settings_path=missing)
+    # When file does not exist, fallback returns cached default ("en")
+    assert detector.get_game_language() == "en"

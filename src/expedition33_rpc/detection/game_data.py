@@ -75,10 +75,6 @@ MAIN_MENU_TOKENS: frozenset[str] = frozenset(
     _DATA.get("main_menu_tokens") or _DEFAULT_MAIN_MENU_TOKENS
 )
 
-ZONE_NAME_OVERRIDES_EN: dict[str, str] = dict(_DATA.get("zone_name_overrides_en", {}))
-ZONE_NAME_OVERRIDES_IT: dict[str, str] = dict(_DATA.get("zone_name_overrides_it", {}))
-CHECKPOINT_NAMES_EN: dict[str, str] = dict(_DATA.get("checkpoint_names_en", {}))
-CHECKPOINT_NAMES_IT: dict[str, str] = dict(_DATA.get("checkpoint_names_it", {}))
 ZONE_NAME_OVERRIDES_BY_LANG: dict[str, dict[str, str]] = dict(
     _DATA.get("zone_name_overrides_by_lang", {})
 )
@@ -86,6 +82,7 @@ CHECKPOINT_NAMES_BY_LANG: dict[str, dict[str, str]] = dict(
     _DATA.get("checkpoint_names_by_lang", {})
 )
 TOWER_STAGES_BY_LANG: dict[str, dict[str, str]] = dict(_DATA.get("tower_stages_by_lang", {}))
+LOCALIZED_PRESENTATION: dict[str, dict[str, str]] = dict(_DATA.get("localized_presentation", {}))
 CONTEXTUAL_CHECKPOINTS: list[dict[str, Any]] = list(_DATA.get("contextual_checkpoints", []))
 
 ALL_SUPPORTED_LANGUAGES: tuple[str, ...] = (
@@ -131,13 +128,10 @@ __all__ = [
     "ALL_SUPPORTED_LANGUAGES",
     "TARGET_PROCESS_NAMES",
     "MAIN_MENU_TOKENS",
-    "ZONE_NAME_OVERRIDES_EN",
-    "ZONE_NAME_OVERRIDES_IT",
     "ZONE_NAME_OVERRIDES_BY_LANG",
-    "CHECKPOINT_NAMES_EN",
-    "CHECKPOINT_NAMES_IT",
     "CHECKPOINT_NAMES_BY_LANG",
     "TOWER_STAGES_BY_LANG",
+    "LOCALIZED_PRESENTATION",
     "CONTEXTUAL_CHECKPOINTS",
     "ENDLESS_TOWER_TRIALS",
     "TowerTrial",
