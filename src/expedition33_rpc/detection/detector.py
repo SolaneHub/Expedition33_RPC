@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import os
-import sys
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -12,12 +10,13 @@ from typing import Any, Protocol, runtime_checkable
 
 import psutil
 
+from expedition33_rpc.core.platform import read_file_shared_text as _read_file_shared_text
 from expedition33_rpc.detection.compat_paths import (
     get_game_user_settings_path,
     get_telemetry_file_path,
     get_telemetry_file_paths,
 )
-from expedition33_rpc.detection.game_data import LOCALIZED_PRESENTATION, TARGET_PROCESS_NAMES
+from expedition33_rpc.detection.game_data import TARGET_PROCESS_NAMES
 from expedition33_rpc.detection.normalization import (
     format_checkpoint_tag,
     format_enemy_name,
@@ -48,7 +47,11 @@ class ProcessLike(Protocol):
     def is_running(self) -> bool: ...
 
 
-_UNSET = object()
+class _UnsetType:
+    """Unique sentinel type for distinguishing omitted arguments from None."""
+
+
+_UNSET = _UnsetType()
 
 
 @dataclass(frozen=True)
@@ -102,7 +105,7 @@ class GameState:
         enemies: list[str] | None = None,
         raw_checkpoint: str = "",
         tower_floor: int | None = None,
-        tower_stage_trial: TowerTrial | None | object = _UNSET,
+        tower_stage_trial: TowerTrial | None | _UnsetType = _UNSET,
         current_tower_trial: TowerTrial | None = None,
         zone_name: str | None = None,
         checkpoint_name: str | None = None,
@@ -119,10 +122,9 @@ class GameState:
 
         # 2. Enemy name & tower trial
         final_enemy = ""
-        trial_resolved = tower_stage_trial is not _UNSET
         trial_info: TowerTrial | None = (
-            tower_stage_trial  # type: ignore
-            if trial_resolved
+            tower_stage_trial
+            if not isinstance(tower_stage_trial, _UnsetType)
             else current_tower_trial
         )
 
@@ -188,72 +190,17 @@ class GameState:
         )
 
 
-if sys.platform == "win32":
-    import ctypes
-    import msvcrt
-    from ctypes import wintypes
+@runtime_checkable
+class BridgeProviderProtocol(Protocol):
+    """Protocol for bridge telemetry providers."""
 
-    _GENERIC_READ = 0x80000000
-    _FILE_SHARE_READ = 0x00000001
-    _FILE_SHARE_WRITE = 0x00000002
-    _FILE_SHARE_DELETE = 0x00000004
-    _OPEN_EXISTING = 3
-    _FILE_ATTRIBUTE_NORMAL = 0x80
-    _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+    def read_bridge_status(self) -> RawGameData | None: ...
 
-    _windll: Any = getattr(ctypes, "windll", None)
-    _kernel32: Any = getattr(_windll, "kernel32", None) if _windll is not None else None
-    if _kernel32 is not None:
-        _kernel32.CreateFileW.restype = wintypes.HANDLE
-        _kernel32.CreateFileW.argtypes = [
-            wintypes.LPCWSTR,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            wintypes.LPVOID,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            wintypes.HANDLE,
-        ]
-        _kernel32.CloseHandle.restype = wintypes.BOOL
-        _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    def read_game_data(
+        self, min_valid_timestamp: float | None = None, lang: str = "en"
+    ) -> RawGameData | None: ...
 
-
-def _read_file_shared_text(path: str) -> str:
-    """Reads a file allowing concurrent read, write, and delete on Windows NTFS (avoiding WinError 32)."""
-    if sys.platform == "win32" and _kernel32 is not None:
-        try:
-            handle = _kernel32.CreateFileW(
-                path,
-                _GENERIC_READ,
-                _FILE_SHARE_READ | _FILE_SHARE_WRITE | _FILE_SHARE_DELETE,
-                None,
-                _OPEN_EXISTING,
-                _FILE_ATTRIBUTE_NORMAL,
-                None,
-            )
-            if handle in (_INVALID_HANDLE_VALUE, None, 0, -1, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
-                err = ctypes.GetLastError()
-                raise OSError(None, ctypes.FormatError(err), path, err)
-            try:
-                fd = msvcrt.open_osfhandle(handle, os.O_RDONLY)
-            except Exception:
-                _kernel32.CloseHandle(handle)
-                raise
-            try:
-                with open(fd, encoding="utf-8") as f:
-                    return f.read()
-            except Exception:
-                with contextlib.suppress(OSError):
-                    os.close(fd)
-                raise
-        except OSError:
-            raise
-        except Exception:
-            with open(path, encoding="utf-8") as f:
-                return f.read()
-    else:
-        with open(path, encoding="utf-8") as f:
-            return f.read()
+    def reset(self) -> None: ...
 
 
 class BridgeStateProvider:
@@ -383,10 +330,12 @@ class GameDetector:
     def __init__(
         self,
         timer_tracker: ZoneTimerTracker | None = None,
-        bridge_provider: BridgeStateProvider | None | object = _UNSET,
+        bridge_provider: BridgeProviderProtocol | None | _UnsetType = _UNSET,
         process_scanner: Callable[[], Iterable[ProcessLike]] | None = None,
         target_process_names: Iterable[str] | str | None = None,
         game_user_settings_path: Path | str | None = None,
+        idle_poll_interval: float = 5.0,
+        time_provider: Callable[[], float] | None = None,
     ):
         self.cached_pid: int | None = None
         self.game_start_time: float | None = None
@@ -402,6 +351,11 @@ class GameDetector:
         self._game_user_settings_path: Path | None = (
             Path(game_user_settings_path) if game_user_settings_path is not None else None
         )
+        self.idle_poll_interval: float = idle_poll_interval
+        self.time_provider: Callable[[], float] = (
+            time_provider if time_provider is not None else time.monotonic
+        )
+        self._last_process_scan_time: float = -float("inf")
         resolved_names: list[str] = []
         if target_process_names is not None:
             if isinstance(target_process_names, str):
@@ -417,16 +371,10 @@ class GameDetector:
         self.process_scanner = process_scanner
 
         # Telemetry Provider (Bridge IPC)
-        if bridge_provider is _UNSET:
-            self.bridge_provider: BridgeStateProvider | None = BridgeStateProvider()
+        if isinstance(bridge_provider, _UnsetType):
+            self.bridge_provider: BridgeProviderProtocol | None = BridgeStateProvider()
         else:
-            self.bridge_provider = (  # type: ignore[assignment]
-                bridge_provider
-                if isinstance(bridge_provider, BridgeStateProvider)
-                else None
-                if bridge_provider is None
-                else bridge_provider  # type: ignore
-            )
+            self.bridge_provider = bridge_provider
 
     @property
     def exe_path(self) -> str | None:
@@ -450,8 +398,10 @@ class GameDetector:
         except Exception:
             pass
 
-    def find_game_process(self) -> ProcessLike | None:
-        """Finds game process using cached PID validation or fast name-only process iteration."""
+    def find_game_process(
+        self, now: float | None = None, force: bool = False
+    ) -> ProcessLike | None:
+        """Finds game process using cached PID validation or fast name-only process iteration with idle backoff."""
         # 1. Fast path: validate cached PID
         if self.cached_pid is not None:
             if self.process_scanner is not None:
@@ -478,7 +428,18 @@ class GameDetector:
             self.game_exe_path = None
             self.game_win64_dir = None
 
-        # 2. Optimized global enumeration: request only name and pid, avoid create_time on all processes
+        # 2. Optimized global enumeration with adaptive idle backoff
+        current_time = self.time_provider() if now is None else now
+        if (
+            self.cached_pid is None
+            and self.process_scanner is None
+            and not force
+            and (current_time - self._last_process_scan_time < self.idle_poll_interval)
+        ):
+            return None
+
+        self._last_process_scan_time = current_time
+
         try:
             procs = (
                 self.process_scanner()
@@ -537,9 +498,13 @@ class GameDetector:
             pass
         return self._cached_language
 
-    def get_game_state(self) -> GameState:
+    def get_game_state(self, now: float | None = None, force: bool = False) -> GameState:
         """Executes a full detection cycle returning an immutable GameState snapshot."""
-        proc = self.find_game_process()
+        proc = (
+            self.find_game_process(now, force)
+            if (now is not None or force)
+            else self.find_game_process()
+        )
 
         if not proc:
             self.cached_pid = None
@@ -628,12 +593,9 @@ class GameDetector:
         # Determine zone key and update state timing machine
         zone_key = raw_zone.strip() or "Exploring"
         self.last_zone = zone_key
-        exploring_tokens = {
-            s.get("exploring", "Exploring") for s in LOCALIZED_PRESENTATION.values()
-        } | {"Exploring"}
-        if zone_key in exploring_tokens and self.timer_tracker.current_zone_id not in (
+        if zone_key == "Exploring" and self.timer_tracker.current_zone_id not in (
             None,
-            *exploring_tokens,
+            "Exploring",
         ):
             zone_key = self.timer_tracker.current_zone_id
 
@@ -671,6 +633,7 @@ class GameDetector:
 
 __all__ = [
     "ProcessLike",
+    "BridgeProviderProtocol",
     "GameProcessInfo",
     "GameState",
     "BridgeStateProvider",

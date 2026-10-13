@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from expedition33_rpc.detection.detector import GameState
 
+from expedition33_rpc.core.presence import PresencePayload
 from expedition33_rpc.detection.game_data import LOCALIZED_PRESENTATION, TOWER_STAGES_BY_LANG
 from expedition33_rpc.detection.normalization import (
     is_continent_zone,
@@ -93,6 +94,19 @@ def format_presence(game_state: GameState, anti_spoiler: bool = False) -> tuple[
     return truncate_presence_field(details), truncate_presence_field(state)
 
 
+def build_presence_payload(game_state: GameState, anti_spoiler: bool = False) -> PresencePayload:
+    """Constructs an immutable PresencePayload DTO for Discord Rich Presence."""
+    details, state = format_presence(game_state, anti_spoiler=anti_spoiler)
+    start_timestamp = int(game_state.start_time) if game_state.start_time else None
+    return PresencePayload(
+        details=details,
+        state=state,
+        start_timestamp=start_timestamp,
+        large_image="logo",
+        large_text="Clair Obscur: Expedition 33",
+    )
+
+
 def format_tray_title(game_state: GameState, anti_spoiler: bool = False) -> str:
     """Formats the system tray icon tooltip (pystray.Icon.title)."""
     if not game_state.is_running:
@@ -156,6 +170,7 @@ __all__ = [
     "get_presentation_strings",
     "truncate_presence_field",
     "format_presence",
+    "build_presence_payload",
     "format_location_name",
     "is_menu_zone",
     "is_continent_zone",

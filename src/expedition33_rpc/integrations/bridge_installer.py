@@ -9,13 +9,9 @@ from pathlib import Path
 
 import psutil
 
+from expedition33_rpc.core.platform import winreg, winreg_read_value
 from expedition33_rpc.core.resources import get_resource_path
 from expedition33_rpc.detection.game_data import TARGET_PROCESS_NAMES
-
-try:
-    import winreg
-except ImportError:
-    winreg = None
 
 
 def find_game_win64_directory(
@@ -67,17 +63,13 @@ def find_game_win64_directory(
     steam_roots = []
     if winreg is not None:
         for hkey, subkey in [
-            (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam"),
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam"),
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam"),
+            (getattr(winreg, "HKEY_CURRENT_USER", None), r"Software\Valve\Steam"),
+            (getattr(winreg, "HKEY_LOCAL_MACHINE", None), r"SOFTWARE\WOW6432Node\Valve\Steam"),
+            (getattr(winreg, "HKEY_LOCAL_MACHINE", None), r"SOFTWARE\Valve\Steam"),
         ]:
-            try:
-                with winreg.OpenKey(hkey, subkey) as key:
-                    val, _ = winreg.QueryValueEx(key, "SteamPath")
-                    if val:
-                        steam_roots.append(os.path.normpath(val))
-            except Exception:
-                pass
+            val = winreg_read_value(hkey, subkey, "SteamPath", winreg_module=winreg)
+            if val:
+                steam_roots.append(os.path.normpath(val))
 
     libraries = list(steam_roots)
 

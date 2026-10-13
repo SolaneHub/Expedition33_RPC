@@ -1,21 +1,7 @@
-import ctypes
 import os
 import sys
 
-_MUTEX_HANDLE = None
-
-
-def is_already_running() -> bool:
-    """Checks if another instance of Expedition 33 RPC is already running on Windows."""
-    if sys.platform != "win32":
-        return False
-    global _MUTEX_HANDLE
-    mutex_name = "Local\\Expedition33_Discord_RPC_Mutex"
-    kernel32 = ctypes.windll.kernel32
-    _MUTEX_HANDLE = kernel32.CreateMutexW(None, False, mutex_name)
-    last_error = kernel32.GetLastError()
-    # ERROR_ALREADY_EXISTS = 183, ERROR_ACCESS_DENIED = 5
-    return last_error in (183, 5)
+from expedition33_rpc.core.platform import is_already_running
 
 
 def main() -> None:
@@ -57,7 +43,7 @@ def main() -> None:
         assert _icon is not None
         sys.exit(0)
 
-    if sys.platform == "win32" and is_already_running():
+    if is_already_running():
         sys.exit(0)
 
     from expedition33_rpc.core.orchestrator import AppOrchestrator

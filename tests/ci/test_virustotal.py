@@ -16,7 +16,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[2] / ".github" / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from virustotal_scan import (  # noqa: E402  # type: ignore[import-not-found]
+from virustotal_scan import (  # noqa: E402
     RateLimiter,
     check_file_report,
     compute_sha256,

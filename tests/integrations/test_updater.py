@@ -49,14 +49,14 @@ def mock_release_server() -> Generator[tuple[str, type[MockReleaseHTTPHandler]],
         pass
 
     server = http.server.HTTPServer(("127.0.0.1", 0), ConfigurableHandler)
-    server.poll_interval = 0.01  # pyright: ignore[reportAttributeAccessIssue]
+    poll_interval = 0.01
     host = str(server.server_address[0])
     port = int(server.server_address[1])
     url = f"http://{host}:{port}/releases/latest"
 
     worker = threading.Thread(
         target=server.serve_forever,
-        kwargs={"poll_interval": server.poll_interval},  # pyright: ignore[reportAttributeAccessIssue]
+        kwargs={"poll_interval": poll_interval},
         daemon=True,
     )
     worker.start()

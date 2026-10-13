@@ -5,8 +5,10 @@ Pure domain functions independent of Discord IPC and UI presentation layers.
 
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 from expedition33_rpc.detection.game_data import (
@@ -80,11 +82,38 @@ def normalize_language_code(lang: str | None) -> str:
             return "en-US"
 
 
-# Pre-compiled O(1) hash maps for normalized checkpoint tag resolution across all languages
-CHECKPOINT_HASH_MAPS_BY_LANG: dict[str, dict[str, str]] = {
-    lang: {_normalize_alphanumeric_key(k): v for k, v in table.items()}
-    for lang, table in CHECKPOINT_NAMES_BY_LANG.items()
-}
+@functools.lru_cache(maxsize=32)
+def get_checkpoint_hash_map(lang: str) -> dict[str, str]:
+    """Computes normalized checkpoint hash maps on demand with caching."""
+    table = CHECKPOINT_NAMES_BY_LANG.get(lang)
+    if table is None:
+        return {}
+    return {_normalize_alphanumeric_key(k): v for k, v in table.items()}
+
+
+# Backward-compatible hash map lookup mapping
+class _CheckpointHashMapLookup(Mapping[str, dict[str, str]]):
+    def __getitem__(self, lang: str) -> dict[str, str]:
+        res = get_checkpoint_hash_map(lang)
+        if not res and lang not in CHECKPOINT_NAMES_BY_LANG:
+            raise KeyError(lang)
+        return res
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(CHECKPOINT_NAMES_BY_LANG)
+
+    def __len__(self) -> int:
+        return len(CHECKPOINT_NAMES_BY_LANG)
+
+    def __contains__(self, key: object) -> bool:
+        return key in CHECKPOINT_NAMES_BY_LANG
+
+    def get(self, key: str, default: Any = None) -> Any:
+        res = get_checkpoint_hash_map(key)
+        return res if res else default
+
+
+CHECKPOINT_HASH_MAPS_BY_LANG: Mapping[str, dict[str, str]] = _CheckpointHashMapLookup()
 
 
 def strip_accents(text: str) -> str:
@@ -311,8 +340,8 @@ def format_checkpoint_tag(
     canon_lang = normalize_language_code(lang)
     fallback_dict = CHECKPOINT_NAMES_BY_LANG.get("en-US", {})
     name_dict = CHECKPOINT_NAMES_BY_LANG.get(canon_lang) or fallback_dict
-    fallback_hash_map = CHECKPOINT_HASH_MAPS_BY_LANG.get("en-US", {})
-    hash_map = CHECKPOINT_HASH_MAPS_BY_LANG.get(canon_lang) or fallback_hash_map
+    fallback_hash_map = get_checkpoint_hash_map("en-US")
+    hash_map = get_checkpoint_hash_map(canon_lang) or fallback_hash_map
 
     clean_tag_lower = clean_tag.lower()
     suffix_lower = suffix.lower()
@@ -379,6 +408,7 @@ def format_checkpoint_tag(
 
 __all__ = [
     "CHECKPOINT_HASH_MAPS_BY_LANG",
+    "get_checkpoint_hash_map",
     "normalize_language_code",
     "strip_accents",
     "is_main_menu",

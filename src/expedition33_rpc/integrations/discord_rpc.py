@@ -19,13 +19,13 @@ import uuid
 from collections.abc import Callable
 from typing import Any, BinaryIO, Protocol
 
+from expedition33_rpc.core.presence import PresencePayload
+
+msvcrt: Any = None
 if sys.platform == "win32":
     import msvcrt
 else:
-    msvcrt = None  # type: ignore[assignment]
-
-from expedition33_rpc.detection.detector import GameState
-from expedition33_rpc.ui.presentation import format_presence, truncate_presence_field
+    msvcrt = None
 
 EMBEDDED_CLIENT_ID = "1552405358503272468"
 
@@ -198,12 +198,12 @@ class DiscordIPCClient:
                     sock: socket.socket | None = None
                     try:
                         if sys.platform == "win32":
-                            pipe: BinaryIO = open(path, "r+b", buffering=0)  # noqa: SIM115
+                            pipe: IPCTransport | BinaryIO = open(path, "r+b", buffering=0)  # noqa: SIM115
                         else:
                             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                             sock.settimeout(self.timeout)
                             sock.connect(path)
-                            pipe = sock.makefile("rwb", buffering=0)  # type: ignore
+                            pipe = sock.makefile("rwb", buffering=0)
                             self._sock = sock
                         self._pipe = pipe
 
@@ -243,23 +243,36 @@ class DiscordIPCClient:
     def set_activity(
         self,
         pid: int,
-        state: str,
-        details: str,
+        state: str | None = None,
+        details: str | None = None,
         start_timestamp: int | None = None,
-        large_image: str = "logo",
-        large_text: str = "Clair Obscur: Expedition 33",
+        large_image: str | None = "logo",
+        large_text: str | None = "Clair Obscur: Expedition 33",
+        small_image: str | None = None,
+        small_text: str | None = None,
+        party_id: str | None = None,
+        party_size: tuple[int, int] | None = None,
     ) -> bool:
         """Sends a SET_ACTIVITY frame to Discord atomically."""
+        assets: dict[str, Any] = {}
+        if large_image:
+            assets["large_image"] = large_image
+        if large_text:
+            assets["large_text"] = large_text
+        if small_image:
+            assets["small_image"] = small_image
+        if small_text:
+            assets["small_text"] = small_text
+
         activity: dict[str, Any] = {
             "state": state,
             "details": details,
-            "assets": {
-                "large_image": large_image,
-                "large_text": large_text,
-            },
+            "assets": assets,
         }
         if start_timestamp:
             activity["timestamps"] = {"start": start_timestamp}
+        if party_id and party_size:
+            activity["party"] = {"id": party_id, "size": list(party_size)}
 
         payload = {
             "cmd": "SET_ACTIVITY",
@@ -374,11 +387,12 @@ class DiscordRPCManager:
 
     def update_presence(
         self,
-        state: GameState,
-        anti_spoiler: bool = False,
+        payload: PresencePayload | None,
+        pid: int | None = None,
         force: bool = False,
     ) -> bool:
-        """Formats and transmits the latest presence data to Discord."""
+        """Transmits the latest presence data to Discord."""
+
         if self.is_stopping is not None and self.is_stopping():
             return False
 
@@ -391,11 +405,9 @@ class DiscordRPCManager:
             if not self.connect():
                 return False
 
-        target_pid = (
-            state.process_pid if (state.process_pid and state.process_pid > 0) else os.getpid()
-        )
+        target_pid = pid if (pid and pid > 0) else os.getpid()
 
-        if not state.is_running:
+        if payload is None:
             if self.last_update_state != "idle" and self._rpc:
                 try:
                     success = self._rpc.clear_activity(pid=target_pid)
@@ -410,14 +422,16 @@ class DiscordRPCManager:
                     return False
             return True
 
-        details_text, state_text = format_presence(state, anti_spoiler=anti_spoiler)
-        details_text = truncate_presence_field(details_text)
-        state_text = truncate_presence_field(state_text)
-
-        start_timestamp = int(state.start_time) if state.start_time else int(time.time())
+        details_text = payload.details[:128] if payload.details else None
+        state_text = payload.state[:128] if payload.state else None
+        start_timestamp = (
+            payload.start_timestamp if payload.start_timestamp is not None else int(time.time())
+        )
+        large_image = payload.large_image or "logo"
+        large_text = payload.large_text or "Clair Obscur: Expedition 33"
 
         # State fingerprint to avoid redundant IPC writes
-        fingerprint = f"{details_text}|{state_text}|{start_timestamp}|{target_pid}"
+        fingerprint = f"{details_text}|{state_text}|{start_timestamp}|{large_image}|{target_pid}"
         if fingerprint == self.last_update_state:
             return True
 
@@ -428,8 +442,12 @@ class DiscordRPCManager:
                     state=state_text,
                     details=details_text,
                     start_timestamp=start_timestamp,
-                    large_image="logo",
-                    large_text="Clair Obscur: Expedition 33",
+                    large_image=large_image,
+                    large_text=large_text,
+                    small_image=payload.small_image,
+                    small_text=payload.small_text,
+                    party_id=payload.party_id,
+                    party_size=payload.party_size,
                 )
                 if success:
                     self.last_update_state = fingerprint
@@ -446,12 +464,12 @@ class DiscordRPCManager:
 
     def update(
         self,
-        game_state: GameState,
-        anti_spoiler: bool = False,
+        payload: PresencePayload | None,
+        pid: int | None = None,
         force: bool = False,
     ) -> bool:
-        """Alias for update_presence maintaining backwards compatibility."""
-        return self.update_presence(game_state, anti_spoiler=anti_spoiler, force=force)
+        """Alias for update_presence accepting PresencePayload."""
+        return self.update_presence(payload, pid=pid, force=force)
 
 
 __all__ = [

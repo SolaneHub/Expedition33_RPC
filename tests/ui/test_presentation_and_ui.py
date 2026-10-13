@@ -13,6 +13,7 @@ from expedition33_rpc.detection.detector import GameDetector, GameState
 from expedition33_rpc.integrations.updater import UpdateInfo
 from expedition33_rpc.ui.presentation import (
     DISCORD_MAX_FIELD_LENGTH,
+    build_presence_payload,
     format_location_name,
     format_presence,
     format_tray_combat_status,
@@ -244,7 +245,8 @@ def test_step_update_reads_state_and_calls_rpc(tray_test_app) -> None:
     mock_detector.get_game_state.assert_called_once()
     assert app.orchestrator.current_state == running_state
     assert result == running_state
-    mock_rpc.update.assert_called_once_with(running_state, anti_spoiler=False)
+    expected_payload = build_presence_payload(running_state, anti_spoiler=False)
+    mock_rpc.update.assert_called_once_with(expected_payload, pid=9999)
     mock_icon.update_menu.assert_called_once()
     assert "Old Lumiere" in mock_icon.title
 

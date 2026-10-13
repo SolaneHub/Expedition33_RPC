@@ -829,8 +829,8 @@ def test_orchestrator_install_bridge_to_exception(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_orchestrator_unsubscribe_update_available() -> None:
-    """Verifies that unsetting an update callback prevents it from receiving future notifications."""
+def test_orchestrator_update_available_callback() -> None:
+    """Verifies that on_update_available callback receives update notifications."""
     received_updates: list[UpdateInfo] = []
 
     def callback(info: UpdateInfo) -> None:
@@ -839,11 +839,10 @@ def test_orchestrator_unsubscribe_update_available() -> None:
     orchestrator = AppOrchestrator(
         detector=MagicMock(spec=GameDetector),
         rpc_manager=MagicMock(spec=DiscordRPCManager),
+        on_update_available=callback,
         auto_install_bridge=False,
         sync_startup=False,
     )
-
-    orchestrator.subscribe_update_available(callback)
 
     # Calling with None should be a safe no-op
     orchestrator.on_update_check_complete(None)
@@ -855,22 +854,18 @@ def test_orchestrator_unsubscribe_update_available() -> None:
     assert len(received_updates) == 1
     assert received_updates[0].tag_name == "v1.0.0"
 
-    # Unsubscribe callback
-    orchestrator.unsubscribe_update_available(callback)
+    # Unsetting callback stops notifications
+    orchestrator.on_update_available = None
 
     update_v2 = UpdateInfo(tag_name="v2.0.0", version_tuple=(2, 0, 0), html_url="https://...")
     orchestrator.on_update_check_complete(update_v2)
 
-    # callback should not receive the subsequent update
     assert len(received_updates) == 1
-
-    # Unsubscribing a non-registered callback is safe and does not raise
-    orchestrator.unsubscribe_update_available(callback)
 
 
 @pytest.mark.unit
-def test_orchestrator_update_available_reentrant_and_error_resilience() -> None:
-    """Verifies unsubscription and error resilience for update listeners."""
+def test_orchestrator_update_available_error_resilience() -> None:
+    """Verifies unhandled exceptions in on_update_available callback are handled safely."""
     orchestrator = AppOrchestrator(
         detector=MagicMock(spec=GameDetector),
         rpc_manager=MagicMock(spec=DiscordRPCManager),
@@ -882,42 +877,11 @@ def test_orchestrator_update_available_reentrant_and_error_resilience() -> None:
         del info
         raise RuntimeError("Subscriber explosion")
 
-    orchestrator.subscribe_update_available(failing_cb)
+    orchestrator.on_update_available = failing_cb
 
     update_v1 = UpdateInfo(tag_name="v1.0.0", version_tuple=(1, 0, 0), html_url="https://...")
     # Does not raise even if callback fails
     orchestrator.on_update_check_complete(update_v1)
-
-
-@pytest.mark.unit
-def test_orchestrator_unsubscribe_state_change() -> None:
-    """Verifies that unsubscribing a state change callback removes it cleanly."""
-    received_states: list[GameState] = []
-
-    def state_cb(state: GameState, _spoiler: bool) -> None:
-        received_states.append(state)
-
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_detector.get_game_state.return_value = GameState.create(is_running=False)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
-
-    orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
-        auto_install_bridge=False,
-        sync_startup=False,
-    )
-
-    orchestrator.subscribe_state_change(state_cb)
-    orchestrator.step_update()
-    assert len(received_states) == 1
-
-    orchestrator.unsubscribe_state_change(state_cb)
-    orchestrator.step_update()
-    assert len(received_states) == 1
-
-    # Unsubscribing again is a no-op and safe
-    orchestrator.unsubscribe_state_change(state_cb)
 
 
 @pytest.mark.unit
@@ -943,3 +907,57 @@ def test_orchestrator_state_change_callback_error_resilience() -> None:
     st = orchestrator.step_update()
     assert st is not None
     assert st.is_running is False
+
+
+@pytest.mark.unit
+def test_orchestrator_status_snapshot() -> None:
+    """Verifies get_status_snapshot black-box inspection of subsystem states."""
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_detector.get_game_state.return_value = GameState.create(is_running=False)
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    mock_rpc.is_connected = True
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    snapshot = orchestrator.get_status_snapshot()
+    assert isinstance(snapshot, dict)
+    assert snapshot["running"] is False
+    assert snapshot["rpc_connected"] is True
+    assert snapshot["anti_spoiler"] is False
+    assert isinstance(snapshot["game_state"], GameState)
+    assert "bridge_installed" in snapshot
+    assert "startup_enabled" in snapshot
+    assert "update_available" in snapshot
+    assert "updater_status" in snapshot
+
+
+@pytest.mark.unit
+def test_orchestrator_run_loop_adaptive_idle_backoff() -> None:
+    """Verifies that orchestrator uses idle_polling_interval when game is idle and polling_interval when running."""
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+
+    # 1. Idle state: game is not running
+    mock_detector.get_game_state.return_value = GameState.create(is_running=False)
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        polling_interval=2.0,
+        idle_polling_interval=7.0,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    orchestrator.step_update()
+    assert orchestrator.current_polling_interval == 7.0
+
+    # 2. Active state: game is running with PID
+    mock_detector.get_game_state.return_value = GameState.create(is_running=True, process_pid=9999)
+    orchestrator.step_update()
+    assert orchestrator.current_polling_interval == 2.0

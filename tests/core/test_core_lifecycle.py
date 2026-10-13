@@ -62,13 +62,8 @@ def test_settings_service_in_memory_caching_and_atomic_update(tmp_path: Path) ->
     service = SettingsService(custom_path=custom_json)
 
     # Initial query returns default without requiring a file on disk
+    assert not custom_json.exists()
     assert service.is_anti_spoiler_enabled() is False
-
-    # Calling is_anti_spoiler_enabled() returns from memory without disk reads
-    with patch(
-        "builtins.open", side_effect=AssertionError("Should not read from disk on cached query")
-    ):
-        assert service.is_anti_spoiler_enabled() is False
 
     # Atomic write updates in-memory cache and writes to file
     success = service.set_anti_spoiler_enabled(True)
@@ -76,16 +71,16 @@ def test_settings_service_in_memory_caching_and_atomic_update(tmp_path: Path) ->
     assert service.is_anti_spoiler_enabled() is True
     assert custom_json.is_file()
 
-    # Querying after update continues to read from memory without disk reads
-    with patch(
-        "builtins.open", side_effect=AssertionError("Should not read from disk on cached query")
-    ):
-        assert service.is_anti_spoiler_enabled() is True
+    # Black-box cache verification: query succeeds from in-memory cache even if disk file is removed
+    custom_json.unlink()
+    assert not custom_json.exists()
+    assert service.is_anti_spoiler_enabled() is True
 
-    # Toggle updates in-memory cache and persists
+    # Toggle updates in-memory cache and persists back to disk
     new_val = service.toggle_anti_spoiler()
     assert new_val is False
     assert service.is_anti_spoiler_enabled() is False
+    assert custom_json.is_file()
 
     # Verify persistence by reading from a fresh service instance
     fresh_service = SettingsService(custom_path=custom_json)
@@ -140,7 +135,9 @@ def test_settings_save_atomic_failure_preserves_ram_and_disk_consistency(tmp_pat
         assert toggled_val is False
         assert service.is_anti_spoiler_enabled() is False
 
-    assert rpc.last_update_state is None
+    snapshot = orchestrator.get_status_snapshot()
+    assert snapshot["anti_spoiler"] is False
+    assert not orchestrator.is_anti_spoiler_enabled()
 
 
 # ---------------------------------------------------------------------------
@@ -268,3 +265,31 @@ def test_main_smoke_test_invocation() -> None:
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 0
+
+
+@pytest.mark.unit
+def test_pep562_dir_and_lazy_exports() -> None:
+    """Verifies PEP 562 __dir__() and lazy exports across package namespaces."""
+    import expedition33_rpc
+    import expedition33_rpc.core
+    import expedition33_rpc.detection
+
+    for name in expedition33_rpc.__all__:
+        assert hasattr(expedition33_rpc, name)
+    for name in expedition33_rpc.core.__all__:
+        assert hasattr(expedition33_rpc.core, name)
+    for name in expedition33_rpc.detection.__all__:
+        assert hasattr(expedition33_rpc.detection, name)
+
+    # Verify lazy attribute resolution via __getattr__
+    assert expedition33_rpc.main is not None
+    assert expedition33_rpc.core.get_resource_path is not None
+    assert expedition33_rpc.detection.GameDetector is not None
+
+    bad_name = "non_existent_attribute_xyz"
+    with pytest.raises(AttributeError):
+        _ = getattr(expedition33_rpc, bad_name)
+    with pytest.raises(AttributeError):
+        _ = getattr(expedition33_rpc.core, bad_name)
+    with pytest.raises(AttributeError):
+        _ = getattr(expedition33_rpc.detection, bad_name)

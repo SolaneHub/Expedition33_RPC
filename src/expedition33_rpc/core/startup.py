@@ -1,12 +1,13 @@
-import contextlib
 import os
 import sys
 from pathlib import Path
 
-try:
-    import winreg
-except ImportError:
-    winreg = None
+from expedition33_rpc.core.platform import (
+    winreg,
+    winreg_delete_value,
+    winreg_read_value,
+    winreg_set_value,
+)
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APP_NAME = "Expedition33_DiscordRPC"
@@ -30,49 +31,39 @@ def is_startup_enabled() -> bool:
     """Checks if the application is registered to run on Windows startup and the target binary exists."""
     if winreg is None:
         return False
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ) as key:
-            val, _ = winreg.QueryValueEx(key, APP_NAME)
-            if not val:
-                return False
-            raw = val.strip()
-            if raw.startswith('"'):
-                parts = raw.split('"')
-                clean_path = parts[1] if len(parts) > 1 else raw.strip('"')
-            else:
-                clean_path = raw.split()[0] if " " in raw else raw
-            return os.path.exists(clean_path)
-    except Exception:
+    val = winreg_read_value(
+        getattr(winreg, "HKEY_CURRENT_USER", None), RUN_KEY, APP_NAME, winreg_module=winreg
+    )
+    if not val:
         return False
+    raw = val.strip()
+    if raw.startswith('"'):
+        parts = raw.split('"')
+        clean_path = parts[1] if len(parts) > 1 else raw.strip('"')
+    else:
+        clean_path = raw.split()[0] if " " in raw else raw
+    return os.path.exists(clean_path)
 
 
 def set_startup_enabled(enable: bool) -> bool:
     """Enables or disables automatic startup with Windows."""
     if winreg is None:
         return False
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
-            if enable:
-                cmd = get_current_executable_command()
-                winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, cmd)
-            else:
-                with contextlib.suppress(FileNotFoundError, OSError):
-                    winreg.DeleteValue(key, APP_NAME)
-        return True
-    except Exception as e:
-        print(f"[Startup] Error setting startup: {e}")
-        return False
+    hkey = getattr(winreg, "HKEY_CURRENT_USER", None)
+    if enable:
+        cmd = get_current_executable_command()
+        return winreg_set_value(hkey, RUN_KEY, APP_NAME, cmd, winreg_module=winreg)
+    else:
+        return winreg_delete_value(hkey, RUN_KEY, APP_NAME, winreg_module=winreg)
 
 
 def sync_startup_path() -> None:
     """If startup is enabled, ensures the registered path matches the current location of the executable."""
     if winreg is None:
         return
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ) as key:
-            val, _ = winreg.QueryValueEx(key, APP_NAME)
-    except Exception:
-        return
+    val = winreg_read_value(
+        getattr(winreg, "HKEY_CURRENT_USER", None), RUN_KEY, APP_NAME, winreg_module=winreg
+    )
 
     if val:
         current_cmd = get_current_executable_command()

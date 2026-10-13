@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import functools
 import json
 import os
 from typing import Any
-
-from expedition33_rpc.core.resources import get_resource_path
 
 type TowerTrial = tuple[int, int] | str
 type TrialDefinition = tuple[TowerTrial, str | None, list[list[str]]]
 
 
 def _load_game_data() -> dict[str, Any]:
+    from expedition33_rpc.core.resources import get_resource_path
+
     path = get_resource_path("game_data.json")
     if not os.path.isfile(path):
         candidate = os.path.normpath(
@@ -25,12 +26,10 @@ def _load_game_data() -> dict[str, Any]:
         return {}
 
 
-_DATA: dict[str, Any] = _load_game_data()
-
-
+@functools.lru_cache(maxsize=1)
 def get_game_data() -> dict[str, Any]:
-    """Returns the global game data catalog loaded at module import."""
-    return _DATA
+    """Returns the global game data catalog, loaded on demand with caching."""
+    return _load_game_data()
 
 
 _DEFAULT_MAIN_MENU_TOKENS: list[str] = [
@@ -60,6 +59,8 @@ _DEFAULT_MAIN_MENU_TOKENS: list[str] = [
     "wbp_splashscreens_logos",
     "wbp_splashscreens_logos_c",
 ]
+
+_DATA: dict[str, Any] = get_game_data()
 
 _raw_process_names = _DATA.get("target_process_names")
 if isinstance(_raw_process_names, list) and _raw_process_names:
@@ -126,15 +127,15 @@ ENDLESS_TOWER_TRIALS: list[TrialDefinition] = _build_endless_tower_trials(
 
 __all__ = [
     "ALL_SUPPORTED_LANGUAGES",
-    "TARGET_PROCESS_NAMES",
-    "MAIN_MENU_TOKENS",
-    "ZONE_NAME_OVERRIDES_BY_LANG",
-    "CHECKPOINT_NAMES_BY_LANG",
-    "TOWER_STAGES_BY_LANG",
-    "LOCALIZED_PRESENTATION",
     "CONTEXTUAL_CHECKPOINTS",
+    "CHECKPOINT_NAMES_BY_LANG",
     "ENDLESS_TOWER_TRIALS",
+    "LOCALIZED_PRESENTATION",
+    "MAIN_MENU_TOKENS",
+    "TARGET_PROCESS_NAMES",
+    "TOWER_STAGES_BY_LANG",
     "TowerTrial",
     "TrialDefinition",
+    "ZONE_NAME_OVERRIDES_BY_LANG",
     "get_game_data",
 ]

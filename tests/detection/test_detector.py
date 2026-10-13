@@ -12,7 +12,7 @@ import time
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -403,42 +403,40 @@ def test_detector_bridge_grace_period_prevents_telemetry_jitter(tmp_path: Path) 
 
     current_clock = 1000.0
     bridge_provider = BridgeStateProvider(grace_period=2.5, time_provider=lambda: current_clock)
-    bridge_provider.read_bridge_status = MagicMock(  # type: ignore
-        side_effect=[
-            {
-                "timestamp": 1000.0,
-                "zone": "Level_Main_OldLumiere",
-                "in_combat": True,
-                "enemy_name": "Duollistes",
-                "tower_floor": None,
-                "checkpoint": "",
-            },
-            None,  # transient glitch within grace period
-            None,  # transient glitch past grace period
-        ]
-    )
+    glitch_responses = [
+        {
+            "timestamp": 1000.0,
+            "zone": "Level_Main_OldLumiere",
+            "in_combat": True,
+            "enemy_name": "Duollistes",
+            "tower_floor": None,
+            "checkpoint": "",
+        },
+        None,  # transient glitch within grace period
+        None,  # transient glitch past grace period
+    ]
+    with patch.object(bridge_provider, "read_bridge_status", side_effect=glitch_responses):
+        detector = GameDetector(
+            bridge_provider=bridge_provider,
+            process_scanner=lambda: [mock_proc],
+            game_user_settings_path=ini_path,
+        )
 
-    detector = GameDetector(
-        bridge_provider=bridge_provider,
-        process_scanner=lambda: [mock_proc],
-        game_user_settings_path=ini_path,
-    )
+        # Tick 1: Bridge succeeds
+        st1 = detector.get_game_state()
+        assert st1.zone_name == "Old Lumière"
+        assert st1.in_combat is True
 
-    # Tick 1: Bridge succeeds
-    st1 = detector.get_game_state()
-    assert st1.zone_name == "Old Lumière"
-    assert st1.in_combat is True
+        # Tick 2: Bridge glitch (read_bridge_status returns None), bridge internal grace period returns cached state
+        current_clock = 1001.0
+        st2 = detector.get_game_state()
+        assert st2.zone_name == "Old Lumière"
+        assert st2.in_combat is True
 
-    # Tick 2: Bridge glitch (read_bridge_status returns None), bridge internal grace period returns cached state
-    current_clock = 1001.0
-    st2 = detector.get_game_state()
-    assert st2.zone_name == "Old Lumière"
-    assert st2.in_combat is True
-
-    # Tick 3: Past grace period (5.0s > 2.5s), telemetry expires
-    current_clock = 1005.0
-    st3 = detector.get_game_state()
-    assert st3.in_combat is False
+        # Tick 3: Past grace period (5.0s > 2.5s), telemetry expires
+        current_clock = 1005.0
+        st3 = detector.get_game_state()
+        assert st3.in_combat is False
 
 
 @pytest.mark.unit
@@ -644,3 +642,44 @@ def test_game_detector_get_game_language_fallback_when_missing(tmp_path: Path) -
     detector = GameDetector(game_user_settings_path=missing)
     # When file does not exist, fallback returns cached default ("en")
     assert detector.get_game_language() == "en"
+
+
+@pytest.mark.unit
+def test_detector_idle_polling_backoff_for_psutil_process_iter() -> None:
+    """Verifies adaptive idle backoff throttling psutil.process_iter scans when game is inactive."""
+    from unittest.mock import patch
+
+    scan_calls = 0
+
+    def mock_process_iter(_attrs: Any = None) -> list[Any]:
+        nonlocal scan_calls
+        scan_calls += 1
+        return []
+
+    detector = GameDetector(idle_poll_interval=5.0)
+
+    with patch("psutil.process_iter", side_effect=mock_process_iter):
+        # 1. First scan at t=0 executes global process_iter
+        proc1 = detector.find_game_process(now=0.0)
+        assert proc1 is None
+        assert scan_calls == 1
+
+        # 2. Query at t=2.0 (before 5s idle interval) throttles and returns None without scanning
+        proc2 = detector.find_game_process(now=2.0)
+        assert proc2 is None
+        assert scan_calls == 1
+
+        # 3. Query at t=4.9 throttles
+        proc3 = detector.find_game_process(now=4.9)
+        assert proc3 is None
+        assert scan_calls == 1
+
+        # 4. Query at t=5.1 (after idle interval) performs second global scan
+        proc4 = detector.find_game_process(now=5.1)
+        assert proc4 is None
+        assert scan_calls == 2
+
+        # 5. Query with force=True bypasses idle backoff
+        proc5 = detector.find_game_process(now=5.5, force=True)
+        assert proc5 is None
+        assert scan_calls == 3

@@ -12,7 +12,8 @@ import pytest
 from tests.harness import DiscordPipeSimulator, MockDiscordServer
 
 from expedition33_rpc.core.orchestrator import AppOrchestrator
-from expedition33_rpc.detection.detector import GameDetector, GameState
+from expedition33_rpc.core.presence import PresencePayload
+from expedition33_rpc.detection.detector import GameDetector
 from expedition33_rpc.integrations.discord_rpc import (
     OP_FRAME,
     OP_HANDSHAKE,
@@ -83,30 +84,30 @@ def test_discord_rpc_manager_end_to_end_with_native_client() -> None:
     assert manager.connect() is True
     assert manager.is_connected is True
 
-    state = GameState.create(
-        is_running=True,
-        process_pid=5432,
-        zone_name="Flying Manor",
-        in_combat=False,
-        start_time=1700000000.0,
+    payload = PresencePayload(
+        details="Flying Manor",
+        state="Exploring",
+        start_timestamp=1700000000,
+        large_image="logo",
+        large_text="Clair Obscur: Expedition 33",
     )
 
-    manager.update(state, anti_spoiler=False)
+    manager.update(payload, pid=5432)
     assert manager.last_update_state is not None
     assert "Flying Manor" in manager.last_update_state
 
     written_len_1 = len(mock_pipe.written_data)
-    manager.update(state, anti_spoiler=False)
+    manager.update(payload, pid=5432)
     assert len(mock_pipe.written_data) == written_len_1
 
     # Invalidate forces re-transmission
     manager.invalidate()
-    manager.update(state, anti_spoiler=False)
+    manager.update(payload, pid=5432)
     assert len(mock_pipe.written_data) > written_len_1
 
     # force=True forces re-transmission directly
     written_len_2 = len(mock_pipe.written_data)
-    manager.update(state, anti_spoiler=False, force=True)
+    manager.update(payload, pid=5432, force=True)
     assert len(mock_pipe.written_data) > written_len_2
 
 
@@ -181,21 +182,21 @@ def test_discord_rpc_manager_loopback_lifecycle_and_backoff() -> None:
         client = DiscordIPCClient(client_id="manager_test", custom_pipe_path=server.pipe_path)
         manager = DiscordRPCManager(client=client)
 
-        state = GameState.create(
-            is_running=True,
-            process_pid=5432,
-            zone_name="Flying Manor",
-            in_combat=False,
-            start_time=1700000000.0,
+        payload = PresencePayload(
+            details="Flying Manor",
+            state="Exploring",
+            start_timestamp=1700000000,
+            large_image="logo",
+            large_text="Clair Obscur: Expedition 33",
         )
 
-        manager.update(state, anti_spoiler=False)
+        manager.update(payload, pid=5432)
         assert manager.is_connected is True
         assert manager.last_update_state is not None
 
         # Redundant update does not write extra frames
         frames_count = len(server.get_frames())
-        manager.update(state, anti_spoiler=False)
+        manager.update(payload, pid=5432)
         assert len(server.get_frames()) == frames_count
 
         # Disconnect
@@ -326,8 +327,8 @@ def test_discord_ipc_client_and_orchestrator_freeze_chaos() -> None:
         assert orchestrator.rpc_manager.connect() is True
         assert orchestrator.is_rpc_connected() is True
 
-        state1 = GameState.create(is_running=True, zone_name="SafeZone")
-        orchestrator.rpc_manager.update(state1)
+        payload1 = PresencePayload(details="SafeZone", state="Exploring")
+        orchestrator.rpc_manager.update(payload1)
         assert orchestrator.is_rpc_connected() is True
         safe_fingerprint = orchestrator.rpc_manager.last_update_state
         assert safe_fingerprint is not None
@@ -335,9 +336,9 @@ def test_discord_ipc_client_and_orchestrator_freeze_chaos() -> None:
         # Now simulate Discord IPC daemon deadlock / frozen named pipe
         server.simulate_freeze = True
 
-        state2 = GameState.create(is_running=True, zone_name="DeadlockZone")
+        payload2 = PresencePayload(details="DeadlockZone", state="Exploring")
         t0 = time.perf_counter()
-        orchestrator.rpc_manager.update(state2)
+        orchestrator.rpc_manager.update(payload2)
         freeze_duration = time.perf_counter() - t0
 
         assert freeze_duration < 1.0  # Finished within timeout budget
@@ -376,9 +377,9 @@ def test_discord_rpc_manager_is_stopping_prevents_update_reconnect() -> None:
     stopping = True
     manager = DiscordRPCManager(client=client, is_stopping=lambda: stopping)
 
-    state = GameState.create(is_running=True, zone_name="Old Lumiere")
+    payload = PresencePayload(details="Old Lumiere", state="Exploring")
     # Must return False and not attempt connection when application is stopping
-    res = manager.update_presence(state)
+    res = manager.update_presence(payload)
     assert res is False
     assert manager.is_connected is False
     assert len(mock_pipe.written_data) == 0

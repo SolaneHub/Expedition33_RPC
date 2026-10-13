@@ -79,9 +79,9 @@ ignore = [
 known-first-party = ["expedition33_rpc"]
 
 [tool.pyright]
-include = ["src", "main.py", "build_exe.py", "tests"]
+include = ["src", "main.py", "build_exe.py", "tests", "tools"]
 
-extraPaths = ["src"]
+extraPaths = ["src", ".github/scripts"]
 exclude = [
     "**/__pycache__",
     "build",

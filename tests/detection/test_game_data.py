@@ -268,12 +268,12 @@ def test_detector_resolves_structured_bridge_payload_end_to_end(tmp_path: Path) 
         encoding="utf-8",
     )
     bridge = BridgeStateProvider(paths=[str(bridge_path)])
+    real_proc = psutil.Process(os.getpid())
     detector = GameDetector(
         bridge_provider=bridge,
+        process_scanner=lambda: [real_proc],
+        target_process_names=[real_proc.name()],
     )
-
-    real_proc = psutil.Process(os.getpid())
-    detector.find_game_process = lambda: real_proc  # type: ignore
     state = detector.get_game_state()
     assert state.in_combat is True
     assert state.enemy_name != ""
