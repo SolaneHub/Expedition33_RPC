@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.8.0] - 2026-10-12
+
+### Added
+- **Multi-Target Process Unification (Steam & Game Pass WinGDK)**:
+  - Added seamless simultaneous detection support for both Steam (`SandFall-Win64-Shipping.exe`) and PC Game Pass / Microsoft Store (`SandFall-WinGDK-Shipping.exe`) game editions.
+  - Unified detection target configuration to `target_process_names` with dynamic process image resolution.
+- **Immutable Process Context (`GameProcessInfo`)**:
+  - Encapsulated PID, executable name, and resolved binary paths within immutable `GameProcessInfo` and `GameState` domain structures.
+  - Bound Discord Rich Presence directly to the detected executable PID for both Steam and WinGDK targets, guaranteeing accurate Discord activity association.
+- **Discord IPC Protocol Framing (`DiscordFrameCodec`)**:
+  - Extracted binary length-prefix framing and JSON payload encoding into dedicated, unit-tested `DiscordFrameCodec`, eliminating nested wrapper abstractions.
+- **Structural Protocol Typing**:
+  - Introduced clean `typing.Protocol` definitions for `ProcessLike`, `BridgeInstallerProtocol`, and `StartupProtocol`.
+- **Precompiled Hash Lookup Acceleration**:
+  - Optimized checkpoint tag lookups using precompiled $O(1)$ dictionary lookups instead of repetitive regular expression scans.
+
+### Changed
+- **Ultra-Fast Test Suite Execution**:
+  - Accelerated full test suite runtimes to under 2.2 seconds by replacing wall-clock sleep loops with deterministic iterations, lowering test HTTP server polling intervals to 0.01s, and injecting virtual `time_provider` clocks into telemetry providers.
+- **Facade Encapsulation in AppOrchestrator**:
+  - Replaced ceremonial wrapper services with clean atomic facade methods (`install_bridge_to`, `subscribe_update_available`).
+  - Added thread-safe state synchronization and re-entrant update subscription handling.
+
+### Fixed
+- **PyInstaller Bundled UI Smoke Test in CI**:
+  - Hardened GitHub Actions release workflow with automated headless smoke testing of PyInstaller executable binaries, ensuring correct bundling of Tkinter, PIL, pystray, and platform dependencies.
+
 ## [v1.7.0] - 2026-10-11
 
 ### Added

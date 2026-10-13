@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.7.0-blue.svg" alt="Release"></a>
+  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.8.0-blue.svg" alt="Release"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python"></a>
   <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform"></a>
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/badge/code%20style-ruff-000000.svg" alt="Code Style: Ruff"></a>
@@ -52,7 +52,8 @@
 
 <h2 id="features">✨ Key Features</h2>
 
-- **Continuous Autonomous Detection**: Runs quietly in the system tray and establishes a Discord Rich Presence session the moment `SandFall-Win64-Shipping.exe` begins running, cleanly disconnecting when the game closes.
+- **Continuous Autonomous Detection**: Runs quietly in the system tray and establishes a Discord Rich Presence session the moment the game begins running (`SandFall-Win64-Shipping.exe` or `SandFall-WinGDK-Shipping.exe`), cleanly disconnecting when the game closes.
+- **Multi-Target Process Unification**: First-class simultaneous support for both **Steam** (`SandFall-Win64-Shipping.exe`) and **PC Game Pass / Microsoft Store** (`SandFall-WinGDK-Shipping.exe`) game editions with dynamic process resolution.
 - **Pure Real-Time Telemetry Pipeline**: A headless, non-intrusive Lua bridge powered by [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) that hooks directly into `AC_jRPG_BattleManager_C` on the game thread. Detects battle transitions with zero latency and extracts live enemy/boss titles without memory scanning. Employs a strict 5.0-second wall-clock freshness window to instantly expire stale combat or zone telemetry when the game or battle concludes.
 - **Cross-Platform Telemetry Paths**: Built-in compatibility path resolution (`compat_paths.py`) supporting Windows, Linux, and Steam Deck Proton/Wine environments.
 - **Lightweight Native Discord IPC Client**: Replaced third-party client wrappers with an in-house asynchronous wire client featuring intelligent rate-limiting, thread-safe cache invalidation, and automatic reconnection backoff.
@@ -80,7 +81,7 @@ The status adjusts dynamically depending on whether your game language is set to
 | **Anti-Spoiler Enabled** | `In Combat` / `In combattimento` | `Hidden Location` / `Posizione riservata` | `Clair Obscur: Expedition 33` | Active session duration |
 
 > [!TIP]
-> **Process PID Binding**: The Discord Rich Presence client is bound directly to the live game executable (`SandFall-Win64-Shipping.exe`). Discord attaches your custom Rich Presence status directly to the running game instance, preventing conflicting dual statuses.
+> **Process PID Binding**: The Discord Rich Presence client is bound directly to the live game executable (`SandFall-Win64-Shipping.exe` or `SandFall-WinGDK-Shipping.exe`). Discord attaches your custom Rich Presence status directly to the running game instance, preventing conflicting dual statuses.
 
 ---
 
@@ -192,7 +193,7 @@ If your antivirus or Windows SmartScreen displays an alert, here is exactly why 
   - **Arctic Wolf**: `Unsafe` *(Generic reputation score heuristic)*
 - **Why PyInstaller Triggers Machine Learning Heuristics**:
   - `Expedition33_RPC` is packaged using **PyInstaller**, which bundles Python 3.12 and dependencies into a self-extracting executable. Because some malware authors also package malicious scripts using packers, automated cloud ML heuristics frequently misclassify fresh, unsigned PyInstaller binaries under generic names like `Wacatac.B!ml`.
-  - These engines also flag legitimate Windows API calls: creating a named Windows mutex (used to enforce a single running instance of the tray app) and querying running processes via `psutil` (used solely to detect when `SandFall-Win64-Shipping.exe` launches or exits).
+  - These engines also flag legitimate Windows API calls: creating a named Windows mutex (used to enforce a single running instance of the tray app) and querying running processes via `psutil` (used solely to detect when `SandFall-Win64-Shipping.exe` or `SandFall-WinGDK-Shipping.exe` launches or exits).
 - **Lack of Expensive EV Code-Signing Certificate**:
   - Commercial software publishers pay hundreds of dollars per year ($400+/year) for Extended Validation (EV) certificates to bypass SmartScreen and heuristics. As a free, open-source community tool, `Expedition33_RPC` is unsigned, so automated heuristics assign it a default "low reputation" score until enough community reputation builds.
 
@@ -286,7 +287,7 @@ We welcome bug reports, feature suggestions, and questions from the community! I
 1. **Check Existing Issues**: Search [open issues](https://github.com/SolaneHub/Expedition33_RPC/issues) and [closed issues](https://github.com/SolaneHub/Expedition33_RPC/issues?q=is%3Aissue+is%3Aclosed) to see if the topic has already been addressed.
 2. **Update to Latest Version**: Verify that you are running the latest release from [Releases](https://github.com/SolaneHub/Expedition33_RPC/releases/latest) or through the in-app automatic updater.
 3. **Provide Context**: When reporting a bug, please include:
-   - Application version (e.g. `v1.7.0`)
+   - Application version (e.g. `v1.8.0`)
    - Game edition (Steam, PC Game Pass / Xbox, etc.)
    - Combat Bridge status (Installed via tray or automatic deployment)
    - Windows OS version
