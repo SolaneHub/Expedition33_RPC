@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.0] - 2026-10-14
+
+### Added
+- **Decoupled Presence Engine (`core.presence`)**:
+  - Introduced immutable `PresencePayload` Data Transfer Object (DTO) encapsulating all Discord rich presence state fields (`state`, `details`, `large_image`, `large_text`, `small_image`, `small_text`, `start_timestamp`, `pid`).
+  - Completely decoupled `DiscordRPCManager` from the UI layer (`ExpeditionTrayApp`) and domain models: the presence client exclusively consumes `PresencePayload`, enabling pure headless operation and isolated unit testing.
+- **Native Platform Abstraction Layer (`core.platform`)**:
+  - Consolidated all operating system interactions into a unified platform module (`core.platform`):
+    - `PlatformMutex`: Named Win32 Mutex on Windows with automatic POSIX advisory file lock (`fcntl.flock`) fallback on Linux/macOS.
+    - `FileLock`: Robust cross-platform non-blocking file locking for atomic configuration updates.
+    - `PlatformRegistry`: Safe abstraction over Windows Registry (`winreg`) with no-op fallbacks for POSIX platforms.
+  - Completely eliminated direct low-level Win32 ctypes and winreg imports from application business logic.
+- **Interactive Telemetry Simulation Harness (`tools/simulate_telemetry.py`)**:
+  - Added standalone developer CLI tool for simulating game lifecycles, combat transitions, Endless Tower trials, and location changes in real-time or automated batch mode.
+  - Added automated simulation regression tests (`tests/detection/test_simulate_telemetry.py` and `tests/e2e/test_process_lifecycle.py`), expanding test suite to 175 automated tests.
+
+### Changed
+- **Zero Static Type Suppressions & 100% Pyright Strict Safety**:
+  - Eradicated all 12 static type suppressions (`type: ignore`) across production and test code.
+  - Full codebase strict type compliance validated under Python 3.12+ and Pyright with 0 errors and 0 warnings.
+- **Detection Kernel Purification & LRU Caching**:
+  - Standardized domain combat and exploration states around canonical `Exploring` domain tokens.
+  - Replaced complex lazy data structures with standard Python `functools.lru_cache` and direct protocol bindings (`BridgeProviderProtocol`).
+  - Implemented adaptive idle polling in detector to minimize background CPU usage when the game is not running.
+- **Package Entrypoint Lazy Exports**:
+  - Modernized `src/expedition33_rpc/__init__.py` with PEP 562 module-level `__getattr__` and `__dir__`, ensuring fast startup times by deferring heavyweight imports until accessed.
+
 ## [v1.9.0] - 2026-10-13
 
 ### Added

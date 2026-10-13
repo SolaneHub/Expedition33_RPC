@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.9.0-blue.svg" alt="Release"></a>
+  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v2.0.0-blue.svg" alt="Release"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python"></a>
   <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform"></a>
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/badge/code%20style-ruff-000000.svg" alt="Code Style: Ruff"></a>
@@ -53,12 +53,15 @@
 <h2 id="features">✨ Key Features</h2>
 
 - **Continuous Autonomous Detection**: Runs quietly in the system tray and establishes a Discord Rich Presence session the moment the game begins running (`SandFall-Win64-Shipping.exe` or `SandFall-WinGDK-Shipping.exe`), cleanly disconnecting when the game closes.
+- **Decoupled Presence Engine**: Clean architectural separation between UI, presence formatting, and Discord IPC via immutable `PresencePayload` Data Transfer Objects (DTO), enabling headless presence management and deterministic testing.
+- **Native Platform Abstraction Layer (`core.platform`)**: Robust cross-platform primitives (`PlatformMutex`, `FileLock`, `PlatformRegistry`) providing native Win32 named mutexes on Windows and POSIX advisory flock on Unix, eliminating low-level ctypes and winreg calls from business logic.
 - **Multi-Target Process Unification**: First-class simultaneous support for both **Steam** (`SandFall-Win64-Shipping.exe`) and **PC Game Pass / Microsoft Store** (`SandFall-WinGDK-Shipping.exe`) game editions with dynamic process resolution.
 - **Universal 20-Language Localization**: Full native presence support across all 20 officially supported game languages extracted directly from Unreal Engine `.locres` binary catalogs: English (`en`), Italian (`it`), French (`fr`), German (`de`), Spanish (`es`), Latin American Spanish (`es-419`), Japanese (`ja`), Korean (`ko`), Polish (`pl`), Brazilian Portuguese (`pt-BR`), Russian (`ru`), Simplified Chinese (`zh-Hans`), Traditional Chinese (`zh-Hant`), and more.
 - **100% Checkpoint & Trial Symmetry**: All **765 official checkpoint tags** and all **33 Endless Tower stages & trials** are fully mapped with localized titles across all 20 languages.
 - **Single Source of Truth (SSOT) Asset Catalog**: Centralized localization templates and domain data into `assets/game_data.json`, formatted with Prettier.
-- **Thread-Safe Telemetry Concurrency**: Enforced Win32 `FILE_SHARE_DELETE` flags on bridge telemetry file reads to eliminate Windows file locking collisions during concurrent Lua writes.
+- **Zero Static Type Suppressions**: 100% strict type safety under Python 3.12+ and Pyright with zero `type: ignore` comments across the entire codebase.
 - **Pure Real-Time Telemetry Pipeline**: A headless, non-intrusive Lua bridge powered by [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) that hooks directly into `AC_jRPG_BattleManager_C` on the game thread. Detects battle transitions with zero latency and extracts live enemy/boss titles without memory scanning. Employs a strict 5.0-second wall-clock freshness window to instantly expire stale combat or zone telemetry when the game or battle concludes.
+- **Interactive Telemetry Simulation Harness**: Bundled developer CLI (`tools/simulate_telemetry.py`) for live Discord Rich Presence simulation, combat transitions, and Endless Tower testing without running the game.
 - **Cross-Platform Telemetry Paths**: Built-in compatibility path resolution (`compat_paths.py`) supporting Windows, Linux, and Steam Deck Proton/Wine environments.
 - **Lightweight Native Discord IPC Client**: Replaced third-party client wrappers with an in-house asynchronous wire client featuring intelligent rate-limiting, thread-safe cache invalidation, and automatic reconnection backoff.
 - **Official Zone Normalization**: Translates raw internal Unreal Engine map assets (`Level_Goblu_Main` -> *Flying Waters*, `Level_SeaCliff` -> *Stone Wave Cliffs*, `Level_CleasFlyingHouse` -> *Flying Manor*, `Level_SimonArea` -> *The Abyss*) into clean player-facing names.
@@ -123,34 +126,37 @@ The codebase follows a clean, modular 4-tier architecture designed for high main
 
 ```text
 src/expedition33_rpc/
-├── __init__.py               # Re-exports GameDetector, GameState, main, __version__
+├── __init__.py               # Lazy exports (__version__, main, GameDetector, GameState)
 ├── __main__.py               # CLI entrypoint (`python -m expedition33_rpc`)
 │
-├── core/                     # Application lifecycle, settings & system startup
-│   ├── app.py                # App entrypoint and single-instance mutex
+├── core/                     # Application lifecycle, platform abstraction & presence
+│   ├── app.py                # Single-instance application entrypoint
 │   ├── orchestrator.py       # Headless AppOrchestrator lifecycle coordinator
-│   ├── settings.py           # Persistent configuration management (Anti-Spoiler)
-│   ├── startup.py            # Windows Registry autostart integration
+│   ├── platform.py           # Native OS abstraction (PlatformMutex, FileLock, PlatformRegistry)
+│   ├── presence.py           # Decoupled PresencePayload DTO
+│   ├── settings.py           # Persistent configuration management
+│   ├── startup.py            # Windows autostart management via platform abstraction
 │   └── resources.py          # Bundled asset path resolution
 │
 ├── detection/                # Game state detection and telemetry pipelines
 │   ├── compat_paths.py       # Cross-platform IPC paths (Windows, Linux Proton)
 │   ├── detector.py           # GameDetector with BridgeStateProvider & GameState
-│   ├── game_data.py          # Zone overrides, regexes & Endless Tower trials
+│   ├── game_data.py          # 20-language asset catalog, regexes & Endless Tower trials
 │   ├── normalization.py      # Pure domain string normalization routines
 │   └── timer_tracker.py      # ZoneTimerTracker for smooth timer persistence
 │
 ├── integrations/             # External services & installers
 │   ├── bridge_installer.py   # Automatic UE4SS combat bridge deployment
-│   ├── discord_rpc.py        # Native lightweight Discord IPC wire client
+│   ├── discord_rpc.py        # Decoupled native Discord IPC client (PresencePayload)
 │   └── updater.py            # In-app silent updater with SHA-256 verification
 │
 ├── ui/                       # Graphical user interface & presentation
-│   ├── presentation.py       # Pure presentation formatting logic for Discord & Tray
+│   ├── presentation.py       # Pure presentation formatting logic producing PresencePayload
 │   └── tray_app.py           # Windows System Tray icon, menu & notifications
 │
 └── assets/                   # Static resources
     ├── bridge.zip            # Pre-compiled headless UE4SS mod package
+    ├── game_data.json        # 20-language SSOT asset catalog
     ├── icon.ico              # Windows executable icon
     └── icon.png              # System tray & notification icon
 ```
@@ -293,7 +299,7 @@ We welcome bug reports, feature suggestions, and questions from the community! I
 1. **Check Existing Issues**: Search [open issues](https://github.com/SolaneHub/Expedition33_RPC/issues) and [closed issues](https://github.com/SolaneHub/Expedition33_RPC/issues?q=is%3Aissue+is%3Aclosed) to see if the topic has already been addressed.
 2. **Update to Latest Version**: Verify that you are running the latest release from [Releases](https://github.com/SolaneHub/Expedition33_RPC/releases/latest) or through the in-app automatic updater.
 3. **Provide Context**: When reporting a bug, please include:
-   - Application version (e.g. `v1.9.0`)
+   - Application version (e.g. `v2.0.0`)
    - Game edition (Steam, PC Game Pass / Xbox, etc.)
    - Combat Bridge status (Installed via tray or automatic deployment)
    - Windows OS version
