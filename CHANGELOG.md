@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.7.0] - 2026-10-11
+
+### Added
+- **Headless Application Orchestrator (`core.orchestrator`)**:
+  - Introduced `AppOrchestrator` central coordinator to decouple lifecycle management, state polling, and external service interactions from GUI event loops.
+  - Added thread-safe pub/sub notification mechanisms and lifecycle synchronization (`start()`, `stop()`, `tick()`).
+  - Added exponential backoff retry mechanism for automatic UE4SS bridge deployment upon detection failures.
+- **Pure Presentation Formatting Layer (`ui.presentation`)**:
+  - Extracted string formatting, combat details, and presence string assembly into pure, stateless functions (`format_discord_presence`, `format_location_name`, `format_tray_status`), preventing divergent UI/Discord text and allowing 100% test coverage without UI mocks.
+- **Pure Domain String Normalization (`detection.normalization`)**:
+  - Isolated clean string sanitization, token stripping, and checkpoint parsing from low-level I/O.
+- **Cross-Platform Compatibility Paths (`detection.compat_paths`)**:
+  - Added Linux and Steam Deck Proton/Wine prefix resolution alongside native Windows paths, ensuring smooth telemetry file discovery across varied operating environments.
+- **Comprehensive Mirrored Test Suite & Test Harness**:
+  - Re-architected test suite to mirror `src/` modular layout across `tests/core/`, `tests/detection/`, `tests/integrations/`, `tests/ui/`, `tests/e2e/`, and `tests/harness/`.
+  - Added mock Discord IPC pipe transport, in-process HTTP updater test server, and multi-threaded IPC concurrency stress tests, reaching 114 automated tests.
+  - Added GitHub Actions CI workflow (`.github/workflows/ci.yml`) validating multi-platform test passes, linting, formatting, and type checks.
+
+### Changed
+- **Pure Real-Time Telemetry Pipeline**:
+  - Bound `GameDetector` directly to `BridgeStateProvider` consuming telemetry from the UE4SS Lua bridge with an enforced 5.0-second freshness window.
+  - Eliminated stale combat states and lingering zone information through strict timestamp validation.
+- **Native Lightweight Discord IPC Client (`integrations.discord_rpc`)**:
+  - Replaced external third-party client wrappers with an in-house asynchronous wire client featuring automatic rate-limiting, thread-safe cache invalidation (`invalidate()`), and resilient reconnection logic.
+- **Atomic Configuration Management (`core.settings`)**:
+  - Migrated configuration persistence from the Windows Registry to thread-safe, atomic JSON storage (`%APPDATA%/Expedition33_RPC/settings.json`) with automatic backward-compatible migration of legacy registry keys.
+- **Centralized Asset Catalog (`assets/game_data.json`)**:
+  - Externalized static game data dictionaries, trial mappings, and regex definitions into a standalone JSON asset catalog loaded lazily.
+
+### Removed
+- **Legacy Binary Save File Parsing**:
+  - Completely purged `detection.save_reader`, save-file binary decoders, and associated static test fixtures, reducing binary footprint and eliminating disk I/O contention with the game engine.
+
 ## [v1.6.0] - 2026-10-06
 
 ### Changed

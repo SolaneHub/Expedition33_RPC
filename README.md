@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.6.0-blue.svg" alt="Release"></a>
+  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v1.7.0-blue.svg" alt="Release"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python"></a>
   <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform"></a>
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/badge/code%20style-ruff-000000.svg" alt="Code Style: Ruff"></a>
@@ -17,7 +17,6 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT%20with%20Attribution-yellow.svg" alt="License: MIT with Attribution"></a>
   <a href="#security"><img src="https://img.shields.io/badge/VirusTotal-Transparent%20Audit-blue.svg?logo=virustotal" alt="VirusTotal: Transparent Audit"></a>
 </p>
-
 <p align="center">
   <a href="https://github.com/SolaneHub/Expedition33_RPC/releases/latest/download/Expedition33_RPC.exe">
     <img src="https://img.shields.io/badge/Download-Expedition33__RPC.exe-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Download Executable">
@@ -54,9 +53,9 @@
 <h2 id="features">✨ Key Features</h2>
 
 - **Continuous Autonomous Detection**: Runs quietly in the system tray and establishes a Discord Rich Presence session the moment `SandFall-Win64-Shipping.exe` begins running, cleanly disconnecting when the game closes.
-- **Dual-Engine Detection Pipeline**:
-  - **Tier 1 (Real-Time Game Thread Bridge)**: A headless, non-intrusive Lua bridge powered by [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) that hooks directly into `AC_jRPG_BattleManager_C` on the game thread. Detects battle transitions in 0 milliseconds and extracts live enemy/boss titles without memory scanning.
-  - **Tier 2 (Binary Save File Parser)**: Reads `SavesContainer.sav` and `EXPEDITION_0.sav` with multi-tier fuzzy zone validation as a fallback whenever the bridge is not active.
+- **Pure Real-Time Telemetry Pipeline**: A headless, non-intrusive Lua bridge powered by [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) that hooks directly into `AC_jRPG_BattleManager_C` on the game thread. Detects battle transitions with zero latency and extracts live enemy/boss titles without memory scanning. Employs a strict 5.0-second wall-clock freshness window to instantly expire stale combat or zone telemetry when the game or battle concludes.
+- **Cross-Platform Telemetry Paths**: Built-in compatibility path resolution (`compat_paths.py`) supporting Windows, Linux, and Steam Deck Proton/Wine environments.
+- **Lightweight Native Discord IPC Client**: Replaced third-party client wrappers with an in-house asynchronous wire client featuring intelligent rate-limiting, thread-safe cache invalidation, and automatic reconnection backoff.
 - **Exhaustive Expedition Flag Mapping**: All **115 official in-game Expedition Flags** across **48 zones** (from *Spring Meadows* to *The Monolith*, *Verso's Drafts*, and *The Reacher*) are mapped with sub-area disambiguation and multi-tier resolution.
 - **Official Zone Normalization**: Translates raw internal Unreal Engine map assets (`Level_Goblu_Main` -> *Flying Waters*, `Level_SeaCliff` -> *Stone Wave Cliffs*, `Level_CleasFlyingHouse` -> *Flying Manor*, `Level_SimonArea` -> *The Abyss*) into clean player-facing names.
 - **Endless Tower & Super Boss Intelligence**: Automatically resolves trials, stages, and Super Bosses (*Simon the Divergent Star*, *Clea Unleashed*, *Duollistes*, *Painted Love*).
@@ -287,9 +286,9 @@ We welcome bug reports, feature suggestions, and questions from the community! I
 1. **Check Existing Issues**: Search [open issues](https://github.com/SolaneHub/Expedition33_RPC/issues) and [closed issues](https://github.com/SolaneHub/Expedition33_RPC/issues?q=is%3Aissue+is%3Aclosed) to see if the topic has already been addressed.
 2. **Update to Latest Version**: Verify that you are running the latest release from [Releases](https://github.com/SolaneHub/Expedition33_RPC/releases/latest) or through the in-app automatic updater.
 3. **Provide Context**: When reporting a bug, please include:
-   - Application version (e.g. `v1.5.0`)
+   - Application version (e.g. `v1.7.0`)
    - Game edition (Steam, PC Game Pass / Xbox, etc.)
-   - Combat Bridge status (Installed via tray or fallback binary save reader)
+   - Combat Bridge status (Installed via tray or automatic deployment)
    - Windows OS version
    - Clear steps to reproduce and any relevant screenshots or logs
 
