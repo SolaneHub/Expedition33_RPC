@@ -62,13 +62,19 @@ def test_tray_menu_structure_inspection(tray_fixture) -> None:
 
 
 @pytest.mark.unit
-def test_tray_menu_action_toggle_anti_spoiler(tray_fixture) -> None:
+def test_tray_menu_action_toggle_anti_spoiler(
+    tray_fixture, capsys: pytest.CaptureFixture[str]
+) -> None:
     _app, orchestrator, harness, icon = tray_fixture
     orchestrator.toggle_anti_spoiler.return_value = True
 
     harness.invoke("Anti-Spoiler Mode")
     orchestrator.toggle_anti_spoiler.assert_called_once()
     icon.update_menu.assert_called()
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
 
 
 @pytest.mark.unit

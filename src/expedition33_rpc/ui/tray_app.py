@@ -131,8 +131,7 @@ class ExpeditionTrayApp:
         return "Anti-Spoiler Mode  [Disabled]"
 
     def action_toggle_anti_spoiler(self, *_):
-        new_val = self.orchestrator.toggle_anti_spoiler()
-        print(f"[TrayApp] Anti-Spoiler toggled to: {new_val}")
+        self.orchestrator.toggle_anti_spoiler()
         self._safe_update_menu()
 
     def menu_bridge_toggle(self, *_) -> str:
