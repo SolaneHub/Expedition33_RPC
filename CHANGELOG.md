@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.3] - 2026-10-14
+
+### Fixed
+- **Settings Persistence Optimization & Responsiveness**:
+  - Implemented thread-safe in-memory caching and reentrant locking (`RLock`) in `SettingsService`, eliminating redundant disk reads during setting queries and toggles.
+  - Adopted direct binary stream write with EAFP parent directory recreation, cutting hot-path UI toggle latency from ~12.6ms down to ~0.26ms.
+  - Hardened multi-process temporary filename generation with `os.getpid()`, unique thread IDs, and high-precision timestamps to prevent collisions.
+  - Added filesystem modification timestamp (`st_mtime`) tracking to automatically detect and merge external configuration file changes.
+  - Suppressed debug standard output in tray menu actions to avoid terminal I/O latency regressions in headless test runners.
+
 ## [v2.0.2] - 2026-10-14
 
 ### Changed
