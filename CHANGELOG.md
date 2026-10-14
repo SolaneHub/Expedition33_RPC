@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.2] - 2026-10-14
+
+### Changed
+- **Optimized Lazy Telemetry Catalog Loading**:
+  - Guarded `game_data.__getattr__` with strict `_LAZY_ATTRIBUTES` whitelist before reading JSON catalogs, preventing premature 1.26MB file reads during Python module inspection.
+  - Eliminated top-level catalog imports from `normalization.py` and `presentation.py` in favor of deferred module-attribute access.
+- **Franciscan Architectural Refactoring & Pruning**:
+  - Extracted smoke test logic from `core/app.py` into dedicated `core/smoke.py` and registered PyInstaller hidden import.
+  - Pruned unused ghost hash maps, redundant sentinels (`_UnsetType`), duplicate parameters, and unused platform lock wrappers.
+  - Streamlined `AppOrchestrator` state change subscriber dispatching to ensure decoupled and concurrent multi-listener delivery.
+
+### Fixed
+- **Process Lifecycle & Steam AppID Compatibility**:
+  - Decoupled process lifecycle validation from strict AppID dependency, preventing false disconnects on alternative distribution paths.
+  - Hardened bridge provider injection in `GameDetector` to allow deterministic opt-out via `bridge_provider=None` using sentinel defaults.
+
 ## [v2.0.1] - 2026-10-14
 
 ### Fixed
