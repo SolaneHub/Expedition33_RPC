@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from tests.harness import DiscordPipeSimulator
@@ -161,6 +161,42 @@ def test_orchestrator_step_update_coordinates_subsystems(tmp_path: Path) -> None
         assert len(state_changed_events) == 1
         assert state_changed_events[0][0].zone_name == "Old Lumière"
         assert state_changed_events[0][1] is False
+
+
+@pytest.mark.unit
+def test_orchestrator_subscribe_state_change_and_unsubscribe(tmp_path: Path) -> None:
+    settings = SettingsService(custom_path=tmp_path / "settings.json")
+    pipe = DiscordPipeSimulator()
+    client = DiscordIPCClient(client_id="test", transport=pipe)
+    rpc = DiscordRPCManager(client=client)
+
+    with GameSessionSimulator(base_dir=tmp_path) as session:
+        session.start_game(pid=5555).enter_zone("Level_Main_OldLumiere")
+        orchestrator = AppOrchestrator(
+            detector=session.detector,
+            rpc_manager=rpc,
+            settings_service=settings,
+            auto_install_bridge=False,
+            sync_startup=False,
+        )
+
+        received_events: list[tuple[GameState, bool]] = []
+
+        def callback(state: GameState, anti_spoiler: bool) -> None:
+            received_events.append((state, anti_spoiler))
+
+        unsubscribe = orchestrator.subscribe_state_change(callback)
+
+        # 1. First step: callback receives state
+        result = orchestrator.step_update()
+        assert result is not None
+        assert len(received_events) == 1
+        assert received_events[0][0].process_pid == 5555
+
+        # 2. Unsubscribe: callback should not be invoked on subsequent steps
+        unsubscribe()
+        orchestrator.step_update()
+        assert len(received_events) == 1
 
 
 @pytest.mark.unit
@@ -340,18 +376,96 @@ def test_orchestrator_event_driven_bridge_check_triggers_on_process_restart() ->
 
     # 4. Game restarts with new PID 2002 -> re-checks observable status
     mock_detector.get_game_state.return_value = GameState.create(
-        is_running=True, process_pid=2002, start_time=600.0
+        is_running=True, process_pid=2002, process_create_time=600.0, start_time=600.0
     )
     orchestrator.step_update()
     assert orchestrator.is_bridge_installed() is False
 
-    # 5. Fast restart: PID reused but start_time changed without intermediate stopped tick -> re-checks
+    # 5. Fast restart: PID reused but process_create_time changed without intermediate stopped tick -> re-checks
     fake_installer.installed = True
     mock_detector.get_game_state.return_value = GameState.create(
-        is_running=True, process_pid=2002, start_time=700.0
+        is_running=True, process_pid=2002, process_create_time=700.0, start_time=700.0
     )
     orchestrator.step_update()
     assert orchestrator.is_bridge_installed() is True
+
+
+@pytest.mark.unit
+def test_orchestrator_eliminates_parasitic_io_on_gameplay_timer_transitions() -> None:
+    """Anti-regression test: verifies that gameplay zone/combat transitions changing state.start_time
+
+    do NOT re-trigger bridge installation or filesystem checks. Bridge check runs exactly once per process.
+    """
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    fake_installer = FakeBridgeInstaller(installed=False, install_success=True)
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        bridge_installer=fake_installer,
+        auto_install_bridge=True,
+        sync_startup=False,
+    )
+
+    with patch.object(
+        orchestrator,
+        "check_and_auto_install_bridge",
+        wraps=orchestrator.check_and_auto_install_bridge,
+    ) as spy_auto_install:
+        # 1. Game launches: PID=4242, process_create_time=1000.0, start_time=1000.0 (exploration)
+        mock_detector.get_game_state.return_value = GameState.create(
+            is_running=True,
+            process_pid=4242,
+            process_create_time=1000.0,
+            start_time=1000.0,
+            zone_name="Ancient Sanctuary",
+            in_combat=False,
+            win64_dir=Path("/mock/game/win64"),
+        )
+        orchestrator.step_update()
+        assert spy_auto_install.call_count == 1
+
+        # 2. Zone transition: start_time resets to 1050.0, PID and process_create_time unchanged
+        mock_detector.get_game_state.return_value = GameState.create(
+            is_running=True,
+            process_pid=4242,
+            process_create_time=1000.0,
+            start_time=1050.0,
+            zone_name="Crimson Forest",
+            in_combat=False,
+            win64_dir=Path("/mock/game/win64"),
+        )
+        orchestrator.step_update()
+        # MUST remain 1 (no parasitic I/O)
+        assert spy_auto_install.call_count == 1
+
+        # 3. Enter combat: start_time resets to 1080.0
+        mock_detector.get_game_state.return_value = GameState.create(
+            is_running=True,
+            process_pid=4242,
+            process_create_time=1000.0,
+            start_time=1080.0,
+            zone_name="Crimson Forest",
+            in_combat=True,
+            enemy_name="Duollistes",
+            win64_dir=Path("/mock/game/win64"),
+        )
+        orchestrator.step_update()
+        assert spy_auto_install.call_count == 1
+
+        # 4. Exit combat: start_time adjusted to 1110.0
+        mock_detector.get_game_state.return_value = GameState.create(
+            is_running=True,
+            process_pid=4242,
+            process_create_time=1000.0,
+            start_time=1110.0,
+            zone_name="Crimson Forest",
+            in_combat=False,
+            win64_dir=Path("/mock/game/win64"),
+        )
+        orchestrator.step_update()
+        assert spy_auto_install.call_count == 1
 
 
 @pytest.mark.unit

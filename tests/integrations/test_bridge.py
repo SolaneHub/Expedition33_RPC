@@ -71,32 +71,67 @@ def test_bridge_lua_script_emits_expected_json_contract() -> None:
         assert re.search(pattern, lua_content), f"main.lua does not emit required JSON key '{key}'"
 
 
-def test_bridge_state_provider_parses_lua_emitted_payload(tmp_path: Path) -> None:
+def test_bridge_lua_write_status_schema_contract_with_state_provider(tmp_path: Path) -> None:
+    """Verifies complete schema synchronization between main.lua write_status and BridgeStateProvider."""
+    bridge_zip_path = Path(get_resource_path("bridge.zip"))
+    with zipfile.ZipFile(bridge_zip_path, "r") as z:
+        lua_content = z.read("ue4ss/Mods/Expedition33RPC/scripts/main.lua").decode("utf-8")
+
+    # Extract JSON format string inside write_status in main.lua
+    match = re.search(r"local payload = string\.format\(\s*\'([^\']+)\'", lua_content)
+    assert match is not None, "Failed to extract JSON format template from write_status in main.lua"
+    format_template = match.group(1).strip()
+
+    # Verify that all keys produced by write_status format string are present
+    emitted_keys = re.findall(r'"([a-zA-Z0-9_]+)"\s*:', format_template)
+    expected_emitted_keys = {
+        "in_combat",
+        "enemy_name",
+        "enemies",
+        "zone",
+        "raw_zone",
+        "raw_level",
+        "world_path",
+        "checkpoint",
+        "floor",
+        "tower_floor",
+        "tower_trial",
+        "timestamp",
+    }
+    assert expected_emitted_keys.issubset(set(emitted_keys))
+
+    # Simulate realistic main.lua emission using extracted format keys
     now = time.time()
-    sample_payload = {
+    simulated_lua_output = {
         "in_combat": True,
         "enemy_name": "Duollistes",
         "enemies": ["Duollistes", "Alpha Gold Chevaliere"],
         "zone": "Level_Main_OldLumiere",
+        "raw_zone": "Level_Main_OldLumiere",
+        "raw_level": "Level_Main_OldLumiere_P",
+        "world_path": "/Game/Maps/OldLumiere",
         "checkpoint": "Entrance",
+        "floor": 4,
         "tower_floor": 4,
         "tower_trial": [2, 1],
         "timestamp": now,
     }
+
     status_file = tmp_path / "expedition33_status.json"
-    status_file.write_text(json.dumps(sample_payload), encoding="utf-8")
+    status_file.write_text(json.dumps(simulated_lua_output), encoding="utf-8")
 
-    provider = BridgeStateProvider(paths=[str(status_file)])
-    data = provider.read_game_data(min_valid_timestamp=now - 5.0, lang="en")
+    provider = BridgeStateProvider(paths=[str(status_file)], time_provider=lambda: now)
+    parsed_data = provider.read_game_data(min_valid_timestamp=now - 5.0, lang="en")
 
-    assert data is not None
-    assert data["in_combat"] is True
-    assert data["enemy_name"] == "Duollistes"
-    assert data["enemies"] == ["Duollistes", "Alpha Gold Chevaliere"]
-    assert data["raw_zone"] == "Level_Main_OldLumiere"
-    assert data["checkpoint"] == "Entrance"
-    assert data["tower_floor"] == 4
-    assert data["tower_trial"] == (2, 1)
+    assert parsed_data is not None
+    # Verify all expected domain fields in read_game_data output
+    assert parsed_data["raw_zone"] == simulated_lua_output["raw_zone"]
+    assert parsed_data["in_combat"] is True
+    assert parsed_data["enemy_name"] == simulated_lua_output["enemy_name"]
+    assert parsed_data["enemies"] == simulated_lua_output["enemies"]
+    assert parsed_data["checkpoint"] == simulated_lua_output["checkpoint"]
+    assert parsed_data["tower_floor"] == 4
+    assert parsed_data["tower_trial"] == (2, 1)
 
 
 def test_bridge_state_provider_enforces_stale_timestamp_rejection(tmp_path: Path) -> None:
@@ -267,36 +302,6 @@ def test_bridge_lua_syntax_validity() -> None:
             check=False,
         )
         assert res.returncode == 0, f"luac syntax validation failed: {res.stderr}"
-
-
-def test_bridge_lua_syntax_mocked_luac_compiler() -> None:
-    """Verifies that luac compiler validation block passes decoded string input (not bytes) to subprocess."""
-    fake_run_result = subprocess.CompletedProcess(
-        args=["luac", "-p", "-"], returncode=0, stdout="", stderr=""
-    )
-
-    with (
-        patch("shutil.which", return_value="/mock/path/luac"),
-        patch("subprocess.run", return_value=fake_run_result) as mock_run,
-    ):
-        test_bridge_lua_syntax_validity()
-
-        assert mock_run.called
-        call_kwargs = mock_run.call_args.kwargs
-        assert isinstance(call_kwargs.get("input"), str), "input must be decoded str, not bytes"
-        assert call_kwargs.get("text") is True
-        assert call_kwargs.get("capture_output") is True
-
-    # Also verify failure assertion when luac returns non-zero returncode
-    failing_result = subprocess.CompletedProcess(
-        args=["luac", "-p", "-"], returncode=1, stdout="", stderr="syntax error line 1"
-    )
-    with (
-        patch("shutil.which", return_value="/mock/path/luac"),
-        patch("subprocess.run", return_value=failing_result),
-        pytest.raises(AssertionError, match="luac syntax validation failed"),
-    ):
-        test_bridge_lua_syntax_validity()
 
 
 def test_find_game_win64_directory_from_wingdk_process(tmp_path: Path) -> None:

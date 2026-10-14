@@ -47,13 +47,6 @@ class ProcessLike(Protocol):
     def is_running(self) -> bool: ...
 
 
-class _UnsetType:
-    """Unique sentinel type for distinguishing omitted arguments from None."""
-
-
-_UNSET = _UnsetType()
-
-
 @dataclass(frozen=True)
 class GameProcessInfo:
     """Immutable DTO holding process-level executable and filesystem locations."""
@@ -61,6 +54,7 @@ class GameProcessInfo:
     pid: int | None = None
     exe_path: str | None = None
     win64_dir: Path | None = None
+    process_create_time: float | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +63,7 @@ class GameState:
 
     is_running: bool = False
     process_pid: int | None = None
+    process_create_time: float | None = None
     start_time: float | None = None
     game_language: str = "en"
     zone_name: str = "Exploring"
@@ -97,6 +92,7 @@ class GameState:
         *,
         is_running: bool = True,
         process_pid: int | None = None,
+        process_create_time: float | None = None,
         start_time: float | None = None,
         game_language: str = "en",
         raw_zone: str = "",
@@ -105,8 +101,7 @@ class GameState:
         enemies: list[str] | None = None,
         raw_checkpoint: str = "",
         tower_floor: int | None = None,
-        tower_stage_trial: TowerTrial | None | _UnsetType = _UNSET,
-        current_tower_trial: TowerTrial | None = None,
+        tower_stage_trial: TowerTrial | None = None,
         zone_name: str | None = None,
         checkpoint_name: str | None = None,
         process_info: GameProcessInfo | None = None,
@@ -122,11 +117,7 @@ class GameState:
 
         # 2. Enemy name & tower trial
         final_enemy = ""
-        trial_info: TowerTrial | None = (
-            tower_stage_trial
-            if not isinstance(tower_stage_trial, _UnsetType)
-            else current_tower_trial
-        )
+        trial_info: TowerTrial | None = tower_stage_trial
 
         effective_enemy = enemy_name or (", ".join(enemies) if enemies else "")
         if effective_enemy or enemies:
@@ -148,20 +139,32 @@ class GameState:
 
         # 4. Process info resolution
         effective_process_info = process_info
+        effective_create_time = (
+            process_create_time
+            if process_create_time is not None
+            else (effective_process_info.process_create_time if effective_process_info else None)
+        )
         if (
             effective_process_info is None
             and is_running
-            and (process_pid is not None or exe_path is not None or win64_dir is not None)
+            and (
+                process_pid is not None
+                or exe_path is not None
+                or win64_dir is not None
+                or process_create_time is not None
+            )
         ):
             effective_process_info = GameProcessInfo(
                 pid=process_pid,
                 exe_path=exe_path,
                 win64_dir=win64_dir,
+                process_create_time=effective_create_time,
             )
 
         return cls(
             is_running=is_running,
             process_pid=process_pid,
+            process_create_time=effective_create_time,
             start_time=start_time,
             game_language=game_language,
             zone_name=resolved_zone,
@@ -173,20 +176,6 @@ class GameState:
             tower_floor=tower_floor,
             tower_stage_trial=trial_info,
             process_info=effective_process_info,
-        )
-
-    def matches(self, other: GameState | None) -> bool:
-        """Returns True if the user-facing game status is functionally identical."""
-        if not other:
-            return False
-        return (
-            self.is_running == other.is_running
-            and self.zone_name == other.zone_name
-            and self.in_combat == other.in_combat
-            and self.enemy_name == other.enemy_name
-            and self.checkpoint_name == other.checkpoint_name
-            and self.tower_floor == other.tower_floor
-            and self.tower_stage_trial == other.tower_stage_trial
         )
 
 
@@ -324,13 +313,16 @@ class BridgeStateProvider:
         return None
 
 
+_DEFAULT_BRIDGE: Any = object()
+
+
 class GameDetector:
     """Orchestrates game process detection, telemetry providers, and zone timing."""
 
     def __init__(
         self,
         timer_tracker: ZoneTimerTracker | None = None,
-        bridge_provider: BridgeProviderProtocol | None | _UnsetType = _UNSET,
+        bridge_provider: BridgeProviderProtocol | None | Any = _DEFAULT_BRIDGE,
         process_scanner: Callable[[], Iterable[ProcessLike]] | None = None,
         target_process_names: Iterable[str] | str | None = None,
         game_user_settings_path: Path | str | None = None,
@@ -371,10 +363,9 @@ class GameDetector:
         self.process_scanner = process_scanner
 
         # Telemetry Provider (Bridge IPC)
-        if isinstance(bridge_provider, _UnsetType):
-            self.bridge_provider: BridgeProviderProtocol | None = BridgeStateProvider()
-        else:
-            self.bridge_provider = bridge_provider
+        self.bridge_provider: BridgeProviderProtocol | None = (
+            BridgeStateProvider() if bridge_provider is _DEFAULT_BRIDGE else bridge_provider
+        )
 
     @property
     def exe_path(self) -> str | None:
@@ -610,11 +601,13 @@ class GameDetector:
             pid=proc.pid,
             exe_path=self.game_exe_path,
             win64_dir=self.game_win64_dir,
+            process_create_time=proc_create_time,
         )
 
         return GameState.create(
             is_running=True,
             process_pid=proc.pid,
+            process_create_time=proc_create_time,
             start_time=effective_start,
             game_language=lang,
             raw_zone=raw_zone,
@@ -624,7 +617,6 @@ class GameDetector:
             raw_checkpoint=raw_checkpoint,
             tower_floor=tower_floor,
             tower_stage_trial=self.current_tower_trial,
-            current_tower_trial=self.current_tower_trial,
             process_info=proc_info,
             exe_path=self.game_exe_path,
             win64_dir=self.game_win64_dir,

@@ -8,19 +8,12 @@ from __future__ import annotations
 import functools
 import re
 import unicodedata
-from collections.abc import Iterator, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from expedition33_rpc.detection.game_data import (
-    ALL_SUPPORTED_LANGUAGES,
-    CHECKPOINT_NAMES_BY_LANG,
-    CONTEXTUAL_CHECKPOINTS,
-    ENDLESS_TOWER_TRIALS,
-    LOCALIZED_PRESENTATION,
-    MAIN_MENU_TOKENS,
-    ZONE_NAME_OVERRIDES_BY_LANG,
-    TowerTrial,
-)
+import expedition33_rpc.detection.game_data as game_data
+
+if TYPE_CHECKING:
+    from expedition33_rpc.detection.game_data import TowerTrial
 
 
 def _normalize_alphanumeric_key(text: str) -> str:
@@ -76,7 +69,7 @@ def normalize_language_code(lang: str | None) -> str:
             return "id"
         case _:
             prefix = c.split("-")[0]
-            for canon in ALL_SUPPORTED_LANGUAGES:
+            for canon in game_data.ALL_SUPPORTED_LANGUAGES:
                 if canon.lower().startswith(prefix):
                     return canon
             return "en-US"
@@ -85,35 +78,10 @@ def normalize_language_code(lang: str | None) -> str:
 @functools.lru_cache(maxsize=32)
 def get_checkpoint_hash_map(lang: str) -> dict[str, str]:
     """Computes normalized checkpoint hash maps on demand with caching."""
-    table = CHECKPOINT_NAMES_BY_LANG.get(lang)
+    table = game_data.CHECKPOINT_NAMES_BY_LANG.get(lang)
     if table is None:
         return {}
     return {_normalize_alphanumeric_key(k): v for k, v in table.items()}
-
-
-# Backward-compatible hash map lookup mapping
-class _CheckpointHashMapLookup(Mapping[str, dict[str, str]]):
-    def __getitem__(self, lang: str) -> dict[str, str]:
-        res = get_checkpoint_hash_map(lang)
-        if not res and lang not in CHECKPOINT_NAMES_BY_LANG:
-            raise KeyError(lang)
-        return res
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(CHECKPOINT_NAMES_BY_LANG)
-
-    def __len__(self) -> int:
-        return len(CHECKPOINT_NAMES_BY_LANG)
-
-    def __contains__(self, key: object) -> bool:
-        return key in CHECKPOINT_NAMES_BY_LANG
-
-    def get(self, key: str, default: Any = None) -> Any:
-        res = get_checkpoint_hash_map(key)
-        return res if res else default
-
-
-CHECKPOINT_HASH_MAPS_BY_LANG: Mapping[str, dict[str, str]] = _CheckpointHashMapLookup()
 
 
 def strip_accents(text: str) -> str:
@@ -129,14 +97,14 @@ def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
         return False
     raw_lower = (raw_zone or "").lower().strip()
     display_lower = (zone_display or "").lower().strip()
-    if raw_lower in MAIN_MENU_TOKENS:
+    if raw_lower in game_data.MAIN_MENU_TOKENS:
         return True
     norm_display = strip_accents(display_lower)
     if "menu" in raw_lower or "menu" in norm_display:
         return True
     return any(
         table.get("mainmenu", "").lower() == display_lower
-        for table in ZONE_NAME_OVERRIDES_BY_LANG.values()
+        for table in game_data.ZONE_NAME_OVERRIDES_BY_LANG.values()
     )
 
 
@@ -222,7 +190,7 @@ def resolve_tower_trial(
             re.sub(r"\(Tier \d+\)", "", format_enemy_name(e), flags=re.IGNORECASE).strip().lower()
             for e in structured
         ]
-        for stage_info, boss_name, enemy_groups in ENDLESS_TOWER_TRIALS:
+        for stage_info, boss_name, enemy_groups in game_data.ENDLESS_TOWER_TRIALS:
             if all(
                 any(any(variant.lower() in e for e in cleaned_list) for variant in group)
                 for group in enemy_groups
@@ -235,7 +203,7 @@ def resolve_tower_trial(
         cleaned_str = re.sub(r"\(Tier \d+\)", "", normalized_single, flags=re.IGNORECASE)
         cleaned_str = re.sub(r"\bT\d+\b", "", cleaned_str, flags=re.IGNORECASE).lower()
 
-        for stage_info, boss_name, enemy_groups in ENDLESS_TOWER_TRIALS:
+        for stage_info, boss_name, enemy_groups in game_data.ENDLESS_TOWER_TRIALS:
             if all(
                 any(variant.lower() in cleaned_str for variant in group) for group in enemy_groups
             ):
@@ -250,16 +218,20 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
     canon_lang = normalize_language_code(lang)
 
     if not raw_name:
-        strings = LOCALIZED_PRESENTATION.get(canon_lang, LOCALIZED_PRESENTATION.get("en-US", {}))
+        strings = game_data.LOCALIZED_PRESENTATION.get(
+            canon_lang, game_data.LOCALIZED_PRESENTATION.get("en-US", {})
+        )
         return strings.get("exploring", "Exploring")
 
     if is_main_menu(raw_name):
         if canon_lang == "it":
             return "Nel menu principale"
-        lang_overrides = ZONE_NAME_OVERRIDES_BY_LANG.get(canon_lang) or {}
+        lang_overrides = game_data.ZONE_NAME_OVERRIDES_BY_LANG.get(canon_lang) or {}
         if "mainmenu" in lang_overrides:
             return lang_overrides["mainmenu"]
-        strings = LOCALIZED_PRESENTATION.get(canon_lang, LOCALIZED_PRESENTATION.get("en-US", {}))
+        strings = game_data.LOCALIZED_PRESENTATION.get(
+            canon_lang, game_data.LOCALIZED_PRESENTATION.get("en-US", {})
+        )
         return strings.get("in_menu", "Main Menu")
 
     continent_names = {
@@ -271,9 +243,9 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
         "level_worldmap_main",
         "level_worldmap_main_v2",
     }
-    lang_overrides = ZONE_NAME_OVERRIDES_BY_LANG.get(canon_lang) or ZONE_NAME_OVERRIDES_BY_LANG.get(
-        "en-US", {}
-    )
+    lang_overrides = game_data.ZONE_NAME_OVERRIDES_BY_LANG.get(
+        canon_lang
+    ) or game_data.ZONE_NAME_OVERRIDES_BY_LANG.get("en-US", {})
     if raw_name.lower().strip() in continent_names or "worldmap" in raw_name.lower():
         return lang_overrides.get("worldmap", "The Continent")
 
@@ -313,7 +285,7 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
 
     # Fallback to English overrides
     if canon_lang != "en-US":
-        en_overrides = ZONE_NAME_OVERRIDES_BY_LANG.get("en-US", {})
+        en_overrides = game_data.ZONE_NAME_OVERRIDES_BY_LANG.get("en-US", {})
         en_override = en_overrides.get(normalized) or en_overrides.get(cleaned.lower().strip())
         if en_override:
             return en_override
@@ -338,8 +310,8 @@ def format_checkpoint_tag(
         return ""
 
     canon_lang = normalize_language_code(lang)
-    fallback_dict = CHECKPOINT_NAMES_BY_LANG.get("en-US", {})
-    name_dict = CHECKPOINT_NAMES_BY_LANG.get(canon_lang) or fallback_dict
+    fallback_dict = game_data.CHECKPOINT_NAMES_BY_LANG.get("en-US", {})
+    name_dict = game_data.CHECKPOINT_NAMES_BY_LANG.get(canon_lang) or fallback_dict
     fallback_hash_map = get_checkpoint_hash_map("en-US")
     hash_map = get_checkpoint_hash_map(canon_lang) or fallback_hash_map
 
@@ -362,7 +334,7 @@ def format_checkpoint_tag(
     # 2. Declarative contextual zone matching from game_data.json
     if zone:
         z_norm = strip_accents(zone).lower()
-        for rule in CONTEXTUAL_CHECKPOINTS:
+        for rule in game_data.CONTEXTUAL_CHECKPOINTS:
             if not any(k in z_norm for k in rule.get("zone_keywords", [])):
                 continue
             if "zone_required" in rule and not any(k in z_norm for k in rule["zone_required"]):
@@ -407,7 +379,6 @@ def format_checkpoint_tag(
 
 
 __all__ = [
-    "CHECKPOINT_HASH_MAPS_BY_LANG",
     "get_checkpoint_hash_map",
     "normalize_language_code",
     "strip_accents",

@@ -111,6 +111,9 @@ class AppOrchestrator:
         else:
             self.rpc_manager = DiscordRPCManager(is_stopping=self._is_stopping)
 
+        self._state_subscribers: list[Callable[[GameState, bool], None]] = []
+        if on_state_change is not None:
+            self._state_subscribers.append(on_state_change)
         self.on_state_change: Callable[[GameState, bool], None] | None = on_state_change
         self.on_update_available: Callable[[UpdateInfo], None] | None = on_update_available
 
@@ -123,10 +126,22 @@ class AppOrchestrator:
 
         self._bridge_installed: bool = False
         self._last_detected_pid: int | None = None
-        self._last_detected_start_time: float | None = None
+        self._last_detected_create_time: float | None = None
 
         if self.sync_startup:
             self.startup_service.sync_startup_path()
+
+    def subscribe_state_change(
+        self, callback: Callable[[GameState, bool], None]
+    ) -> Callable[[], None]:
+        """Subscribes a listener to game presence state changes and returns an unsubscribe callable."""
+        self._state_subscribers.append(callback)
+
+        def unsubscribe() -> None:
+            if callback in self._state_subscribers:
+                self._state_subscribers.remove(callback)
+
+        return unsubscribe
 
     def _is_stopping(self) -> bool:
         return self._stop_event.is_set() or (self._started and not self.running)
@@ -215,13 +230,14 @@ class AppOrchestrator:
                 if state.process_pid is not None
                 else (1 if state.is_running else None)
             )
-            current_start_time = state.start_time
+            current_create_time = state.process_create_time
             is_new_process = current_pid is not None and (
                 self._last_detected_pid is None
                 or current_pid != self._last_detected_pid
                 or (
-                    current_start_time is not None
-                    and current_start_time != self._last_detected_start_time
+                    current_create_time is not None
+                    and self._last_detected_create_time is not None
+                    and current_create_time != self._last_detected_create_time
                 )
             )
 
@@ -240,9 +256,21 @@ class AppOrchestrator:
                         )
 
             self._last_detected_pid = current_pid
-            self._last_detected_start_time = current_start_time if current_pid is not None else None
+            self._last_detected_create_time = (
+                current_create_time if current_pid is not None else None
+            )
 
-            if self.on_state_change is not None:
+            # Notify subscribed listeners and legacy on_state_change
+            if self._state_subscribers:
+                for sub in list(self._state_subscribers):
+                    try:
+                        sub(state, anti_spoiler)
+                    except Exception as e:
+                        print(f"[Orchestrator] State subscriber error: {e}")
+            if (
+                self.on_state_change is not None
+                and self.on_state_change not in self._state_subscribers
+            ):
                 try:
                     self.on_state_change(state, anti_spoiler)
                 except Exception as e:

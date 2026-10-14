@@ -6,6 +6,7 @@ import contextlib
 import os
 import sys
 import threading
+from collections.abc import Callable
 from typing import Any
 
 if (
@@ -44,15 +45,13 @@ class ExpeditionTrayApp:
         self._last_menu_state: tuple[Any, ...] | None = None
 
         self.orchestrator = orchestrator if orchestrator is not None else AppOrchestrator()
-        self._chained_on_state_change = getattr(self.orchestrator, "on_state_change", None)
+        self._unsubscribe_state: Callable[[], None] | None = None
+        if hasattr(self.orchestrator, "subscribe_state_change"):
+            self._unsubscribe_state = self.orchestrator.subscribe_state_change(
+                self.on_orchestrator_state_change
+            )
         self._chained_on_update_available = getattr(self.orchestrator, "on_update_available", None)
-        self.orchestrator.on_state_change = self._on_state_change_wrapper
         self.orchestrator.on_update_available = self._on_update_available_wrapper
-
-    def _on_state_change_wrapper(self, state: GameState, anti_spoiler: bool) -> None:
-        self.on_orchestrator_state_change(state, anti_spoiler)
-        if self._chained_on_state_change is not None:
-            self._chained_on_state_change(state, anti_spoiler)
 
     def _on_update_available_wrapper(self, update_info: UpdateInfo) -> None:
         self.on_update_available(update_info)
@@ -208,7 +207,9 @@ class ExpeditionTrayApp:
         self.orchestrator.trigger_update_action()
 
     def action_exit(self, *_):
-        self.orchestrator.on_state_change = self._chained_on_state_change
+        if self._unsubscribe_state is not None:
+            self._unsubscribe_state()
+            self._unsubscribe_state = None
         self.orchestrator.on_update_available = self._chained_on_update_available
         self.orchestrator.stop()
         if self.icon is not None:

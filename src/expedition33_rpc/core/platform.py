@@ -179,14 +179,6 @@ def release_single_instance_lock() -> None:
     release_posix_file_lock()
 
 
-def acquire_single_instance_lock(
-    name: str | None = None,
-    lock_path: Path | str | None = None,
-) -> bool:
-    """Acquires single-instance ownership across Windows (Named Mutex) and POSIX (flock)."""
-    return not is_already_running(mutex_name=name, lock_path=lock_path)
-
-
 # ---------------------------------------------------------------------------
 # Shared Non-Blocking File Reading (Win32 / POSIX)
 # ---------------------------------------------------------------------------
@@ -266,7 +258,6 @@ def read_file_shared_text(path: str | Path) -> str:
 
 __all__ = [
     "acquire_posix_file_lock",
-    "acquire_single_instance_lock",
     "is_already_running",
     "read_file_shared_text",
     "release_posix_file_lock",

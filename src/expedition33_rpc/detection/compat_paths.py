@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-DEFAULT_STEAM_APP_ID = "2096330"
+DEFAULT_STEAM_APP_ID = "1903340"
 
 
 def get_telemetry_file_paths(
@@ -18,7 +18,7 @@ def get_telemetry_file_paths(
     """Returns candidate telemetry IPC status file paths across Windows, Linux, and Steam Deck Proton environments.
 
     Args:
-        app_id: The Steam AppID for Expedition 33 (defaults to 2096330).
+        app_id: The Steam AppID for Expedition 33 (defaults to 1903340).
         is_windows: Optional platform override (defaults to sys.platform == 'win32' or os.name == 'nt').
         home_dir: Optional user home directory override (defaults to Path.home()).
     """
@@ -145,7 +145,7 @@ def get_config_file_paths(
     """Returns candidate GameUserSettings.ini file paths across Windows, Linux, and Steam Deck Proton environments.
 
     Args:
-        app_id: The Steam AppID for Expedition 33 (defaults to 2096330).
+        app_id: The Steam AppID for Expedition 33 (defaults to 1903340).
         is_windows: Optional platform override (defaults to sys.platform == 'win32' or os.name == 'nt').
         home_dir: Optional user home directory override (defaults to Path.home()).
     """

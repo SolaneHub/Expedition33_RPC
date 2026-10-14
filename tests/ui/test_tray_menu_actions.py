@@ -130,27 +130,18 @@ def test_tray_menu_action_select_game_folder_cancelled(tray_fixture) -> None:
 
 @pytest.mark.unit
 def test_prompt_folder_selection_lifecycle(tray_fixture) -> None:
-    app, _orchestrator, _harness, _icon = tray_fixture
+    """Verifies that selecting a game folder invokes the bridge installer with the chosen path."""
+    app, orchestrator, harness, icon = tray_fixture
+    orchestrator.install_bridge_to.return_value = (True, "Installed")
 
     with (
-        patch("tkinter.Tk") as mock_tk_cls,
-        patch("tkinter.filedialog.askdirectory", return_value="D:/Custom/Win64") as mock_ask,
+        patch("tkinter.Tk"),
+        patch("tkinter.filedialog.askdirectory", return_value="D:/Custom/Win64"),
     ):
-        mock_root = MagicMock()
-        mock_tk_cls.return_value = mock_root
-
-        selected = app._prompt_folder_selection()
-
-        assert selected == "D:/Custom/Win64"
-        mock_root.withdraw.assert_called_once()
-        mock_root.attributes.assert_any_call("-topmost", True)
-        mock_ask.assert_called_once_with(
-            parent=mock_root,
-            title="Select Expedition 33 Win64 or WinGDK Directory",
-        )
-        mock_root.update_idletasks.assert_called_once()
-        mock_root.update.assert_called_once()
-        mock_root.destroy.assert_called_once()
+        harness.invoke("Select Game Folder...")
+        orchestrator.install_bridge_to.assert_called_once_with("D:/Custom/Win64")
+        icon.notify.assert_called_once()
+        icon.update_menu.assert_called()
 
 
 @pytest.mark.unit

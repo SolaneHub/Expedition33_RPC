@@ -3,7 +3,15 @@ from __future__ import annotations
 import functools
 import json
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    ZONE_NAME_OVERRIDES_BY_LANG: dict[str, dict[str, str]]
+    CHECKPOINT_NAMES_BY_LANG: dict[str, dict[str, str]]
+    TOWER_STAGES_BY_LANG: dict[str, dict[str, str]]
+    LOCALIZED_PRESENTATION: dict[str, dict[str, str]]
+    CONTEXTUAL_CHECKPOINTS: list[dict[str, Any]]
+    ENDLESS_TOWER_TRIALS: list[TrialDefinition]
 
 type TowerTrial = tuple[int, int] | str
 type TrialDefinition = tuple[TowerTrial, str | None, list[list[str]]]
@@ -60,31 +68,12 @@ _DEFAULT_MAIN_MENU_TOKENS: list[str] = [
     "wbp_splashscreens_logos_c",
 ]
 
-_DATA: dict[str, Any] = get_game_data()
-
-_raw_process_names = _DATA.get("target_process_names")
-if isinstance(_raw_process_names, list) and _raw_process_names:
-    TARGET_PROCESS_NAMES: tuple[str, ...] = tuple(
-        str(n).strip().lower() for n in _raw_process_names if str(n).strip()
-    )
-elif isinstance(_raw_process_names, str) and _raw_process_names.strip():
-    TARGET_PROCESS_NAMES = (str(_raw_process_names).strip().lower(),)
-else:
-    TARGET_PROCESS_NAMES = ("sandfall-win64-shipping.exe", "sandfall-wingdk-shipping.exe")
-
-MAIN_MENU_TOKENS: frozenset[str] = frozenset(
-    _DATA.get("main_menu_tokens") or _DEFAULT_MAIN_MENU_TOKENS
+TARGET_PROCESS_NAMES: tuple[str, ...] = (
+    "sandfall-win64-shipping.exe",
+    "sandfall-wingdk-shipping.exe",
 )
 
-ZONE_NAME_OVERRIDES_BY_LANG: dict[str, dict[str, str]] = dict(
-    _DATA.get("zone_name_overrides_by_lang", {})
-)
-CHECKPOINT_NAMES_BY_LANG: dict[str, dict[str, str]] = dict(
-    _DATA.get("checkpoint_names_by_lang", {})
-)
-TOWER_STAGES_BY_LANG: dict[str, dict[str, str]] = dict(_DATA.get("tower_stages_by_lang", {}))
-LOCALIZED_PRESENTATION: dict[str, dict[str, str]] = dict(_DATA.get("localized_presentation", {}))
-CONTEXTUAL_CHECKPOINTS: list[dict[str, Any]] = list(_DATA.get("contextual_checkpoints", []))
+MAIN_MENU_TOKENS: frozenset[str] = frozenset(_DEFAULT_MAIN_MENU_TOKENS)
 
 ALL_SUPPORTED_LANGUAGES: tuple[str, ...] = (
     "ar",
@@ -121,9 +110,41 @@ def _build_endless_tower_trials(raw_trials: list[Any]) -> list[TrialDefinition]:
     ]
 
 
-ENDLESS_TOWER_TRIALS: list[TrialDefinition] = _build_endless_tower_trials(
-    _DATA.get("endless_tower_trials", [])
+_LAZY_ATTRIBUTES = frozenset(
+    {
+        "ZONE_NAME_OVERRIDES_BY_LANG",
+        "CHECKPOINT_NAMES_BY_LANG",
+        "TOWER_STAGES_BY_LANG",
+        "LOCALIZED_PRESENTATION",
+        "CONTEXTUAL_CHECKPOINTS",
+        "ENDLESS_TOWER_TRIALS",
+    }
 )
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily loads heavy localized game data catalogs only upon access."""
+    if name not in _LAZY_ATTRIBUTES:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    data = get_game_data()
+    match name:
+        case "ZONE_NAME_OVERRIDES_BY_LANG":
+            val = dict(data.get("zone_name_overrides_by_lang", {}))
+        case "CHECKPOINT_NAMES_BY_LANG":
+            val = dict(data.get("checkpoint_names_by_lang", {}))
+        case "TOWER_STAGES_BY_LANG":
+            val = dict(data.get("tower_stages_by_lang", {}))
+        case "LOCALIZED_PRESENTATION":
+            val = dict(data.get("localized_presentation", {}))
+        case "CONTEXTUAL_CHECKPOINTS":
+            val = list(data.get("contextual_checkpoints", []))
+        case "ENDLESS_TOWER_TRIALS":
+            val = _build_endless_tower_trials(data.get("endless_tower_trials", []))
+        case _:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    globals()[name] = val
+    return val
+
 
 __all__ = [
     "ALL_SUPPORTED_LANGUAGES",

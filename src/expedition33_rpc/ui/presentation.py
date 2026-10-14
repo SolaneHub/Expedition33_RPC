@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from expedition33_rpc.detection.detector import GameState
 
+import expedition33_rpc.detection.game_data as game_data
 from expedition33_rpc.core.presence import PresencePayload
-from expedition33_rpc.detection.game_data import LOCALIZED_PRESENTATION, TOWER_STAGES_BY_LANG
 from expedition33_rpc.detection.normalization import (
     is_continent_zone,
     is_menu_zone,
@@ -25,7 +25,7 @@ DISCORD_MAX_FIELD_LENGTH = 128
 def get_presentation_strings(lang: str) -> dict[str, str]:
     """Retrieves presentation formatting strings for the specified language with fallback."""
     canon = normalize_language_code(lang)
-    return LOCALIZED_PRESENTATION.get(canon, LOCALIZED_PRESENTATION["en-US"])
+    return game_data.LOCALIZED_PRESENTATION.get(canon, game_data.LOCALIZED_PRESENTATION["en-US"])
 
 
 def truncate_presence_field(text: str, max_length: int = DISCORD_MAX_FIELD_LENGTH) -> str:
@@ -48,7 +48,7 @@ def format_location_name(game_state: GameState) -> str:
         match game_state.tower_stage_trial:
             case (stg, trl) if isinstance(stg, int) and isinstance(trl, int):
                 trial_key = f"ST_BattleTowerStages_Stage_{stg:02d}_Trial_{trl:02d}"
-                lang_trials = TOWER_STAGES_BY_LANG.get(canon, {})
+                lang_trials = game_data.TOWER_STAGES_BY_LANG.get(canon, {})
                 if canon in ("it", "en-US") or trial_key not in lang_trials:
                     trial_label = strings["stage_trial"].format(stage=stg, trial=trl)
                 else:
@@ -166,7 +166,6 @@ def format_tray_combat_status(game_state: GameState, anti_spoiler: bool = False)
 
 __all__ = [
     "DISCORD_MAX_FIELD_LENGTH",
-    "LOCALIZED_PRESENTATION",
     "get_presentation_strings",
     "truncate_presence_field",
     "format_presence",

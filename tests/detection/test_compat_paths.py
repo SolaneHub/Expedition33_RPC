@@ -26,16 +26,10 @@ def test_telemetry_file_paths_windows_defaults() -> None:
 
 
 def test_telemetry_file_paths_linux_proton_structure(tmp_path: Path) -> None:
+    assert DEFAULT_STEAM_APP_ID == "1903340"
     fake_home = tmp_path / "home" / "deck"
     steam_compat = (
-        fake_home
-        / ".local"
-        / "share"
-        / "Steam"
-        / "steamapps"
-        / "compatdata"
-        / DEFAULT_STEAM_APP_ID
-        / "pfx"
+        fake_home / ".local" / "share" / "Steam" / "steamapps" / "compatdata" / "1903340" / "pfx"
     )
     temp_dir = steam_compat / "drive_c" / "users" / "steamuser" / "Temp"
     temp_dir.mkdir(parents=True)
@@ -43,10 +37,39 @@ def test_telemetry_file_paths_linux_proton_structure(tmp_path: Path) -> None:
     status_file.write_text('{"in_combat": true}', encoding="utf-8")
 
     paths = get_telemetry_file_paths(is_windows=False, home_dir=fake_home)
+    assert any("1903340" in p for p in paths)
     assert str(status_file) in paths or os.path.normpath(str(status_file)) in paths
 
     resolved = get_telemetry_file_path(is_windows=False, home_dir=fake_home)
+    assert "1903340" in resolved
     assert os.path.normpath(resolved) == os.path.normpath(str(status_file))
+
+    # Test custom steam_app_id parameter
+    custom_app_id = "999999"
+    custom_compat = (
+        fake_home
+        / ".local"
+        / "share"
+        / "Steam"
+        / "steamapps"
+        / "compatdata"
+        / custom_app_id
+        / "pfx"
+    )
+    custom_temp = custom_compat / "drive_c" / "users" / "steamuser" / "Temp"
+    custom_temp.mkdir(parents=True)
+    custom_file = custom_temp / "expedition33_status.json"
+    custom_file.write_text('{"in_combat": false}', encoding="utf-8")
+
+    custom_paths = get_telemetry_file_paths(
+        app_id=custom_app_id, is_windows=False, home_dir=fake_home
+    )
+    assert any(custom_app_id in p for p in custom_paths)
+    custom_resolved = get_telemetry_file_path(
+        app_id=custom_app_id, is_windows=False, home_dir=fake_home
+    )
+    assert custom_app_id in custom_resolved
+    assert os.path.normpath(custom_resolved) == os.path.normpath(str(custom_file))
 
 
 def test_telemetry_file_paths_linux_wineprefix_env(
