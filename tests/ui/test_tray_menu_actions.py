@@ -120,6 +120,61 @@ def test_tray_menu_action_select_game_folder(tray_fixture) -> None:
 
 
 @pytest.mark.unit
+def test_tray_menu_action_select_game_folder_cancelled(tray_fixture) -> None:
+    app, orchestrator, harness, icon = tray_fixture
+
+    with patch.object(app, "_prompt_folder_selection", return_value=None):
+        harness.invoke("Select Game Folder...")
+        orchestrator.install_bridge_to.assert_not_called()
+
+
+@pytest.mark.unit
+def test_prompt_folder_selection_lifecycle(tray_fixture) -> None:
+    app, _orchestrator, _harness, _icon = tray_fixture
+
+    with (
+        patch("tkinter.Tk") as mock_tk_cls,
+        patch("tkinter.filedialog.askdirectory", return_value="D:/Custom/Win64") as mock_ask,
+    ):
+        mock_root = MagicMock()
+        mock_tk_cls.return_value = mock_root
+
+        selected = app._prompt_folder_selection()
+
+        assert selected == "D:/Custom/Win64"
+        mock_root.withdraw.assert_called_once()
+        mock_root.attributes.assert_any_call("-topmost", True)
+        mock_ask.assert_called_once_with(
+            parent=mock_root,
+            title="Select Expedition 33 Win64 or WinGDK Directory",
+        )
+        mock_root.update_idletasks.assert_called_once()
+        mock_root.update.assert_called_once()
+        mock_root.destroy.assert_called_once()
+
+
+@pytest.mark.unit
+def test_prompt_folder_selection_cancelled_or_closed_x(tray_fixture) -> None:
+    app, _orchestrator, _harness, _icon = tray_fixture
+
+    with (
+        patch("tkinter.Tk") as mock_tk_cls,
+        patch("tkinter.filedialog.askdirectory", return_value="") as mock_ask,
+    ):
+        mock_root = MagicMock()
+        mock_tk_cls.return_value = mock_root
+
+        selected = app._prompt_folder_selection()
+
+        assert selected is None
+        mock_root.withdraw.assert_called_once()
+        mock_ask.assert_called_once()
+        mock_root.update_idletasks.assert_called_once()
+        mock_root.update.assert_called_once()
+        mock_root.destroy.assert_called_once()
+
+
+@pytest.mark.unit
 def test_tray_menu_actions_responsiveness_benchmark(tmp_path: Path) -> None:
     """Verifies that tray menu rendering and user actions execute within a strict latency budget (<10ms)."""
     settings_path = tmp_path / "settings.json"

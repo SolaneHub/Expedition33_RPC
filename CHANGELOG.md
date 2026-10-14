@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.1] - 2026-10-14
+
+### Fixed
+- **Folder Selection Dialog Lifecycle & Process Isolation**:
+  - Isolated folder selection (`_prompt_folder_selection`) into a dedicated worker thread with its own clean Single-Threaded Apartment (STA) and Win32 message pump, eliminating deadlocks with `pystray`'s system tray window message loop.
+  - Bound native directory dialogs explicitly to the Tk root window (`parent=root`), ensuring proper window ownership hierarchy under Windows DWM.
+  - Implemented guaranteed cleanup in `finally:` blocks with `root.attributes("-topmost", False)`, `root.update_idletasks()`, `root.update()`, and `root.destroy()`, ensuring the dialog window closes and disappears immediately upon clicking Cancel or the window close (`X`) button without leaving frozen ghost windows.
+  - Added comprehensive lifecycle and cancellation unit tests for folder selection.
+
 ## [v2.0.0] - 2026-10-14
 
 ### Added

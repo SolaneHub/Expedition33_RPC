@@ -160,21 +160,37 @@ class ExpeditionTrayApp:
             self._safe_update_menu()
 
     def _prompt_folder_selection(self) -> str | None:
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
+        result: list[str | None] = [None]
 
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            selected = filedialog.askdirectory(
-                title="Select Expedition 33 Win64 or WinGDK Directory"
-            )
-            root.destroy()
-            return selected if selected else None
-        except Exception as e:
-            print(f"[TrayApp] Directory dialog error: {e}")
-            return None
+        def _ask() -> None:
+            root = None
+            try:
+                import tkinter as tk
+                from tkinter import filedialog
+
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes("-topmost", True)
+                try:
+                    selected = filedialog.askdirectory(
+                        parent=root,
+                        title="Select Expedition 33 Win64 or WinGDK Directory",
+                    )
+                    result[0] = str(selected) if selected else None
+                finally:
+                    with contextlib.suppress(Exception):
+                        root.attributes("-topmost", False)
+                        root.update_idletasks()
+                        root.update()
+                        root.destroy()
+            except Exception as e:
+                print(f"[TrayApp] Directory dialog error: {e}")
+                result[0] = None
+
+        thread = threading.Thread(target=_ask, daemon=True)
+        thread.start()
+        thread.join()
+        return result[0]
 
     def menu_startup_toggle(self, *_) -> str:
         if self.orchestrator.is_startup_enabled():
