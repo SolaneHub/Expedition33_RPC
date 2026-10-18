@@ -11,8 +11,10 @@ from expedition33_rpc.detection.compat_paths import (
     DEFAULT_STEAM_APP_ID,
     get_config_file_paths,
     get_game_user_settings_path,
+    get_save_games_paths,
     get_telemetry_file_path,
     get_telemetry_file_paths,
+    resolve_user_data_path,
 )
 
 pytestmark = pytest.mark.unit
@@ -235,3 +237,107 @@ def test_get_game_user_settings_path_fallback_linux(tmp_path: Path) -> None:
     assert resolved is not None
     assert "GameUserSettings.ini" in resolved
     assert ".local" in resolved or "compatdata" in resolved
+
+
+def test_save_games_paths_windows_defaults() -> None:
+    paths = get_save_games_paths(is_windows=True)
+    assert len(paths) == 1
+    assert any("SaveGames" in p for p in paths)
+
+
+def test_save_games_paths_linux_proton_structure(tmp_path: Path) -> None:
+    fake_home = tmp_path / "home" / "deck"
+    steam_compat = (
+        fake_home
+        / ".local"
+        / "share"
+        / "Steam"
+        / "steamapps"
+        / "compatdata"
+        / DEFAULT_STEAM_APP_ID
+        / "pfx"
+    )
+    save_dir = (
+        steam_compat
+        / "drive_c"
+        / "users"
+        / "steamuser"
+        / "AppData"
+        / "Local"
+        / "Sandfall"
+        / "Saved"
+        / "SaveGames"
+    )
+    save_dir.mkdir(parents=True)
+
+    paths = get_save_games_paths(is_windows=False, home_dir=fake_home)
+    assert any(str(save_dir) in p or os.path.normpath(str(save_dir)) in p for p in paths)
+
+    resolved = resolve_user_data_path(is_windows=False, home_dir=fake_home)
+    assert os.path.normpath(resolved) == os.path.normpath(str(save_dir))
+
+
+def test_save_games_paths_linux_wineprefix_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_wineprefix = tmp_path / "wineprefix"
+    target_dir = (
+        fake_wineprefix
+        / "drive_c"
+        / "users"
+        / "steamuser"
+        / "AppData"
+        / "Local"
+        / "Sandfall"
+        / "Saved"
+        / "SaveGames"
+    )
+    target_dir.mkdir(parents=True)
+
+    monkeypatch.setenv("WINEPREFIX", str(fake_wineprefix))
+    paths = get_save_games_paths(is_windows=False, home_dir=tmp_path / "empty_home")
+    assert any(str(target_dir) in p or os.path.normpath(str(target_dir)) in p for p in paths)
+
+    resolved = resolve_user_data_path(is_windows=False, home_dir=tmp_path / "empty_home")
+    assert os.path.normpath(resolved) == os.path.normpath(str(target_dir))
+
+
+def test_save_games_paths_linux_steam_compat_data_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_compat_root = tmp_path / "compat_override"
+    target_dir = (
+        fake_compat_root
+        / "pfx"
+        / "drive_c"
+        / "users"
+        / "steamuser"
+        / "AppData"
+        / "Local"
+        / "Sandfall"
+        / "Saved"
+        / "SaveGames"
+    )
+    target_dir.mkdir(parents=True)
+
+    monkeypatch.setenv("STEAM_COMPAT_DATA_PATH", str(fake_compat_root))
+    paths = get_save_games_paths(is_windows=False, home_dir=tmp_path / "empty_home")
+    assert any(str(target_dir) in p or os.path.normpath(str(target_dir)) in p for p in paths)
+
+    resolved = resolve_user_data_path(is_windows=False, home_dir=tmp_path / "empty_home")
+    assert os.path.normpath(resolved) == os.path.normpath(str(target_dir))
+
+
+def test_save_games_paths_linux_fallback(tmp_path: Path) -> None:
+    paths = get_save_games_paths(is_windows=False, home_dir=tmp_path / "nonexistent")
+    assert any(".config" in p and "SaveGames" in p for p in paths)
+
+
+def test_resolve_user_data_path_custom_override() -> None:
+    custom = "/custom/override/path/SaveGames"
+    assert resolve_user_data_path(custom_path=custom) == custom
+
+
+def test_resolve_user_data_path_windows_default() -> None:
+    resolved = resolve_user_data_path(is_windows=True)
+    assert "SaveGames" in resolved

@@ -64,8 +64,9 @@ def test_game_data_schema_and_catalog_integrity(game_data_json: dict) -> None:
 
     en_keys = set(en_checkpoints.keys())
     it_keys = set(it_checkpoints.keys())
-    # All canonical checkpoint keys in en_checkpoints must be present in it_checkpoints
-    assert en_keys.issubset(it_keys), f"Missing canonical checkpoints in IT: {en_keys - it_keys}"
+    assert en_keys == it_keys, (
+        f"Checkpoint asymmetry: missing IT {en_keys - it_keys}, missing EN {it_keys - en_keys}"
+    )
     assert len(en_keys) >= 300, (
         f"Expected at least 300 canonical checkpoint keys, got {len(en_keys)}"
     )
@@ -368,16 +369,12 @@ def test_all_20_languages_schema_and_symmetry(game_data_json: dict) -> None:
         assert len(zone_by_lang[lang]) >= 200, f"Insufficient zone overrides for language {lang}"
         assert all(isinstance(v, str) and len(v) > 0 for v in zone_by_lang[lang].values())
 
-        # 2. Checkpoints contain all canonical keys across all 20 languages
+        # 2. Checkpoints maintain 100% key symmetry across all 20 languages
         assert lang in cp_by_lang, f"Missing checkpoints for language {lang}"
         lang_keys = set(cp_by_lang[lang].keys())
-        assert master_cp_keys.issubset(lang_keys), (
-            f"Checkpoint missing canonical keys in {lang}: missing {master_cp_keys - lang_keys}"
+        assert lang_keys == master_cp_keys, (
+            f"Checkpoint asymmetry in {lang}: missing {master_cp_keys - lang_keys}, extra {lang_keys - master_cp_keys}"
         )
-        if lang != "it":
-            assert lang_keys == master_cp_keys, (
-                f"Checkpoint asymmetry in {lang}: extra {lang_keys - master_cp_keys}"
-            )
         assert all(re.sub(r"[^a-z0-9]", "", k.lower()) == k for k in lang_keys)
         assert all(isinstance(v, str) and len(v) > 0 for v in cp_by_lang[lang].values())
 

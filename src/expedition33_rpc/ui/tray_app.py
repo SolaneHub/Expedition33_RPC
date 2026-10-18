@@ -182,13 +182,24 @@ class ExpeditionTrayApp:
             bi = BROWSEINFO()
             bi.lpszTitle = "Seleziona la cartella di Clair Obscur: Expedition 33"
             bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE
-            pidl = ctypes.windll.shell32.SHBrowseForFolderW(ctypes.byref(bi))
-            if not pidl:
-                return None
-            path_buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
-            ctypes.windll.shell32.SHGetPathFromIDListW(pidl, path_buf)
-            ctypes.windll.ole32.CoTaskMemFree(pidl)
-            return path_buf.value or None
+
+            ole_inited = False
+            with contextlib.suppress(Exception):
+                hr = ctypes.windll.ole32.OleInitialize(None)
+                ole_inited = hr in (0, 1)
+
+            try:
+                pidl = ctypes.windll.shell32.SHBrowseForFolderW(ctypes.byref(bi))
+                if not pidl:
+                    return None
+                path_buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+                ctypes.windll.shell32.SHGetPathFromIDListW(pidl, path_buf)
+                ctypes.windll.ole32.CoTaskMemFree(pidl)
+                return path_buf.value or None
+            finally:
+                if ole_inited:
+                    with contextlib.suppress(Exception):
+                        ctypes.windll.ole32.OleUninitialize()
         except Exception:
             return None
 

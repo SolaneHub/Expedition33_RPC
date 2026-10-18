@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.7] - 2026-10-19
+
+### Fixed & Hardened
+- **Catalog Key Symmetry & Translation Restoration (`assets/game_data.json`, `tests/detection/test_game_data.py`)**:
+  - Restored 90 missing localized checkpoint alias keys across all 19 non-Italian catalogs, guaranteeing 100% key symmetry and allowing foreign clients to cleanly resolve Italian in-game flags to their localized equivalents.
+  - Eliminated special-case language exclusions in test assertions (`if lang != "it":`), enforcing strict bidirectional catalog symmetry.
+- **Cross-Platform Bridge Discovery (`integrations.bridge_installer`)**:
+  - Fixed path separator handling on non-Windows environments using `pathlib.Path` joins, preventing malformed paths with literal backslashes.
+  - Added Linux and Steam Deck standard Steam library discovery roots (`~/.local/share/Steam`, `~/.steam/steam`, `~/.var/app/...`).
+- **COM STA Initialization for Directory Picker (`ui.tray_app`)**:
+  - Wrapped `SHBrowseForFolderW` with `OleInitialize` and `OleUninitialize` in `_prompt_folder_selection`, preventing COM initialization failures with `BIF_NEWDIALOGSTYLE`.
+- **Standalone Execution Bootstrapping (`main.py`)**:
+  - Restored `src` directory insertion into `sys.path` in `main.py`, enabling direct execution without prior virtualenv editable package installation.
+- **Save Games Path Test Coverage (`tests/detection/test_compat_paths.py`)**:
+  - Added full test coverage for `get_save_games_paths` across Windows, Proton, Wine, and custom overrides.
+
 ## [v2.0.6] - 2026-10-19
 
 ### Added

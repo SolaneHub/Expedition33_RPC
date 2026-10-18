@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
+import sys
 import zipfile
 from collections.abc import Iterable
 from pathlib import Path
@@ -70,6 +71,17 @@ def find_game_win64_directory(
             val = winreg_read_value(hkey, subkey, "SteamPath", winreg_module=winreg)
             if val:
                 steam_roots.append(os.path.normpath(val))
+    else:
+        # Non-Windows / Linux / Steam Deck standard Steam roots
+        home = Path.home()
+        for root in [
+            home / ".local" / "share" / "Steam",
+            home / ".steam" / "steam",
+            home / ".steam" / "root",
+            home / ".var" / "app" / "com.valvesoftware.Steam" / ".local" / "share" / "Steam",
+        ]:
+            if root.is_dir():
+                steam_roots.append(os.path.normpath(str(root)))
 
     libraries = list(steam_roots)
 
@@ -88,21 +100,23 @@ def find_game_win64_directory(
                 pass
 
     # Add standard root drives as fallback
-    drives: list[str] = []
+    drives: list[Path] = []
     try:
         for part in psutil.disk_partitions():
-            mount = part.mountpoint.rstrip("\\/")
-            if mount and mount not in drives:
-                drives.append(mount)
+            mount = part.mountpoint
+            if mount:
+                p = Path(mount)
+                if p not in drives:
+                    drives.append(p)
     except Exception:
         pass
     if not drives:
-        drives = ["C:"]
+        drives = [Path("C:\\")] if (sys.platform == "win32" or os.name == "nt") else [Path("/")]
 
     for drive in drives:
-        libraries.append(f"{drive}\\SteamLibrary")
-        libraries.append(f"{drive}\\Program Files (x86)\\Steam")
-        libraries.append(f"{drive}\\Program Files\\Steam")
+        libraries.append(str(drive / "SteamLibrary"))
+        libraries.append(str(drive / "Program Files (x86)" / "Steam"))
+        libraries.append(str(drive / "Program Files" / "Steam"))
 
     checked_dirs = set()
     for lib in libraries:
@@ -130,63 +144,61 @@ def find_game_win64_directory(
     # 3. Check Xbox PC Game Pass and Epic Games standard installation directories
     for drive in drives:
         platform_candidates = [
-            os.path.join(
-                f"{drive}\\",
-                "XboxGames",
-                "Clair Obscur Expedition 33",
-                "Content",
-                "Sandfall",
-                "Binaries",
-                "WinGDK",
+            str(
+                drive
+                / "XboxGames"
+                / "Clair Obscur Expedition 33"
+                / "Content"
+                / "Sandfall"
+                / "Binaries"
+                / "WinGDK"
             ),
-            os.path.join(
-                f"{drive}\\",
-                "XboxGames",
-                "Clair Obscur Expedition 33",
-                "Content",
-                "Sandfall",
-                "Binaries",
-                "Win64",
+            str(
+                drive
+                / "XboxGames"
+                / "Clair Obscur Expedition 33"
+                / "Content"
+                / "Sandfall"
+                / "Binaries"
+                / "Win64"
             ),
-            os.path.join(
-                f"{drive}\\",
-                "XboxGames",
-                "Expedition 33",
-                "Content",
-                "Sandfall",
-                "Binaries",
-                "WinGDK",
+            str(
+                drive
+                / "XboxGames"
+                / "Expedition 33"
+                / "Content"
+                / "Sandfall"
+                / "Binaries"
+                / "WinGDK"
             ),
-            os.path.join(
-                f"{drive}\\",
-                "XboxGames",
-                "Expedition 33",
-                "Content",
-                "Sandfall",
-                "Binaries",
-                "Win64",
+            str(
+                drive
+                / "XboxGames"
+                / "Expedition 33"
+                / "Content"
+                / "Sandfall"
+                / "Binaries"
+                / "Win64"
             ),
-            os.path.join(
-                f"{drive}\\",
-                "Program Files",
-                "Epic Games",
-                "Expedition 33",
-                "Sandfall",
-                "Binaries",
-                "Win64",
+            str(
+                drive
+                / "Program Files"
+                / "Epic Games"
+                / "Expedition 33"
+                / "Sandfall"
+                / "Binaries"
+                / "Win64"
             ),
-            os.path.join(
-                f"{drive}\\",
-                "Program Files (x86)",
-                "Epic Games",
-                "Expedition 33",
-                "Sandfall",
-                "Binaries",
-                "Win64",
+            str(
+                drive
+                / "Program Files (x86)"
+                / "Epic Games"
+                / "Expedition 33"
+                / "Sandfall"
+                / "Binaries"
+                / "Win64"
             ),
-            os.path.join(
-                f"{drive}\\", "Epic Games", "Expedition 33", "Sandfall", "Binaries", "Win64"
-            ),
+            str(drive / "Epic Games" / "Expedition 33" / "Sandfall" / "Binaries" / "Win64"),
         ]
         for candidate in platform_candidates:
             if os.path.isdir(candidate):
