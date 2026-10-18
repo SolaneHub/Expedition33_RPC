@@ -25,6 +25,7 @@ from expedition33_rpc.detection.normalization import (
     is_menu_zone,
     resolve_tower_trial,
 )
+from expedition33_rpc.detection.save_reader import SaveFileReader
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
 
 type TowerTrial = tuple[int, int] | str
@@ -328,6 +329,7 @@ class GameDetector:
         game_user_settings_path: Path | str | None = None,
         idle_poll_interval: float = 5.0,
         time_provider: Callable[[], float] | None = None,
+        save_reader: SaveFileReader | None = None,
     ):
         self.cached_pid: int | None = None
         self.game_start_time: float | None = None
@@ -365,6 +367,9 @@ class GameDetector:
         # Telemetry Provider (Bridge IPC)
         self.bridge_provider: BridgeProviderProtocol | None = (
             BridgeStateProvider() if bridge_provider is _DEFAULT_BRIDGE else bridge_provider
+        )
+        self.save_reader: SaveFileReader | None = (
+            save_reader if save_reader is not None else SaveFileReader()
         )
 
     @property
@@ -508,6 +513,8 @@ class GameDetector:
             self.last_raw_checkpoint = ""
             if self.bridge_provider is not None:
                 self.bridge_provider.reset()
+            if self.save_reader is not None:
+                self.save_reader.reset()
             self.timer_tracker.reset()
             return GameState(is_running=False, game_language=self._cached_language)
 
@@ -549,7 +556,7 @@ class GameDetector:
         is_menu = is_menu_zone(raw_zone)
         is_continent = is_continent_zone(raw_zone)
 
-        # Checkpoint resolution via active telemetry source
+        # Checkpoint resolution via active telemetry source with save reader fallback
         if is_menu or is_continent:
             raw_checkpoint = ""
             self.last_raw_checkpoint = ""
@@ -561,6 +568,13 @@ class GameDetector:
             else:
                 raw_checkpoint = ""
                 self.last_raw_checkpoint = ""
+
+            # Fallback to save reader if bridge has empty checkpoint for current zone
+            if not raw_checkpoint and raw_zone and self.save_reader is not None:
+                resolved_cp = self.save_reader.resolve_checkpoint_for_zone(raw_zone)
+                if resolved_cp:
+                    raw_checkpoint = resolved_cp
+                    self.last_raw_checkpoint = resolved_cp
 
         self.last_raw_zone = raw_zone
 
@@ -630,6 +644,7 @@ __all__ = [
     "GameState",
     "BridgeStateProvider",
     "GameDetector",
+    "SaveFileReader",
     "TARGET_PROCESS_NAMES",
     "get_telemetry_file_path",
     "get_telemetry_file_paths",

@@ -47,6 +47,8 @@ def build() -> None:
         "expedition33_rpc.detection.game_data",
         "--hidden-import",
         "expedition33_rpc.core.smoke",
+        "--hidden-import",
+        "expedition33_rpc.detection.save_reader",
         "--paths",
         "src",
         "--clean",
