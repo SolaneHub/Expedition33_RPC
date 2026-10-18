@@ -28,14 +28,16 @@ def get_presentation_strings(lang: str) -> dict[str, str]:
     return game_data.LOCALIZED_PRESENTATION.get(canon, game_data.LOCALIZED_PRESENTATION["en-US"])
 
 
-def truncate_presence_field(text: str, max_length: int = DISCORD_MAX_FIELD_LENGTH) -> str:
-    """Enforces Discord IPC string limits (max 128 characters for details and state).
+def truncate_presence_field(text: str, max_bytes: int = DISCORD_MAX_FIELD_LENGTH) -> str:
+    """Enforces Discord IPC string limits (max 128 bytes for details and state).
 
-    If text exceeds max_length, it is deterministically clamped to the boundary.
+    If text exceeds max_bytes, it is deterministically clamped to the byte boundary
+    without splitting multibyte sequences.
     """
-    if len(text) <= max_length:
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
         return text
-    return text[:max_length]
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
 
 
 def format_location_name(game_state: GameState) -> str:

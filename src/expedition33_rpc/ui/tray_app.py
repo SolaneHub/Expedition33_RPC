@@ -50,13 +50,14 @@ class ExpeditionTrayApp:
             self._unsubscribe_state = self.orchestrator.subscribe_state_change(
                 self.on_orchestrator_state_change
             )
-        self._chained_on_update_available = getattr(self.orchestrator, "on_update_available", None)
-        self.orchestrator.on_update_available = self._on_update_available_wrapper
+        self._unsubscribe_update: Callable[[], None] | None = None
+        if hasattr(self.orchestrator, "subscribe_update_available"):
+            self._unsubscribe_update = self.orchestrator.subscribe_update_available(
+                self._on_update_available_wrapper
+            )
 
     def _on_update_available_wrapper(self, update_info: UpdateInfo) -> None:
         self.on_update_available(update_info)
-        if self._chained_on_update_available is not None:
-            self._chained_on_update_available(update_info)
 
     def _safe_update_menu(self) -> None:
         if self.icon is not None:
@@ -209,7 +210,9 @@ class ExpeditionTrayApp:
         if self._unsubscribe_state is not None:
             self._unsubscribe_state()
             self._unsubscribe_state = None
-        self.orchestrator.on_update_available = self._chained_on_update_available
+        if self._unsubscribe_update is not None:
+            self._unsubscribe_update()
+            self._unsubscribe_update = None
         self.orchestrator.stop()
         if self.icon is not None:
             self.icon.stop()

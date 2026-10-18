@@ -107,11 +107,13 @@ def test_tray_menu_action_update_click(tray_fixture) -> None:
 
 @pytest.mark.unit
 def test_tray_menu_action_exit(tray_fixture) -> None:
-    _app, orchestrator, harness, icon = tray_fixture
+    app, orchestrator, harness, icon = tray_fixture
 
     harness.invoke("Exit")
     orchestrator.stop.assert_called_once()
     icon.stop.assert_called_once()
+    assert app._unsubscribe_state is None
+    assert app._unsubscribe_update is None
 
 
 @pytest.mark.unit

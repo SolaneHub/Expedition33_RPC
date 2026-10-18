@@ -6,10 +6,16 @@ import contextlib
 import json
 import os
 import sys
-import threading
-import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+
+@dataclass
+class Settings:
+    """Application settings schema."""
+
+    anti_spoiler: bool = False
 
 
 def get_default_settings_dir() -> Path:
@@ -30,83 +36,100 @@ class SettingsService:
         self.path = (
             custom_path if custom_path is not None else get_default_settings_dir() / "settings.json"
         )
-        self.anti_spoiler: bool = False
-        self._lock = threading.RLock()
-        self._cached_data: dict[str, Any] = {}
-        self._last_mtime: float = 0.0
+        self.settings = Settings()
+        self._raw_data: dict[str, Any] = {}
         with contextlib.suppress(Exception):
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self.load()
 
-    def load(self) -> bool:
-        """Loads anti-spoiler setting from the JSON configuration file."""
-        with self._lock:
-            if self.path.is_file():
-                try:
-                    data = json.loads(self.path.read_text(encoding="utf-8"))
-                    if isinstance(data, dict):
-                        self._cached_data = dict(data)
-                        self.anti_spoiler = bool(data.get("anti_spoiler", False))
-                        self._last_mtime = self.path.stat().st_mtime
-                except Exception:
-                    pass
-            return self.anti_spoiler
+    @property
+    def target_path(self) -> Path:
+        """Alias for settings file path."""
+        return self.path
 
-    def is_anti_spoiler_enabled(self) -> bool:
+    @property
+    def anti_spoiler(self) -> bool:
         """Checks if anti-spoiler mode is enabled."""
-        with self._lock:
-            return self.anti_spoiler
+        return self.settings.anti_spoiler
 
-    def set_anti_spoiler_enabled(self, enabled: bool) -> bool:
-        """Atomically persists anti-spoiler setting to the JSON configuration file."""
-        with self._lock:
+    @anti_spoiler.setter
+    def anti_spoiler(self, value: bool) -> None:
+        self.settings.anti_spoiler = bool(value)
+
+    def load(self) -> bool:
+        """Loads settings from the JSON configuration file, falling back to defaults."""
+        if self.path.is_file():
             try:
-                disk_mtime = self.path.stat().st_mtime
-            except OSError:
-                disk_mtime = 0.0
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self._raw_data = dict(data)
+                    self.settings.anti_spoiler = bool(data.get("anti_spoiler", False))
+                    return self.anti_spoiler
+            except Exception:
+                pass
+        self._raw_data = {}
+        self.settings.anti_spoiler = False
+        return self.anti_spoiler
 
-            if disk_mtime != self._last_mtime and disk_mtime > 0.0:
+    def save(self, settings: Settings | None = None) -> bool:
+        """Saves current settings to the JSON configuration file."""
+        if settings is not None:
+            self.settings = settings
+
+        tmp_path: Path | None = None
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            if self.path.is_file():
                 with contextlib.suppress(Exception):
                     loaded = json.loads(self.path.read_text(encoding="utf-8"))
                     if isinstance(loaded, dict):
-                        self._cached_data = dict(loaded)
-                        self._last_mtime = disk_mtime
+                        self._raw_data.update(loaded)
 
-            new_data = dict(self._cached_data)
-            new_data["anti_spoiler"] = enabled
+            payload = dict(self._raw_data)
+            payload["anti_spoiler"] = self.settings.anti_spoiler
+            data_str = json.dumps(payload, indent=2)
 
-            tmp_path = self.path.with_name(
-                f"{self.path.stem}_{os.getpid()}_{threading.get_ident()}_{time.time_ns()}.tmp"
-            )
-            try:
-                payload = json.dumps(new_data, indent=2).encode("utf-8")
-                try:
-                    with open(tmp_path, "wb") as f:
-                        f.write(payload)
-                except FileNotFoundError:
-                    self.path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(tmp_path, "wb") as f:
-                        f.write(payload)
-
-                tmp_path.replace(self.path)
-                self._cached_data = new_data
-                self.anti_spoiler = enabled
+            tmp_path = self.path.with_suffix(".tmp")
+            tmp_path.write_text(data_str, encoding="utf-8")
+            tmp_path.replace(self.path)
+            return True
+        except OSError:
+            if tmp_path is not None:
                 with contextlib.suppress(OSError):
-                    self._last_mtime = self.path.stat().st_mtime
-                return True
-            except Exception:
-                with contextlib.suppress(Exception):
                     if tmp_path.exists():
                         tmp_path.unlink()
-                return False
+            return False
+
+    def update(self, anti_spoiler: bool | None = None, **kwargs: Any) -> bool:
+        """Updates settings and persists changes to disk."""
+        if anti_spoiler is not None:
+            self.settings.anti_spoiler = anti_spoiler
+        for k, v in kwargs.items():
+            if hasattr(self.settings, k):
+                setattr(self.settings, k, v)
+            else:
+                self._raw_data[k] = v
+        return self.save()
+
+    def is_anti_spoiler_enabled(self) -> bool:
+        """Checks if anti-spoiler mode is enabled."""
+        return self.anti_spoiler
+
+    def set_anti_spoiler_enabled(self, enabled: bool) -> bool:
+        """Persists anti-spoiler setting to the configuration file."""
+        old_val = self.anti_spoiler
+        self.anti_spoiler = enabled
+        if not self.save():
+            self.anti_spoiler = old_val
+            return False
+        return True
 
     def toggle_anti_spoiler(self) -> bool:
         """Toggles anti-spoiler mode and persists the new state."""
-        with self._lock:
-            target = not self.anti_spoiler
-            if self.set_anti_spoiler_enabled(target):
-                return target
-            return self.anti_spoiler
+        target = not self.anti_spoiler
+        if self.set_anti_spoiler_enabled(target):
+            return target
+        return self.anti_spoiler
 
 
-__all__ = ["SettingsService", "get_default_settings_dir"]
+__all__ = ["Settings", "SettingsService", "get_default_settings_dir"]

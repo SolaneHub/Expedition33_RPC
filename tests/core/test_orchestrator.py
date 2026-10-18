@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -299,6 +301,8 @@ def test_orchestrator_auto_install_bridge_on_process_detection() -> None:
 
     # Process detection event triggers auto installation
     orchestrator.step_update()
+    if orchestrator._bridge_install_thread is not None:
+        orchestrator._bridge_install_thread.join(timeout=1.0)
     assert orchestrator.bridge_auto_installed is True
     assert fake_installer.installed is True
     assert orchestrator.is_bridge_installed() is True
@@ -328,6 +332,8 @@ def test_orchestrator_event_driven_bridge_check_eliminates_parasitic_io() -> Non
 
     # Tick 1: First time PID 4242 detected -> triggers check and auto installation
     orchestrator.step_update()
+    if orchestrator._bridge_install_thread is not None:
+        orchestrator._bridge_install_thread.join(timeout=1.0)
     assert fake_installer.installed is True
     assert orchestrator.is_bridge_installed() is True
     assert fake_installer.install_call_count == 1
@@ -424,6 +430,8 @@ def test_orchestrator_eliminates_parasitic_io_on_gameplay_timer_transitions() ->
             win64_dir=Path("/mock/game/win64"),
         )
         orchestrator.step_update()
+        if orchestrator._bridge_install_thread is not None:
+            orchestrator._bridge_install_thread.join(timeout=1.0)
         assert spy_auto_install.call_count == 1
 
         # 2. Zone transition: start_time resets to 1050.0, PID and process_create_time unchanged
@@ -497,6 +505,8 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
 
     # First attempt fails at t = 1000.0, backoff cooldown activated
     orchestrator.step_update()
+    if orchestrator._bridge_install_thread is not None:
+        orchestrator._bridge_install_thread.join(timeout=1.0)
     assert orchestrator.is_bridge_installed() is False
     assert fake_installer.install_call_count == 1
 
@@ -511,6 +521,8 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
         exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
     orchestrator.step_update()
+    if orchestrator._bridge_install_thread is not None:
+        orchestrator._bridge_install_thread.join(timeout=1.0)
     # Throttled by cooldown - install is NOT re-attempted, call count remains 1
     assert orchestrator.is_bridge_installed() is False
     assert fake_installer.install_call_count == 1
@@ -524,6 +536,8 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
         exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
     orchestrator.step_update()
+    if orchestrator._bridge_install_thread is not None:
+        orchestrator._bridge_install_thread.join(timeout=1.0)
     # Now allowed - installation succeeds and status reflects True
     assert orchestrator.is_bridge_installed() is True
     assert fake_installer.install_call_count == 2
@@ -999,6 +1013,49 @@ def test_orchestrator_update_available_error_resilience() -> None:
 
 
 @pytest.mark.unit
+def test_orchestrator_subscribe_update_available() -> None:
+    """Verifies that subscribe_update_available registers listeners and unsubscribe works."""
+    received_updates: list[UpdateInfo] = []
+    subscriber_updates: list[UpdateInfo] = []
+
+    def legacy_cb(info: UpdateInfo) -> None:
+        received_updates.append(info)
+
+    orchestrator = AppOrchestrator(
+        detector=MagicMock(spec=GameDetector),
+        rpc_manager=MagicMock(spec=DiscordRPCManager),
+        on_update_available=legacy_cb,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    def sub_cb(info: UpdateInfo) -> None:
+        subscriber_updates.append(info)
+
+    def failing_sub(info: UpdateInfo) -> None:
+        del info
+        raise RuntimeError("Failing sub")
+
+    unsub = orchestrator.subscribe_update_available(sub_cb)
+    orchestrator.subscribe_update_available(failing_sub)
+
+    update_v1 = UpdateInfo(tag_name="v1.0.0", version_tuple=(1, 0, 0), html_url="https://...")
+    orchestrator.on_update_check_complete(update_v1)
+
+    assert len(received_updates) == 1
+    assert len(subscriber_updates) == 1
+    assert subscriber_updates[0] == update_v1
+
+    # Unsubscribe sub_cb
+    unsub()
+    update_v2 = UpdateInfo(tag_name="v2.0.0", version_tuple=(2, 0, 0), html_url="https://...")
+    orchestrator.on_update_check_complete(update_v2)
+
+    assert len(received_updates) == 2
+    assert len(subscriber_updates) == 1
+
+
+@pytest.mark.unit
 def test_orchestrator_state_change_callback_error_resilience() -> None:
     """Verifies that an unhandled exception in on_state_change callback does not crash step_update."""
     mock_detector = MagicMock(spec=GameDetector)
@@ -1075,3 +1132,131 @@ def test_orchestrator_run_loop_adaptive_idle_backoff() -> None:
     mock_detector.get_game_state.return_value = GameState.create(is_running=True, process_pid=9999)
     orchestrator.step_update()
     assert orchestrator.current_polling_interval == 2.0
+
+
+@pytest.mark.unit
+def test_orchestrator_async_bridge_install_spawns_daemon_thread_and_prevents_concurrency() -> None:
+    """Verifies that auto-install runs asynchronously in a daemon thread and does not spawn concurrent threads."""
+    started_event = threading.Event()
+    continue_event = threading.Event()
+
+    class BlockingInstaller(FakeBridgeInstaller):
+        def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            del win64_dir
+            self.install_call_count += 1
+            started_event.set()
+            continue_event.wait(timeout=2.0)
+            self.installed = True
+            return True, "Installed asynchronously"
+
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    installer = BlockingInstaller(installed=False)
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        bridge_installer=installer,
+        auto_install_bridge=True,
+        sync_startup=False,
+    )
+
+    # 1. Trigger process detection: must return immediately without blocking
+    mock_detector.get_game_state.return_value = GameState.create(
+        is_running=True,
+        process_pid=5555,
+        win64_dir=Path("/mock/game/win64"),
+        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+    )
+    res = orchestrator.step_update()
+    assert res is not None
+    assert orchestrator._is_installing_bridge is True
+    assert orchestrator._bridge_install_thread is not None
+    assert orchestrator._bridge_install_thread.is_alive()
+    assert orchestrator._bridge_install_thread.daemon is True
+
+    # Confirm worker thread is executing
+    assert started_event.wait(timeout=1.0) is True
+
+    # 2. Re-trigger process detection while installation is still in progress:
+    # should NOT spawn an additional thread or invoke install_bridge again
+    orchestrator.step_update()
+    assert installer.install_call_count == 1
+
+    # 3. Release blocking installer and wait for thread to finish
+    continue_event.set()
+    orchestrator._bridge_install_thread.join(timeout=1.0)
+
+    assert orchestrator._is_installing_bridge is False
+    assert orchestrator.is_bridge_installed() is True
+    assert installer.install_call_count == 1
+
+
+@pytest.mark.unit
+def test_orchestrator_async_bridge_install_catches_exception_safely() -> None:
+    """Verifies that an unexpected exception in check_and_auto_install_bridge does not crash the process."""
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    fake_installer = FakeBridgeInstaller(installed=False)
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        bridge_installer=fake_installer,
+        auto_install_bridge=True,
+        sync_startup=False,
+    )
+
+    with patch.object(
+        orchestrator,
+        "check_and_auto_install_bridge",
+        side_effect=RuntimeError("Simulated disk failure"),
+    ):
+        mock_detector.get_game_state.return_value = GameState.create(
+            is_running=True,
+            process_pid=7777,
+            win64_dir=Path("/mock/game/win64"),
+        )
+        res = orchestrator.step_update()
+        assert res is not None
+        if orchestrator._bridge_install_thread is not None:
+            orchestrator._bridge_install_thread.join(timeout=1.0)
+        assert orchestrator._is_installing_bridge is False
+
+
+@pytest.mark.unit
+def test_orchestrator_stop_waits_for_bridge_install_thread() -> None:
+    """Verifies that orchestrator.stop() waits for the active bridge install worker thread to finish."""
+    thread_finished = False
+
+    def slow_install(*_args: Any, **_kwargs: Any) -> bool:
+        nonlocal thread_finished
+        time.sleep(0.05)
+        thread_finished = True
+        return True
+
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    fake_installer = FakeBridgeInstaller(installed=False)
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        bridge_installer=fake_installer,
+        auto_install_bridge=True,
+        sync_startup=False,
+    )
+
+    with patch.object(orchestrator, "check_and_auto_install_bridge", side_effect=slow_install):
+        mock_detector.get_game_state.return_value = GameState.create(
+            is_running=True,
+            process_pid=8888,
+            win64_dir=Path("/mock/game/win64"),
+        )
+        orchestrator.step_update()
+        assert orchestrator._bridge_install_thread is not None
+        assert orchestrator._bridge_install_thread.is_alive()
+
+        orchestrator.stop()
+        assert thread_finished is True
+        assert orchestrator._bridge_install_thread is None

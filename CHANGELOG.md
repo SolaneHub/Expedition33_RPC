@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.5] - 2026-10-18
+
+### Fixed
+- **Discord Wire Protocol 128 UTF-8 Bytes Boundary Clamping (`ui.presentation`)**:
+  - Fixed `truncate_presence_field` to strictly clamp at the 128 **byte** UTF-8 wire protocol limit instead of character count.
+  - Implemented safe byte-boundary decoding with `errors="ignore"`, preventing packet rejections and IPC socket crashes when displaying multibyte languages (Chinese, Russian, Japanese, Korean, Arabic, emojis).
+  - Added dedicated test coverage in `tests/ui/test_presentation.py`.
+
+### Changed & Optimized
+- **Non-blocking Asynchronous Lua Bridge Auto-Installation (`core.orchestrator`)**:
+  - Offloaded `bridge.zip` unzipping and filesystem modifications to a background daemon thread with guard flags and a 30s cooldown.
+  - Eliminated telemetry polling loop jitter (0.5–2s freeze) and Discord socket heartbeat timeouts on game launch.
+- **Clean Event Subscription Pattern (`core.orchestrator`, `ui.tray_app`)**:
+  - Replaced runtime monkey-patching of `orchestrator.on_update_available` with formal `subscribe_update_available()` observer pattern returning an idempotent unsubscribe callback.
+- **Simplified Settings Persistence Architecture (`core.settings`)**:
+  - Replaced complex locking and nanosecond temp files with a streamlined typed `Settings` dataclass and atomic `.replace()` operations, with in-memory rollback on filesystem errors.
+
 ## [v2.0.4] - 2026-10-18
 
 ### Added

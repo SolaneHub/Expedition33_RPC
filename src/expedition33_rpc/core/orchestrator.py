@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -16,6 +17,8 @@ from expedition33_rpc.integrations import bridge_installer as bridge_installer_m
 from expedition33_rpc.integrations.discord_rpc import DiscordRPCManager
 from expedition33_rpc.integrations.updater import AppUpdater, UpdateInfo, UpdateState
 from expedition33_rpc.ui.presentation import build_presence_payload
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -115,6 +118,7 @@ class AppOrchestrator:
         if on_state_change is not None:
             self._state_subscribers.append(on_state_change)
         self.on_state_change: Callable[[GameState, bool], None] | None = on_state_change
+        self._update_available_subscribers: list[Callable[[UpdateInfo], None]] = []
         self.on_update_available: Callable[[UpdateInfo], None] | None = on_update_available
 
         # Current state - immutable GameState DTO, assignment is atomic
@@ -123,6 +127,8 @@ class AppOrchestrator:
 
         self.bridge_install_cooldown: float = 30.0
         self.last_bridge_install_attempt: float = -float("inf")
+        self._is_installing_bridge: bool = False
+        self._bridge_install_thread: threading.Thread | None = None
 
         self._bridge_installed: bool = False
         self._last_detected_pid: int | None = None
@@ -143,6 +149,18 @@ class AppOrchestrator:
 
         return unsubscribe
 
+    def subscribe_update_available(
+        self, callback: Callable[[UpdateInfo], None]
+    ) -> Callable[[], None]:
+        """Subscribes a listener to update available notifications and returns an unsubscribe callable."""
+        self._update_available_subscribers.append(callback)
+
+        def unsubscribe() -> None:
+            if callback in self._update_available_subscribers:
+                self._update_available_subscribers.remove(callback)
+
+        return unsubscribe
+
     def _is_stopping(self) -> bool:
         return self._stop_event.is_set() or (self._started and not self.running)
 
@@ -150,7 +168,16 @@ class AppOrchestrator:
         pass
 
     def on_update_check_complete(self, update_info: UpdateInfo | None) -> None:
-        if update_info is not None and self.on_update_available is not None:
+        if update_info is None:
+            return
+
+        for subscriber in list(self._update_available_subscribers):
+            try:
+                subscriber(update_info)
+            except Exception as e:
+                print(f"[Orchestrator] Update subscriber error: {e}")
+
+        if self.on_update_available is not None:
             try:
                 self.on_update_available(update_info)
             except Exception as e:
@@ -244,11 +271,31 @@ class AppOrchestrator:
             if is_new_process:
                 target_dir = state.win64_dir
                 if self.auto_install_bridge:
-                    self.check_and_auto_install_bridge(
-                        now=self.time_provider(),
-                        known_win64_dir=str(target_dir) if target_dir else None,
-                        known_exe_path=state.exe_path,
-                    )
+                    if not self._is_installing_bridge:
+                        self._is_installing_bridge = True
+                        now_val = self.time_provider()
+                        win64_dir_str = str(target_dir) if target_dir else None
+                        exe_path_val = state.exe_path
+
+                        def _async_install() -> None:
+                            try:
+                                self.check_and_auto_install_bridge(
+                                    now=now_val,
+                                    known_win64_dir=win64_dir_str,
+                                    known_exe_path=exe_path_val,
+                                )
+                            except Exception as e:
+                                logger.error("Combat Bridge async auto-install failed: %s", e)
+                            finally:
+                                self._is_installing_bridge = False
+
+                        install_thread = threading.Thread(
+                            target=_async_install,
+                            name="BridgeAutoInstallerThread",
+                            daemon=True,
+                        )
+                        self._bridge_install_thread = install_thread
+                        install_thread.start()
                 else:
                     with contextlib.suppress(Exception):
                         self._bridge_installed = self.bridge_installer.is_bridge_installed(
@@ -321,6 +368,10 @@ class AppOrchestrator:
             if threading.current_thread() != self.worker_thread:
                 self.worker_thread.join(timeout=3.0)
             self.worker_thread = None
+        if self._bridge_install_thread is not None and self._bridge_install_thread.is_alive():
+            if threading.current_thread() != self._bridge_install_thread:
+                self._bridge_install_thread.join(timeout=3.0)
+            self._bridge_install_thread = None
         self.rpc_manager.disconnect()
 
     def toggle_anti_spoiler(self) -> bool:
