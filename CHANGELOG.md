@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.4] - 2026-10-18
+
+### Added
+- **Persistent Checkpoint Save Reader Fallback (`detection.save_reader`)**:
+  - Restored and modernized `SaveFileReader` (Python 3.12+, zero external dependencies) to dynamically read the active player save (`EXPEDITION_*.sav`).
+  - Extracts `LastUsedSavePoint` and validates semantic zone matching, restoring checkpoint presence display in parentheses (e.g. `Verso's Drafts (Candy Land)`) even when the in-game save menu is closed.
+  - Implemented cached binary inspection with filesystem `mtime` checking for zero overhead.
+
+### Fixed
+- **Eliminated Engine Game Thread Freezes & Micro-Stutters**:
+  - Fixed severe periodic stutter (0.5–1.0s every 4 seconds) caused by UE4SS Lua bridge debug routines iterating `FindAllOf("UserWidget")` across 100,000+ UObjects and all streaming levels on the engine Game Thread.
+  - Streamlined `main.lua` to O(1) level identification via `UGameplayStatics::GetCurrentLevelName()`, eliminating all level iteration and blocking disk I/O.
+  - Updated bundled `src/expedition33_rpc/assets/bridge.zip`.
+
 ## [v2.0.3] - 2026-10-14
 
 ### Fixed
