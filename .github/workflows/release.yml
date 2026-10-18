@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release tag (e.g. v1.1.0)"
+        description: "Release tag (e.g. v2.0.6)"
         required: false
-        default: "v1.1.0"
+        default: ""
 
 permissions:
   contents: write
@@ -87,20 +87,31 @@ jobs:
         id: extract_changelog
         shell: python
         env:
+          INPUT_TAG_NAME: ${{ github.event.inputs.tag_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
           VT_ANALYSIS: ${{ steps.virustotal.outputs.analysis }}
         run: |
           import os
           import re
-
-          ref_name = os.environ.get("GITHUB_REF_NAME", "")
-          ref_type = os.environ.get("GITHUB_REF_TYPE", "")
-          input_tag = "${{ github.event.inputs.tag_name }}"
-          
+          input_tag = os.environ.get("INPUT_TAG_NAME", "").strip()
+          ref_name = os.environ.get("REF_NAME", "").strip()
+          ref_type = os.environ.get("REF_TYPE", "").strip()
           candidate = input_tag if input_tag else (ref_name if ref_type == "tag" else "")
           if not candidate:
-              tag = "v1.1.0"
-          elif not candidate.startswith("v"):
-              tag = f"v{candidate}"
+              # Fallback: estrai la versione corrente da pyproject.toml
+              tag = ""
+              try:
+                  with open("pyproject.toml", "r", encoding="utf-8") as f:
+                      for line in f:
+                          if line.strip().startswith("version ="):
+                              ver = line.split("=")[1].strip().strip('"').strip("'")
+                              tag = f"v{ver}"
+                              break
+              except Exception:
+                  pass
+              if not tag:
+                  tag = "v2.0.6"
           else:
               tag = candidate
 
@@ -159,8 +170,8 @@ jobs:
             dist/virustotal_report.json
             src/expedition33_rpc/assets/bridge.zip
           body_path: RELEASE_NOTES.md
-          tag_name: ${{ steps.extract_changelog.outputs.version || 'v1.1.0' }}
-          name: ${{ steps.extract_changelog.outputs.version || 'v1.1.0' }}
+          tag_name: ${{ steps.extract_changelog.outputs.version || 'v2.0.6' }}
+          name: ${{ steps.extract_changelog.outputs.version || 'v2.0.6' }}
           draft: false
           prerelease: false
         env:

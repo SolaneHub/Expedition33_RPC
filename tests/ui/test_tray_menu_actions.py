@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -142,10 +143,7 @@ def test_prompt_folder_selection_lifecycle(tray_fixture) -> None:
     app, orchestrator, harness, icon = tray_fixture
     orchestrator.install_bridge_to.return_value = (True, "Installed")
 
-    with (
-        patch("tkinter.Tk"),
-        patch("tkinter.filedialog.askdirectory", return_value="D:/Custom/Win64"),
-    ):
+    with patch.object(app, "_prompt_folder_selection", return_value="D:/Custom/Win64"):
         harness.invoke("Select Game Folder...")
         orchestrator.install_bridge_to.assert_called_once_with("D:/Custom/Win64")
         icon.notify.assert_called_once()
@@ -153,24 +151,36 @@ def test_prompt_folder_selection_lifecycle(tray_fixture) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Win32 native folder dialog requires Windows ctypes.windll",
+)
 def test_prompt_folder_selection_cancelled_or_closed_x(tray_fixture) -> None:
     app, _orchestrator, _harness, _icon = tray_fixture
 
-    with (
-        patch("tkinter.Tk") as mock_tk_cls,
-        patch("tkinter.filedialog.askdirectory", return_value="") as mock_ask,
-    ):
-        mock_root = MagicMock()
-        mock_tk_cls.return_value = mock_root
-
+    # Test ctypes Shell32 cancelled selection returns None
+    with patch("ctypes.windll.shell32.SHBrowseForFolderW", return_value=0):
         selected = app._prompt_folder_selection()
-
         assert selected is None
-        mock_root.withdraw.assert_called_once()
-        mock_ask.assert_called_once()
-        mock_root.update_idletasks.assert_called_once()
-        mock_root.update.assert_called_once()
-        mock_root.destroy.assert_called_once()
+
+    # Test ctypes Shell32 successful selection
+    with (
+        patch("ctypes.windll.shell32.SHBrowseForFolderW", return_value=1234),
+        patch(
+            "ctypes.windll.shell32.SHGetPathFromIDListW",
+            side_effect=lambda _pidl, buf: buf.__setattr__("value", "C:\\Games\\Expedition33"),
+        ),
+        patch("ctypes.windll.ole32.CoTaskMemFree"),
+    ):
+        selected = app._prompt_folder_selection()
+        assert selected == "C:\\Games\\Expedition33"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="Tests non-Windows fallback")
+def test_prompt_folder_selection_non_windows(tray_fixture) -> None:
+    app, _orchestrator, _harness, _icon = tray_fixture
+    assert app._prompt_folder_selection() is None
 
 
 @pytest.mark.unit

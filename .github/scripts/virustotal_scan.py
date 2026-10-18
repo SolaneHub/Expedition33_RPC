@@ -62,10 +62,17 @@ def build_multipart_payload(field_name: str, file_path: Path) -> tuple[bytes, st
     ).encode()
     footer = f"\r\n--{boundary}--\r\n".encode()
 
-    file_bytes = file_path.read_bytes()
-    body = header + file_bytes + footer
+    file_size = file_path.stat().st_size
+    total_size = len(header) + file_size + len(footer)
+    body = bytearray(total_size)
+
+    body[: len(header)] = header
+    with open(file_path, "rb") as f:
+        f.readinto(memoryview(body)[len(header) : len(header) + file_size])
+    body[len(header) + file_size :] = footer
+
     content_type = f"multipart/form-data; boundary={boundary}"
-    return body, content_type
+    return bytes(body), content_type
 
 
 def vt_api_request(
@@ -379,11 +386,36 @@ def main() -> int:
     vt_output_str = ",".join(analysis_outputs)
     set_github_output("analysis", vt_output_str)
 
-    # Save local JSON report
+    files_payload: dict[str, Any] = {}
+    for r in results:
+        ratio_raw = str(r.get("ratio") or "")
+        clean_cnt = 0
+        total_cnt = 0
+        if "/" in ratio_raw:
+            try:
+                parts = ratio_raw.split("/")
+                clean_cnt = int(parts[0].strip())
+                total_cnt = int(parts[1].split()[0].strip())
+            except (ValueError, IndexError):
+                clean_cnt = 0
+                total_cnt = 0
+        positives_cnt = max(0, total_cnt - clean_cnt)
+        files_payload[r["name"]] = {
+            "sha256": r["sha256"],
+            "status": str(r.get("status", "UNKNOWN")).upper(),
+            "positives": positives_cnt,
+            "total": total_cnt,
+            "permalink": r.get("permalink", ""),
+        }
+
+    report_payload = {
+        "generated_at": time.time(),
+        "files": files_payload,
+    }
     report_file = Path(args.output_report)
     report_file.parent.mkdir(parents=True, exist_ok=True)
     with open(report_file, "w", encoding="utf-8") as rf:
-        json.dump(results, rf, indent=2)
+        json.dump(report_payload, rf, indent=2)
     print(f"\n[VirusTotal] Saved summary report to {report_file}")
 
     # Generate Markdown Summary for GITHUB_STEP_SUMMARY
@@ -394,7 +426,9 @@ def main() -> int:
         "| :--- | :--- | :--- | :--- | :--- |",
     ]
     for r in results:
-        ratio_display = f"**{r['ratio']}**" if "/" in r["ratio"] else r["ratio"]
+        ratio_val = r.get("ratio")
+        ratio_str = str(ratio_val) if ratio_val is not None else ""
+        ratio_display = f"**{ratio_str}**" if "/" in ratio_str else ratio_str
         summary_md.append(
             f"| `{r['name']}` | `{r['sha256'][:16]}...` | {r['status']} | {ratio_display} | [Inspect Report]({r['permalink']}) |"
         )

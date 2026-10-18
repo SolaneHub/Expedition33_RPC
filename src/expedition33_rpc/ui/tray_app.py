@@ -159,37 +159,38 @@ class ExpeditionTrayApp:
             self._safe_update_menu()
 
     def _prompt_folder_selection(self) -> str | None:
-        result: list[str | None] = [None]
+        if sys.platform != "win32":
+            return None
+        try:
+            import ctypes
+            from ctypes import wintypes
 
-        def _ask() -> None:
-            root = None
-            try:
-                import tkinter as tk
-                from tkinter import filedialog
+            class BROWSEINFO(ctypes.Structure):
+                _fields_ = [
+                    ("hwndOwner", wintypes.HWND),
+                    ("pidlRoot", wintypes.LPCVOID),
+                    ("pszDisplayName", wintypes.LPWSTR),
+                    ("lpszTitle", wintypes.LPCWSTR),
+                    ("ulFlags", wintypes.UINT),
+                    ("lpfn", wintypes.LPVOID),
+                    ("lParam", wintypes.LPARAM),
+                    ("iImage", ctypes.c_int),
+                ]
 
-                root = tk.Tk()
-                root.withdraw()
-                root.attributes("-topmost", True)
-                try:
-                    selected = filedialog.askdirectory(
-                        parent=root,
-                        title="Select Expedition 33 Win64 or WinGDK Directory",
-                    )
-                    result[0] = str(selected) if selected else None
-                finally:
-                    with contextlib.suppress(Exception):
-                        root.attributes("-topmost", False)
-                        root.update_idletasks()
-                        root.update()
-                        root.destroy()
-            except Exception as e:
-                print(f"[TrayApp] Directory dialog error: {e}")
-                result[0] = None
-
-        thread = threading.Thread(target=_ask, daemon=True)
-        thread.start()
-        thread.join()
-        return result[0]
+            BIF_RETURNONLYFSDIRS = 0x0001
+            BIF_NEWDIALOGSTYLE = 0x0040
+            bi = BROWSEINFO()
+            bi.lpszTitle = "Seleziona la cartella di Clair Obscur: Expedition 33"
+            bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE
+            pidl = ctypes.windll.shell32.SHBrowseForFolderW(ctypes.byref(bi))
+            if not pidl:
+                return None
+            path_buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+            ctypes.windll.shell32.SHGetPathFromIDListW(pidl, path_buf)
+            ctypes.windll.ole32.CoTaskMemFree(pidl)
+            return path_buf.value or None
+        except Exception:
+            return None
 
     def menu_startup_toggle(self, *_) -> str:
         if self.orchestrator.is_startup_enabled():

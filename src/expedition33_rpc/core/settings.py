@@ -6,12 +6,13 @@ import contextlib
 import json
 import os
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 
-@dataclass
+@dataclass(slots=True)
 class Settings:
     """Application settings schema."""
 
@@ -38,6 +39,7 @@ class SettingsService:
         )
         self.settings = Settings()
         self._raw_data: dict[str, Any] = {}
+        self._lock = threading.RLock()
         with contextlib.suppress(Exception):
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self.load()
@@ -58,58 +60,62 @@ class SettingsService:
 
     def load(self) -> bool:
         """Loads settings from the JSON configuration file, falling back to defaults."""
-        if self.path.is_file():
-            try:
-                data = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(data, dict):
-                    self._raw_data = dict(data)
-                    self.settings.anti_spoiler = bool(data.get("anti_spoiler", False))
-                    return self.anti_spoiler
-            except Exception:
-                pass
-        self._raw_data = {}
-        self.settings.anti_spoiler = False
-        return self.anti_spoiler
+        with self._lock:
+            if self.path.is_file():
+                try:
+                    data = json.loads(self.path.read_text(encoding="utf-8"))
+                    if isinstance(data, dict):
+                        self._raw_data = dict(data)
+                        self.settings.anti_spoiler = bool(data.get("anti_spoiler", False))
+                        return self.anti_spoiler
+                except Exception:
+                    pass
+            self._raw_data = {}
+            self.settings.anti_spoiler = False
+            return self.anti_spoiler
 
     def save(self, settings: Settings | None = None) -> bool:
         """Saves current settings to the JSON configuration file."""
-        if settings is not None:
-            self.settings = settings
+        with self._lock:
+            if settings is not None:
+                self.settings = settings
 
-        tmp_path: Path | None = None
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            if self.path.is_file():
-                with contextlib.suppress(Exception):
-                    loaded = json.loads(self.path.read_text(encoding="utf-8"))
-                    if isinstance(loaded, dict):
-                        self._raw_data.update(loaded)
+            tmp_path: Path | None = None
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                if self.path.is_file():
+                    with contextlib.suppress(Exception):
+                        loaded = json.loads(self.path.read_text(encoding="utf-8"))
+                        if isinstance(loaded, dict):
+                            loaded.update(self._raw_data)
+                            self._raw_data = loaded
 
-            payload = dict(self._raw_data)
-            payload["anti_spoiler"] = self.settings.anti_spoiler
-            data_str = json.dumps(payload, indent=2)
+                payload = dict(self._raw_data)
+                payload["anti_spoiler"] = self.settings.anti_spoiler
+                data_str = json.dumps(payload, indent=2)
 
-            tmp_path = self.path.with_suffix(".tmp")
-            tmp_path.write_text(data_str, encoding="utf-8")
-            tmp_path.replace(self.path)
-            return True
-        except OSError:
-            if tmp_path is not None:
-                with contextlib.suppress(OSError):
-                    if tmp_path.exists():
-                        tmp_path.unlink()
-            return False
+                tmp_path = self.path.with_suffix(f".tmp_{os.getpid()}_{threading.get_ident()}")
+                tmp_path.write_text(data_str, encoding="utf-8")
+                tmp_path.replace(self.path)
+                return True
+            except OSError:
+                if tmp_path is not None:
+                    with contextlib.suppress(OSError):
+                        if tmp_path.exists():
+                            tmp_path.unlink()
+                return False
 
     def update(self, anti_spoiler: bool | None = None, **kwargs: Any) -> bool:
         """Updates settings and persists changes to disk."""
-        if anti_spoiler is not None:
-            self.settings.anti_spoiler = anti_spoiler
-        for k, v in kwargs.items():
-            if hasattr(self.settings, k):
-                setattr(self.settings, k, v)
-            else:
-                self._raw_data[k] = v
-        return self.save()
+        with self._lock:
+            if anti_spoiler is not None:
+                self.settings.anti_spoiler = anti_spoiler
+            for k, v in kwargs.items():
+                if hasattr(self.settings, k):
+                    setattr(self.settings, k, v)
+                else:
+                    self._raw_data[k] = v
+            return self.save()
 
     def is_anti_spoiler_enabled(self) -> bool:
         """Checks if anti-spoiler mode is enabled."""
@@ -117,19 +123,21 @@ class SettingsService:
 
     def set_anti_spoiler_enabled(self, enabled: bool) -> bool:
         """Persists anti-spoiler setting to the configuration file."""
-        old_val = self.anti_spoiler
-        self.anti_spoiler = enabled
-        if not self.save():
-            self.anti_spoiler = old_val
-            return False
-        return True
+        with self._lock:
+            old_val = self.anti_spoiler
+            self.anti_spoiler = enabled
+            if not self.save():
+                self.anti_spoiler = old_val
+                return False
+            return True
 
     def toggle_anti_spoiler(self) -> bool:
         """Toggles anti-spoiler mode and persists the new state."""
-        target = not self.anti_spoiler
-        if self.set_anti_spoiler_enabled(target):
-            return target
-        return self.anti_spoiler
+        with self._lock:
+            target = not self.anti_spoiler
+            if self.set_anti_spoiler_enabled(target):
+                return target
+            return self.anti_spoiler
 
 
 __all__ = ["Settings", "SettingsService", "get_default_settings_dir"]

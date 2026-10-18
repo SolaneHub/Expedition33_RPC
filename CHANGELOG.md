@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.6] - 2026-10-19
+
+### Added
+- **Cross-Platform Save Directory Resolution (`detection.compat_paths`, `detection.save_reader`)**:
+  - Implemented `get_save_games_paths()` and `resolve_user_data_path()` supporting Proton, Wine, SteamOS, and Linux compat paths (`STEAM_COMPAT_DATA_PATH`, `WINEPREFIX`, and standard Steam library roots).
+  - Integrated dynamic user data path resolution into `SaveFileReader` for robust multi-environment save parsing.
+- **Dynamic Process & Main Menu Catalog Access (`detection.game_data`)**:
+  - Added `get_target_process_names()` and `get_main_menu_tokens()` dynamically reading custom overrides from `game_data.json` with safe built-in fallbacks.
+
+### Fixed & Hardened
+- **Safe Bridge Extraction & Path Normalization (`integrations.bridge_installer`)**:
+  - Added zip-slip directory traversal guards (`is_relative_to`) during Lua bridge archive decompression.
+  - Switched file extraction to memory-safe `shutil.copyfileobj` streaming and fixed drive-root path formatting across candidate search directories.
+  - Enhanced error diagnostics with explicit permission feedback if the game process is locking files.
+- **Memory-Mapped Save Point Inspection (`detection.save_reader`)**:
+  - Migrated `EXPEDITION_*.sav` parsing to read-only memory-mapping (`mmap.mmap`), eliminating complete file loading into memory while searching for `LastUsedSavePoint`.
+  - Added defensive guards against zero-byte corrupted save files.
+- **Accurate Tower Trial Matcher (`detection.normalization`, `detection.detector`)**:
+  - Replaced substring matching with set-based alphanumeric token comparison in `resolve_tower_trial`, eliminating false positive collisions between normal enemies and trial bosses.
+  - Refined Endless Tower detection in `GameDetector` to ignore false hits on zones such as "workshop".
+- **Discord Presence Fingerprint Completeness (`integrations.discord_rpc`)**:
+  - Extended presence cache fingerprint to track `large_text`, `small_image`, `small_text`, `party_id`, and `party_size`, ensuring presence updates immediately when secondary metadata changes.
+- **Native Win32 Directory Picker (`ui.tray_app`)**:
+  - Replaced Tkinter file dialog with native Win32 `SHBrowseForFolderW` dialog via `ctypes`, eliminating GUI freezes and window management overhead.
+- **Thread-Safe Settings Persistence (`core.settings`)**:
+  - Protected `SettingsService` state modifications with reentrant lock (`threading.RLock`) and isolated temporary file writing using process and thread identifiers.
+- **Win32 Shared File Reading (`core.platform`)**:
+  - Ensured reliable OS file descriptor closure via `closefd=True` during shared text reading.
+
+### Changed & Optimized
+- **Catalog Normalization & Size Optimization (`assets/game_data.json`)**:
+  - Deduplicated punctuation and whitespace variations across all 20 language catalogs, slashing file size by ~40% (~18,500 lines cleaned) without loss of semantic coverage.
+- **Optimized VirusTotal Upload Streaming (`.github/scripts/virustotal_scan.py`)**:
+  - Optimized multipart payload assembly via preallocated `bytearray` and `memoryview` slice reads.
+  - Standardized JSON report format with structured file verification stats and generated timestamps.
+- **Test Suite Expansion & CI Speedup**:
+  - Added unit test suites for VirusTotal scan reporting, save reader mmap/empty file handling, bridge installer zip-slip protection, detector tower edge cases, and normalization token matching.
+  - Separated fast unit tests fail-fast from integration tests in GitHub Actions CI.
+
 ## [v2.0.5] - 2026-10-18
 
 ### Fixed

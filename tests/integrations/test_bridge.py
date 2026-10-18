@@ -321,3 +321,27 @@ def test_find_game_win64_directory_from_wingdk_process(tmp_path: Path) -> None:
         res = find_game_win64_directory()
         assert res is not None
         assert os.path.normpath(res) == os.path.normpath(str(fake_wingdk_dir))
+
+
+def test_install_bridge_zip_slip_prevention(tmp_path: Path) -> None:
+    """Verifies that install_bridge refuses extracting files attempting directory traversal."""
+    fake_game_dir = tmp_path / "game_binaries"
+    fake_game_dir.mkdir(parents=True, exist_ok=True)
+
+    malicious_zip_path = tmp_path / "malicious.zip"
+    with zipfile.ZipFile(malicious_zip_path, "w") as zf:
+        zf.writestr("../../evil.dll", "malicious payload")
+        zf.writestr("dwmapi.dll", "legit payload")
+
+    with patch(
+        "expedition33_rpc.integrations.bridge_installer.get_resource_path",
+        return_value=str(malicious_zip_path),
+    ):
+        ok, msg = install_bridge(fake_game_dir)
+        assert ok is False
+        assert "Zip slip traversal attempt detected" in msg
+
+    # Verify no file was created outside target directory
+    evil_path = tmp_path / "evil.dll"
+    assert not evil_path.exists()
+    assert not (fake_game_dir.parent / "evil.dll").exists()

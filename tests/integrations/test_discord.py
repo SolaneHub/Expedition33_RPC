@@ -412,3 +412,46 @@ def test_orchestrator_stop_sets_stopping_and_prevents_discord_reconnect() -> Non
     assert state is None
     assert manager.is_connected is False
     assert len(mock_pipe.written_data) == 0
+
+
+@pytest.mark.unit
+def test_update_presence_detects_small_image_or_text_change() -> None:
+    """Verifies that update_presence detects changes in small_image/small_text and sends IPC write."""
+    mock_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="presence_fp_test", transport=mock_pipe)
+    manager = DiscordRPCManager(client=client)
+
+    assert manager.connect() is True
+    mock_pipe.drain_all_frames()
+
+    payload1 = PresencePayload(
+        details="Exploring Old Lumiere",
+        state="In Combat",
+        start_timestamp=1700000000,
+        large_image="logo",
+        small_image="combat",
+        small_text="In Combat",
+    )
+    res1 = manager.update_presence(payload1)
+    assert res1 is True
+    frames1 = mock_pipe.drain_all_frames()
+    assert len(frames1) == 1
+    assert frames1[0][1]["args"]["activity"]["assets"]["small_image"] == "combat"
+    assert frames1[0][1]["args"]["activity"]["assets"]["small_text"] == "In Combat"
+
+    # Same details & state, but change small_image and small_text
+    payload2 = PresencePayload(
+        details="Exploring Old Lumiere",
+        state="In Combat",
+        start_timestamp=1700000000,
+        large_image="logo",
+        small_image="",
+        small_text="",
+    )
+    res2 = manager.update_presence(payload2)
+    assert res2 is True
+    frames2 = mock_pipe.drain_all_frames()
+    assert len(frames2) == 1
+    assets2 = frames2[0][1]["args"]["activity"]["assets"]
+    assert assets2.get("small_image") is None or assets2.get("small_image") == ""
+    assert assets2.get("small_text") is None or assets2.get("small_text") == ""

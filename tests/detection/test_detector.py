@@ -683,3 +683,55 @@ def test_detector_idle_polling_backoff_for_psutil_process_iter() -> None:
         proc5 = detector.find_game_process(now=5.5, force=True)
         assert proc5 is None
         assert scan_calls == 3
+
+
+@pytest.mark.unit
+def test_cleas_workshop_is_not_detected_as_tower() -> None:
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    bridge_provider = MagicMock(spec=BridgeStateProvider)
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_Side_CleasWorkshop",
+        "in_combat": True,
+        "enemy_name": "Gargoyle",
+        "checkpoint": "Workshop Entrance",
+        "timestamp": 1000.0,
+    }
+    mock_timer_tracker = MagicMock(spec=ZoneTimerTracker)
+    mock_timer_tracker.current_zone_id = None
+    mock_timer_tracker.update.return_value = 1000.0
+    detector = GameDetector(
+        bridge_provider=bridge_provider,
+        process_scanner=lambda: [mock_proc],
+        timer_tracker=mock_timer_tracker,
+    )
+
+    state = detector.get_game_state(now=1000.0)
+    assert state.is_running is True
+    assert state.raw_zone == "Level_Side_CleasWorkshop"
+    assert detector.current_tower_trial is None
+    assert state.tower_stage_trial is None
+    mock_timer_tracker.update.assert_called_once()
+    _, kwargs = mock_timer_tracker.update.call_args
+    assert kwargs.get("is_tower") is False
+
+
+@pytest.mark.unit
+def test_get_game_state_propagates_now_timestamp() -> None:
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    mock_timer_tracker = MagicMock(spec=ZoneTimerTracker)
+    mock_timer_tracker.current_zone_id = None
+    mock_timer_tracker.update.return_value = 1700000000.0
+
+    detector = GameDetector(
+        timer_tracker=mock_timer_tracker,
+        process_scanner=lambda: [mock_proc],
+        bridge_provider=None,
+    )
+
+    fixed_now = 1700000000.0
+    state = detector.get_game_state(now=fixed_now)
+
+    assert state.start_time == fixed_now
+    mock_timer_tracker.update.assert_called_once()
+    _, kwargs = mock_timer_tracker.update.call_args
+    assert kwargs.get("now") == fixed_now

@@ -68,12 +68,36 @@ _DEFAULT_MAIN_MENU_TOKENS: list[str] = [
     "wbp_splashscreens_logos_c",
 ]
 
-TARGET_PROCESS_NAMES: tuple[str, ...] = (
+_DEFAULT_TARGET_PROCESS_NAMES: tuple[str, ...] = (
     "sandfall-win64-shipping.exe",
     "sandfall-wingdk-shipping.exe",
 )
 
-MAIN_MENU_TOKENS: frozenset[str] = frozenset(_DEFAULT_MAIN_MENU_TOKENS)
+
+def get_target_process_names() -> tuple[str, ...]:
+    """Returns the list of target game process names from game_data.json or defaults."""
+    data = get_game_data()
+    custom = data.get("target_process_names")
+    if isinstance(custom, list) and custom:
+        names = tuple(str(p).strip().lower() for p in custom if str(p).strip())
+        if names:
+            return names
+    return _DEFAULT_TARGET_PROCESS_NAMES
+
+
+def get_main_menu_tokens() -> frozenset[str]:
+    """Returns the set of main menu tokens from game_data.json or defaults."""
+    data = get_game_data()
+    custom = data.get("main_menu_tokens")
+    if isinstance(custom, list) and custom:
+        tokens = frozenset(str(tok).strip().lower() for tok in custom if str(tok).strip())
+        if tokens:
+            return tokens
+    return frozenset(_DEFAULT_MAIN_MENU_TOKENS)
+
+
+TARGET_PROCESS_NAMES: tuple[str, ...] = get_target_process_names()
+MAIN_MENU_TOKENS: frozenset[str] = get_main_menu_tokens()
 
 ALL_SUPPORTED_LANGUAGES: tuple[str, ...] = (
     "ar",
@@ -159,4 +183,6 @@ __all__ = [
     "TrialDefinition",
     "ZONE_NAME_OVERRIDES_BY_LANG",
     "get_game_data",
+    "get_main_menu_tokens",
+    "get_target_process_names",
 ]

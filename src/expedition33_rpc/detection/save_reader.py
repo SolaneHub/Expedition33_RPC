@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import mmap
 import os
 import re
 from pathlib import Path
 
+from expedition33_rpc.detection.compat_paths import resolve_user_data_path
 from expedition33_rpc.detection.normalization import (
     format_zone_name,
     is_continent_zone,
@@ -40,7 +42,7 @@ class SaveFileReader:
 
     def __init__(self, base_save_dir: str | Path | None = None) -> None:
         self.base_save_dir = str(
-            base_save_dir or os.path.expandvars(r"%LOCALAPPDATA%\Sandfall\Saved\SaveGames")
+            base_save_dir if base_save_dir is not None else resolve_user_data_path()
         )
         self._checkpoint_cache: dict[str, tuple[float, int, tuple[str | None, str | None]]] = {}
 
@@ -81,6 +83,9 @@ class SaveFileReader:
                 return None, None
             latest = candidates[0]
             sav_path = str(latest)
+            if not os.path.isfile(sav_path):
+                return None, None
+
             st = latest.stat()
             cache_key = (st.st_mtime, st.st_size)
             if (
@@ -89,28 +94,35 @@ class SaveFileReader:
             ):
                 return self._checkpoint_cache[sav_path][2]
 
-            with open(sav_path, "rb") as f:
-                data = f.read()
-
-            idx = data.find(b"LastUsedSavePoint")
-            if idx == -1:
+            size = st.st_size
+            if size == 0:
                 res: tuple[str | None, str | None] = (None, None)
                 self._checkpoint_cache[sav_path] = (st.st_mtime, st.st_size, res)
                 return res
 
-            block = data[idx : idx + 1000]
-            lvl_m = re.search(
-                rb"LevelAssetName.*?NameProperty[^\x00]*\x00.*?([A-Za-z0-9_]{3,60})\x00",
-                block,
-                re.DOTALL,
-            )
-            level_name = lvl_m.group(1).decode("latin1") if lvl_m else None
-            tag_m = re.search(rb"(Level\.SpawnPoint\.[A-Za-z0-9_\.]+)\x00", block)
-            tag_name = tag_m.group(1).decode("latin1") if tag_m else None
+            with (
+                open(sav_path, "rb") as f,
+                mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm,
+            ):
+                idx = mm.find(b"LastUsedSavePoint")
+                if idx == -1:
+                    res = (None, None)
+                    self._checkpoint_cache[sav_path] = (st.st_mtime, st.st_size, res)
+                    return res
 
-            res = (level_name, tag_name)
-            self._checkpoint_cache[sav_path] = (st.st_mtime, st.st_size, res)
-            return res
+                block = mm[idx : min(idx + 4096, mm.size())]
+                lvl_m = re.search(
+                    rb"LevelAssetName.*?NameProperty[^\x00]*\x00.*?([A-Za-z0-9_]{3,60})\x00",
+                    block,
+                    re.DOTALL,
+                )
+                tag_m = re.search(rb"(Level\.SpawnPoint\.[A-Za-z0-9_\.]+)\x00", block)
+                lvl = lvl_m.group(1).decode("latin1") if lvl_m else None
+                tag = tag_m.group(1).decode("latin1") if tag_m else None
+
+                res = (lvl, tag)
+                self._checkpoint_cache[sav_path] = (st.st_mtime, st.st_size, res)
+                return res
         except Exception:
             return None, None
 

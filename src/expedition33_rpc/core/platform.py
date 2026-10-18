@@ -242,12 +242,10 @@ def read_file_shared_text(path: str | Path) -> str:
             except Exception:
                 _kernel32.CloseHandle(handle)
                 raise
-            try:
-                with open(fd, encoding="utf-8") as f:
-                    return f.read()
-            except Exception:
-                os.close(fd)
-                raise
+
+            # with open gestisce closefd=True alla chiusura o in caso di eccezione
+            with open(fd, encoding="utf-8", closefd=True) as f:
+                return f.read()
         except Exception:
             # Fall back to standard read if custom Win32 handle creation fails
             pass

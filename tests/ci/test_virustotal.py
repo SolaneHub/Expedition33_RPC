@@ -20,6 +20,7 @@ from virustotal_scan import (  # noqa: E402
     RateLimiter,
     check_file_report,
     compute_sha256,
+    main,
 )
 
 pytestmark = pytest.mark.ci
@@ -87,3 +88,136 @@ def test_check_file_report_cache_miss(test_artifact: tuple[Path, str]) -> None:
         assert found is False
         assert stats is None
         assert ratio is None
+
+
+def test_main_report_generation_clean_ratio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, test_artifact: tuple[Path, str]
+) -> None:
+    test_file, _ = test_artifact
+    report_file = tmp_path / "report.json"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "virustotal_scan.py",
+            str(test_file),
+            "--api-key",
+            "dummy_key",
+            "--output-report",
+            str(report_file),
+        ],
+    )
+
+    with (
+        patch("virustotal_scan.check_file_report", return_value=(True, {}, "71/72 Clean")),
+        patch("virustotal_scan.append_step_summary"),
+        patch("virustotal_scan.set_github_output"),
+    ):
+        ret = main()
+        assert ret == 0
+        assert report_file.exists()
+        data = json.loads(report_file.read_text(encoding="utf-8"))
+        file_info = data["files"][test_file.name]
+        assert file_info["positives"] == 1
+        assert file_info["total"] == 72
+        assert file_info["status"] == "CACHED"
+
+
+def test_main_report_generation_zero_positives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, test_artifact: tuple[Path, str]
+) -> None:
+    test_file, _ = test_artifact
+    report_file = tmp_path / "report_zero.json"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "virustotal_scan.py",
+            str(test_file),
+            "--api-key",
+            "dummy_key",
+            "--output-report",
+            str(report_file),
+        ],
+    )
+
+    with (
+        patch("virustotal_scan.check_file_report", return_value=(True, {}, "72/72 Clean")),
+        patch("virustotal_scan.append_step_summary"),
+        patch("virustotal_scan.set_github_output"),
+    ):
+        ret = main()
+        assert ret == 0
+        assert report_file.exists()
+        data = json.loads(report_file.read_text(encoding="utf-8"))
+        file_info = data["files"][test_file.name]
+        assert file_info["positives"] == 0
+        assert file_info["total"] == 72
+        assert file_info["status"] == "CACHED"
+
+
+def test_main_report_generation_malformed_ratio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, test_artifact: tuple[Path, str]
+) -> None:
+    test_file, _ = test_artifact
+    report_file = tmp_path / "report_malformed.json"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "virustotal_scan.py",
+            str(test_file),
+            "--api-key",
+            "dummy_key",
+            "--output-report",
+            str(report_file),
+        ],
+    )
+
+    with (
+        patch("virustotal_scan.check_file_report", return_value=(True, {}, "invalid/ratio")),
+        patch("virustotal_scan.append_step_summary"),
+        patch("virustotal_scan.set_github_output"),
+    ):
+        ret = main()
+        assert ret == 0
+        assert report_file.exists()
+        data = json.loads(report_file.read_text(encoding="utf-8"))
+        file_info = data["files"][test_file.name]
+        assert file_info["positives"] == 0
+        assert file_info["total"] == 0
+
+
+def test_main_report_generation_no_api_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, test_artifact: tuple[Path, str]
+) -> None:
+    monkeypatch.delenv("VT_API_KEY", raising=False)
+    test_file, _ = test_artifact
+    report_file = tmp_path / "report_no_key.json"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "virustotal_scan.py",
+            str(test_file),
+            "--output-report",
+            str(report_file),
+        ],
+    )
+
+    with (
+        patch("virustotal_scan.append_step_summary"),
+        patch("virustotal_scan.set_github_output"),
+    ):
+        ret = main()
+        assert ret == 0
+        assert report_file.exists()
+        data = json.loads(report_file.read_text(encoding="utf-8"))
+        file_info = data["files"][test_file.name]
+        assert file_info["positives"] == 0
+        assert file_info["total"] == 0
+        assert "NO API KEY" in file_info["status"]

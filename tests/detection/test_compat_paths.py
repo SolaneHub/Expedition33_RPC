@@ -228,3 +228,10 @@ def test_get_game_user_settings_path_fallback() -> None:
     resolved = get_game_user_settings_path(is_windows=True)
     assert resolved is not None
     assert "GameUserSettings.ini" in resolved
+
+
+def test_get_game_user_settings_path_fallback_linux(tmp_path: Path) -> None:
+    resolved = get_game_user_settings_path(is_windows=False, home_dir=tmp_path / "nonexistent")
+    assert resolved is not None
+    assert "GameUserSettings.ini" in resolved
+    assert ".local" in resolved or "compatdata" in resolved

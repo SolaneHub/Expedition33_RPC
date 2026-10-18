@@ -60,3 +60,42 @@ def test_save_reader_parses_real_binary_save(tmp_path: Path) -> None:
 
     resolved = reader.resolve_checkpoint_for_zone("Level_Side_VersosDraft")
     assert resolved == "Level.SpawnPoint.VersosDraft.CandyLand"
+
+
+@pytest.mark.unit
+def test_save_reader_empty_save_file(tmp_path: Path) -> None:
+    profile_dir = tmp_path / "76561198097793146"
+    profile_dir.mkdir(parents=True)
+    empty_sav = profile_dir / "EXPEDITION_0.sav"
+    empty_sav.write_bytes(b"")
+
+    reader = SaveFileReader(base_save_dir=tmp_path)
+    lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
+    assert lvl is None
+    assert tag is None
+    assert reader.resolve_checkpoint_for_zone("Level_Side_VersosDraft") == ""
+
+
+@pytest.mark.unit
+def test_save_reader_linux_cross_platform_path(tmp_path: Path) -> None:
+    fake_home = tmp_path / "home" / "deck"
+    steam_compat = (
+        fake_home / ".local" / "share" / "Steam" / "steamapps" / "compatdata" / "1903340" / "pfx"
+    )
+    save_dir = (
+        steam_compat
+        / "drive_c"
+        / "users"
+        / "steamuser"
+        / "AppData"
+        / "Local"
+        / "Sandfall"
+        / "Saved"
+        / "SaveGames"
+    )
+    save_dir.mkdir(parents=True)
+
+    from expedition33_rpc.detection.compat_paths import resolve_user_data_path
+
+    resolved = resolve_user_data_path(is_windows=False, home_dir=fake_home)
+    assert Path(resolved).resolve() == save_dir.resolve()

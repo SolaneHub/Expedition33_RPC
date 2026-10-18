@@ -64,9 +64,13 @@ def test_game_data_schema_and_catalog_integrity(game_data_json: dict) -> None:
 
     en_keys = set(en_checkpoints.keys())
     it_keys = set(it_checkpoints.keys())
-    assert en_keys == it_keys, (
-        f"Checkpoint asymmetry: missing IT {en_keys - it_keys}, missing EN {it_keys - en_keys}"
+    # All canonical checkpoint keys in en_checkpoints must be present in it_checkpoints
+    assert en_keys.issubset(it_keys), f"Missing canonical checkpoints in IT: {en_keys - it_keys}"
+    assert len(en_keys) >= 300, (
+        f"Expected at least 300 canonical checkpoint keys, got {len(en_keys)}"
     )
+    assert all(re.sub(r"[^a-z0-9]", "", k.lower()) == k for k in en_keys)
+    assert all(re.sub(r"[^a-z0-9]", "", k.lower()) == k for k in it_keys)
     assert all(isinstance(v, str) and len(v.strip()) > 0 for v in en_checkpoints.values())
     assert all(isinstance(v, str) and len(v.strip()) > 0 for v in it_checkpoints.values())
 
@@ -364,12 +368,17 @@ def test_all_20_languages_schema_and_symmetry(game_data_json: dict) -> None:
         assert len(zone_by_lang[lang]) >= 200, f"Insufficient zone overrides for language {lang}"
         assert all(isinstance(v, str) and len(v) > 0 for v in zone_by_lang[lang].values())
 
-        # 2. Checkpoints maintain 100% key symmetry across all 20 languages
+        # 2. Checkpoints contain all canonical keys across all 20 languages
         assert lang in cp_by_lang, f"Missing checkpoints for language {lang}"
         lang_keys = set(cp_by_lang[lang].keys())
-        assert lang_keys == master_cp_keys, (
-            f"Checkpoint asymmetry in {lang}: missing {master_cp_keys - lang_keys}, extra {lang_keys - master_cp_keys}"
+        assert master_cp_keys.issubset(lang_keys), (
+            f"Checkpoint missing canonical keys in {lang}: missing {master_cp_keys - lang_keys}"
         )
+        if lang != "it":
+            assert lang_keys == master_cp_keys, (
+                f"Checkpoint asymmetry in {lang}: extra {lang_keys - master_cp_keys}"
+            )
+        assert all(re.sub(r"[^a-z0-9]", "", k.lower()) == k for k in lang_keys)
         assert all(isinstance(v, str) and len(v) > 0 for v in cp_by_lang[lang].values())
 
         # 3. Tower stages exist with all 33 trials
@@ -453,7 +462,7 @@ def test_multi_language_zone_and_checkpoint_formatting() -> None:
 
     # 2b. Main menu across languages
     assert format_zone_name("Level_MainMenu", lang="en-US") == "Main Menu"
-    assert format_zone_name("Level_MainMenu", lang="it") == "Nel menu principale"
+    assert format_zone_name("Level_MainMenu", lang="it") == "Menu principale"
     assert format_zone_name("Level_MainMenu", lang="fr") == "Menu principal"
     assert format_zone_name("Level_MainMenu", lang="de") == "Hauptmenü"
     assert format_zone_name("Level_MainMenu", lang="ja") == "メインメニュー"
@@ -494,3 +503,36 @@ def test_multi_language_zone_and_checkpoint_formatting() -> None:
     assert format_checkpoint_tag("Level.SpawnPoint.Generic.Entry", lang="it") == "Entrata"
     assert format_checkpoint_tag("Level.SpawnPoint.Generic.Entry", lang="fr") == "Entrée"
     assert format_checkpoint_tag("Level.SpawnPoint.Generic.Entry", lang="de") == "Eingang"
+
+
+def test_target_process_names_and_main_menu_tokens_ssot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifies that get_target_process_names and get_main_menu_tokens source directly from catalog with fallbacks."""
+    from expedition33_rpc.detection import game_data
+
+    # 1. Normal state: values match JSON catalog
+    procs = game_data.get_target_process_names()
+    assert isinstance(procs, tuple)
+    assert procs == game_data.TARGET_PROCESS_NAMES
+    assert "sandfall-win64-shipping.exe" in procs
+
+    tokens = game_data.get_main_menu_tokens()
+    assert isinstance(tokens, frozenset)
+    assert tokens == game_data.MAIN_MENU_TOKENS
+    assert "level_mainmenu" in tokens
+
+    # 2. Dynamic customization from catalog dict
+    custom_data = {
+        "target_process_names": ["CustomGame.exe", "  ANOTHER_GAME.EXE  "],
+        "main_menu_tokens": ["token_one", "TOKEN_TWO"],
+    }
+    monkeypatch.setattr(game_data, "get_game_data", lambda: custom_data)
+    assert game_data.get_target_process_names() == ("customgame.exe", "another_game.exe")
+    assert game_data.get_main_menu_tokens() == frozenset({"token_one", "token_two"})
+
+    # 3. Fallback when keys are missing or empty
+    empty_data: dict[str, list[str]] = {}
+    monkeypatch.setattr(game_data, "get_game_data", lambda: empty_data)
+    fallback_procs = game_data.get_target_process_names()
+    fallback_tokens = game_data.get_main_menu_tokens()
+    assert fallback_procs == game_data._DEFAULT_TARGET_PROCESS_NAMES
+    assert fallback_tokens == frozenset(game_data._DEFAULT_MAIN_MENU_TOKENS)

@@ -48,7 +48,7 @@ class ProcessLike(Protocol):
     def is_running(self) -> bool: ...
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GameProcessInfo:
     """Immutable DTO holding process-level executable and filesystem locations."""
 
@@ -58,7 +58,7 @@ class GameProcessInfo:
     process_create_time: float | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GameState:
     """Immutable GameState DTO / Value Object representing normalized game presence."""
 
@@ -332,7 +332,6 @@ class GameDetector:
         save_reader: SaveFileReader | None = None,
     ):
         self.cached_pid: int | None = None
-        self.game_start_time: float | None = None
         self.game_exe_path: str | None = None
         self.game_win64_dir: Path | None = None
         self.last_zone: str = "Exploring"
@@ -451,11 +450,6 @@ class GameDetector:
                 if proc_name and proc_name.lower() in self.target_process_names:
                     self.cached_pid = proc.pid
                     self._resolve_and_cache_process_paths(proc)
-                    if not self.game_start_time:
-                        try:
-                            self.game_start_time = float(proc.create_time())
-                        except Exception:
-                            self.game_start_time = time.time()
                     return proc
             except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
                 continue
@@ -504,7 +498,6 @@ class GameDetector:
 
         if not proc:
             self.cached_pid = None
-            self.game_start_time = None
             self.game_exe_path = None
             self.game_win64_dir = None
             self.current_tower_trial = None
@@ -579,7 +572,10 @@ class GameDetector:
         self.last_raw_zone = raw_zone
 
         # Track Endless Tower stage and trial
-        is_tower = any(k in raw_zone.lower() for k in ("torre", "tower", "clea"))
+        raw_lower = raw_zone.lower()
+        is_tower = (
+            "endlesstower" in raw_lower or "torreinfinita" in raw_lower or "tower" in raw_lower
+        ) and "workshop" not in raw_lower
         effective_enemy = raw_enemy
         if is_tower and in_combat:
             bridge_trial = data.get("tower_trial") if data else None
@@ -604,11 +600,13 @@ class GameDetector:
         ):
             zone_key = self.timer_tracker.current_zone_id
 
+        current_epoch = time.time() if now is None else now
         effective_start = self.timer_tracker.update(
             zone_key=zone_key,
             in_combat=in_combat,
             is_tower=is_tower,
             current_tower_trial=self.current_tower_trial,
+            now=current_epoch,
         )
 
         proc_info = GameProcessInfo(

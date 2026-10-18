@@ -1260,3 +1260,33 @@ def test_orchestrator_stop_waits_for_bridge_install_thread() -> None:
         orchestrator.stop()
         assert thread_finished is True
         assert orchestrator._bridge_install_thread is None
+
+
+@pytest.mark.unit
+def test_orchestrator_step_with_real_detector(tmp_path: Path) -> None:
+    """Verifies that orchestrator functions end-to-end with a real GameDetector instance."""
+    real_detector = GameDetector(
+        bridge_provider=None,
+        process_scanner=lambda: [],
+        save_reader=None,
+    )
+    pipe = DiscordPipeSimulator()
+    client = DiscordIPCClient(client_id="test", transport=pipe)
+    rpc = DiscordRPCManager(client=client)
+    settings = SettingsService(custom_path=tmp_path / "settings.json")
+    fake_installer = FakeBridgeInstaller(installed=False)
+
+    orchestrator = AppOrchestrator(
+        detector=real_detector,
+        rpc_manager=rpc,
+        settings_service=settings,
+        bridge_installer=fake_installer,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    state = orchestrator.step_update()
+    assert state is not None
+    assert isinstance(state, GameState)
+    assert state.is_running is False
+    assert orchestrator.current_state == state

@@ -88,10 +88,21 @@ def find_game_win64_directory(
                 pass
 
     # Add standard root drives as fallback
-    for drive in ["C", "D", "E", "F", "G"]:
-        libraries.append(f"{drive}:\\SteamLibrary")
-        libraries.append(f"{drive}:\\Program Files (x86)\\Steam")
-        libraries.append(f"{drive}:\\Program Files\\Steam")
+    drives: list[str] = []
+    try:
+        for part in psutil.disk_partitions():
+            mount = part.mountpoint.rstrip("\\/")
+            if mount and mount not in drives:
+                drives.append(mount)
+    except Exception:
+        pass
+    if not drives:
+        drives = ["C:"]
+
+    for drive in drives:
+        libraries.append(f"{drive}\\SteamLibrary")
+        libraries.append(f"{drive}\\Program Files (x86)\\Steam")
+        libraries.append(f"{drive}\\Program Files\\Steam")
 
     checked_dirs = set()
     for lib in libraries:
@@ -117,10 +128,10 @@ def find_game_win64_directory(
                 pass
 
     # 3. Check Xbox PC Game Pass and Epic Games standard installation directories
-    for drive in ["C", "D", "E", "F", "G"]:
+    for drive in drives:
         platform_candidates = [
             os.path.join(
-                f"{drive}:\\",
+                f"{drive}\\",
                 "XboxGames",
                 "Clair Obscur Expedition 33",
                 "Content",
@@ -129,7 +140,7 @@ def find_game_win64_directory(
                 "WinGDK",
             ),
             os.path.join(
-                f"{drive}:\\",
+                f"{drive}\\",
                 "XboxGames",
                 "Clair Obscur Expedition 33",
                 "Content",
@@ -138,7 +149,7 @@ def find_game_win64_directory(
                 "Win64",
             ),
             os.path.join(
-                f"{drive}:\\",
+                f"{drive}\\",
                 "XboxGames",
                 "Expedition 33",
                 "Content",
@@ -147,7 +158,7 @@ def find_game_win64_directory(
                 "WinGDK",
             ),
             os.path.join(
-                f"{drive}:\\",
+                f"{drive}\\",
                 "XboxGames",
                 "Expedition 33",
                 "Content",
@@ -156,7 +167,7 @@ def find_game_win64_directory(
                 "Win64",
             ),
             os.path.join(
-                f"{drive}:\\",
+                f"{drive}\\",
                 "Program Files",
                 "Epic Games",
                 "Expedition 33",
@@ -165,7 +176,7 @@ def find_game_win64_directory(
                 "Win64",
             ),
             os.path.join(
-                f"{drive}:\\",
+                f"{drive}\\",
                 "Program Files (x86)",
                 "Epic Games",
                 "Expedition 33",
@@ -174,7 +185,7 @@ def find_game_win64_directory(
                 "Win64",
             ),
             os.path.join(
-                f"{drive}:\\", "Epic Games", "Expedition 33", "Sandfall", "Binaries", "Win64"
+                f"{drive}\\", "Epic Games", "Expedition 33", "Sandfall", "Binaries", "Win64"
             ),
         ]
         for candidate in platform_candidates:
@@ -280,27 +291,28 @@ def install_bridge(win64_dir: Path | str | None = None) -> tuple[bool, str]:
         return False, f"Bridge archive file missing: {zip_file}"
 
     try:
+        target_root = Path(target_dir).resolve()
         with zipfile.ZipFile(zip_file, "r") as zf:
             for member in zf.infolist():
-                member_path = member.filename
-                dest_path = os.path.join(target_dir, member_path)
-
+                dest = (target_root / member.filename).resolve()
+                if not dest.is_relative_to(target_root):
+                    raise ValueError(f"Zip slip traversal attempt detected: {member.filename}")
                 if member.is_dir():
                     continue
-
-                norm_member = member_path.replace("\\", "/").lower()
-                # 1. Do not overwrite pre-existing UE4SS-settings.ini
-                if norm_member.endswith("ue4ss-settings.ini") and os.path.exists(dest_path):
+                norm_member = member.filename.replace("\\", "/").lower()
+                if norm_member.endswith("ue4ss-settings.ini") and dest.exists():
                     continue
-
-                # 2. Do not overwrite mods.txt: will be non-destructively updated below
                 if norm_member.endswith("mods.txt"):
                     continue
-
-                # 3. Extract all other files
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                with zf.open(member) as source, open(dest_path, "wb") as target:
-                    target.write(source.read())
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    with zf.open(member) as source, open(dest, "wb") as target:
+                        shutil.copyfileobj(source, target)
+                except PermissionError as pe:
+                    raise PermissionError(
+                        f"Failed to write '{dest.name}': file is locked or access is denied. "
+                        "Please close the game if it is running."
+                    ) from pe
 
         # Non-destructively register our mod in mods.txt
         mods_txt = os.path.join(target_dir, "ue4ss", "Mods", "mods.txt")

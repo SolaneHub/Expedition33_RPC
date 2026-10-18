@@ -186,27 +186,63 @@ def resolve_tower_trial(
 
     # 1. Primary path: Match against structured enemy names if available
     if structured:
-        cleaned_list = [
-            re.sub(r"\(Tier \d+\)", "", format_enemy_name(e), flags=re.IGNORECASE).strip().lower()
+        cleaned_tokens = {
+            re.sub(
+                r"[^a-z0-9]",
+                "",
+                re.sub(r"\(Tier \d+\)", "", format_enemy_name(e), flags=re.IGNORECASE).lower(),
+            )
             for e in structured
-        ]
-        for stage_info, boss_name, enemy_groups in game_data.ENDLESS_TOWER_TRIALS:
-            if all(
-                any(any(variant.lower() in e for e in cleaned_list) for variant in group)
-                for group in enemy_groups
-            ):
-                final_enemy = boss_name if boss_name else normalized_single
-                return stage_info, final_enemy
+            if e
+        }
+        cleaned_tokens = {tok for tok in cleaned_tokens if tok}
+        if cleaned_tokens:
+            for stage_info, boss_name, enemy_groups in game_data.ENDLESS_TOWER_TRIALS:
+                if not enemy_groups:
+                    continue
+                all_groups_matched = True
+                for group in enemy_groups:
+                    group_matched = False
+                    for variant in group:
+                        norm_variant = re.sub(r"[^a-z0-9]", "", variant.lower())
+                        if norm_variant in cleaned_tokens:
+                            group_matched = True
+                            break
+                    if not group_matched:
+                        all_groups_matched = False
+                        break
+                if all_groups_matched:
+                    final_enemy = boss_name if boss_name else normalized_single
+                    return stage_info, final_enemy
 
     # 2. Fallback path: Match against exact single/summary string
     if normalized_single:
-        cleaned_str = re.sub(r"\(Tier \d+\)", "", normalized_single, flags=re.IGNORECASE)
-        cleaned_str = re.sub(r"\bT\d+\b", "", cleaned_str, flags=re.IGNORECASE).lower()
+        cleaned_single = re.sub(r"\(Tier \d+\)", "", normalized_single, flags=re.IGNORECASE)
+        cleaned_single = re.sub(r"\bT\d+\b", "", cleaned_single, flags=re.IGNORECASE)
+        # Split by comma for multi-enemy strings, and also consider full stripped token
+        tokens_from_single = {
+            re.sub(r"[^a-z0-9]", "", part.lower())
+            for part in cleaned_single.split(",")
+            if part.strip()
+        }
+        tokens_from_single.add(re.sub(r"[^a-z0-9]", "", cleaned_single.lower()))
+        tokens_from_single = {tok for tok in tokens_from_single if tok}
 
         for stage_info, boss_name, enemy_groups in game_data.ENDLESS_TOWER_TRIALS:
-            if all(
-                any(variant.lower() in cleaned_str for variant in group) for group in enemy_groups
-            ):
+            if not enemy_groups:
+                continue
+            all_groups_matched = True
+            for group in enemy_groups:
+                group_matched = False
+                for variant in group:
+                    norm_variant = re.sub(r"[^a-z0-9]", "", variant.lower())
+                    if norm_variant in tokens_from_single:
+                        group_matched = True
+                        break
+                if not group_matched:
+                    all_groups_matched = False
+                    break
+            if all_groups_matched:
                 final_enemy = boss_name if boss_name else normalized_single
                 return stage_info, final_enemy
 
@@ -224,11 +260,12 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
         return strings.get("exploring", "Exploring")
 
     if is_main_menu(raw_name):
-        if canon_lang == "it":
-            return "Nel menu principale"
         lang_overrides = game_data.ZONE_NAME_OVERRIDES_BY_LANG.get(canon_lang) or {}
-        if "mainmenu" in lang_overrides:
+        if lang_overrides.get("mainmenu"):
             return lang_overrides["mainmenu"]
+        fallback_overrides = game_data.ZONE_NAME_OVERRIDES_BY_LANG.get("en-US") or {}
+        if fallback_overrides.get("mainmenu"):
+            return fallback_overrides["mainmenu"]
         strings = game_data.LOCALIZED_PRESENTATION.get(
             canon_lang, game_data.LOCALIZED_PRESENTATION.get("en-US", {})
         )

@@ -80,6 +80,12 @@ def test_settings_service_update(tmp_path: Path) -> None:
     assert data["anti_spoiler"] is True
     assert data["theme"] == "dark"
 
+    # Sequential update to an already existing custom key must persist
+    assert service.update(theme="light") is True
+    data_updated = json.loads(custom_path.read_text(encoding="utf-8"))
+    assert data_updated["theme"] == "light"
+    assert data_updated["anti_spoiler"] is True
+
 
 @pytest.mark.unit
 def test_settings_service_preserves_external_keys(tmp_path: Path) -> None:
@@ -121,3 +127,23 @@ def test_settings_service_save_oserror_handling(tmp_path: Path) -> None:
     # In-memory value should roll back on save failure
     assert service.anti_spoiler is False
     assert service.is_anti_spoiler_enabled() is False
+
+
+@pytest.mark.unit
+def test_settings_service_concurrent_updates(tmp_path: Path) -> None:
+    import concurrent.futures
+
+    custom_path = tmp_path / "concurrent_settings.json"
+    service = SettingsService(custom_path=custom_path)
+
+    def worker(i: int) -> bool:
+        return service.update(anti_spoiler=(i % 2 == 0), **{f"key_{i}": i})
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(worker, range(20)))
+
+    assert all(results)
+    assert custom_path.is_file()
+    data = json.loads(custom_path.read_text(encoding="utf-8"))
+    for i in range(20):
+        assert data[f"key_{i}"] == i

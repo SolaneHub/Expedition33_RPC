@@ -4,8 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| v1.5.x  | :white_check_mark: |
-| < v1.5  | :x:                |
+| >=2.0.0 | :white_check_mark: |
+| < 2.0.0 | :x:                |
 
 We strongly advise all users to always run the latest release available on [GitHub Releases](https://github.com/SolaneHub/Expedition33_RPC/releases).
 

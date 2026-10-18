@@ -27,7 +27,7 @@ class UpdateState(Enum):
     ERROR = "error"
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class UpdateInfo:
     tag_name: str
     version_tuple: tuple[int, ...]

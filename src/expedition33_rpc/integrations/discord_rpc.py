@@ -431,7 +431,11 @@ class DiscordRPCManager:
         large_text = payload.large_text or "Clair Obscur: Expedition 33"
 
         # State fingerprint to avoid redundant IPC writes
-        fingerprint = f"{details_text}|{state_text}|{start_timestamp}|{large_image}|{target_pid}"
+        fingerprint = (
+            f"{details_text}|{state_text}|{start_timestamp}|{large_image}|"
+            f"{payload.large_text}|{payload.small_image}|{payload.small_text}|"
+            f"{payload.party_id}|{payload.party_size}|{target_pid}"
+        )
         if fingerprint == self.last_update_state:
             return True
 

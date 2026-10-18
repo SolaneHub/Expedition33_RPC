@@ -46,8 +46,8 @@ jobs:
         env:
           PYSTRAY_BACKEND: dummy
 
-      - name: Run Tests (pytest)
-        run: uv run pytest
+      - name: Run Integration & E2E Tests
+        run: uv run pytest -m "not unit"
         env:
           PYSTRAY_BACKEND: dummy
 

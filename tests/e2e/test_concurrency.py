@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -85,15 +86,19 @@ def test_concurrent_settings_mutations(tmp_path: Path) -> None:
     ops_per_worker = 15
     barrier = threading.Barrier(num_workers)
     errors: list[Exception] = []
+    results: list[bool] = []
+    results_lock = threading.Lock()
 
     def worker_task(worker_id: int):
         try:
             barrier.wait()
             for i in range(ops_per_worker):
                 if i % 2 == 0:
-                    settings_service.toggle_anti_spoiler()
+                    res = isinstance(settings_service.toggle_anti_spoiler(), bool)
                 else:
-                    settings_service.set_anti_spoiler_enabled(worker_id % 2 == 0)
+                    res = settings_service.set_anti_spoiler_enabled(worker_id % 2 == 0)
+                with results_lock:
+                    results.append(res)
                 # Verify read consistency
                 _val = settings_service.is_anti_spoiler_enabled()
         except Exception as e:
@@ -105,9 +110,13 @@ def test_concurrent_settings_mutations(tmp_path: Path) -> None:
             future.result()
 
     assert errors == []
-    # Ensure file on disk remains valid JSON
+    assert all(r is True for r in results)
+    # Ensure file on disk matches in-memory value
+    in_memory_anti_spoiler = settings_service.anti_spoiler
+    disk_data = json.loads(settings_file.read_text(encoding="utf-8"))
+    assert disk_data.get("anti_spoiler") == in_memory_anti_spoiler
     settings_service.load()
-    assert isinstance(settings_service.anti_spoiler, bool)
+    assert settings_service.anti_spoiler == in_memory_anti_spoiler
 
 
 def test_concurrent_telemetry_ticks_and_ui_toggles(tmp_path: Path) -> None:
