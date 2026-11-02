@@ -17,6 +17,38 @@ from expedition33_rpc.detection.detector import (
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
 
 
+def create_telemetry_payload(
+    zone: str = "",
+    in_combat: bool = False,
+    enemy_name: str = "",
+    enemies: list[str] | None = None,
+    tower_trial: Any | None = None,
+    checkpoint: str = "",
+    floor: int | None = None,
+    timestamp: float | None = None,
+) -> dict[str, Any]:
+    """Builds a standardized bridge status telemetry dictionary."""
+    resolved_enemies: list[str] = (
+        list(enemies)
+        if (enemies is not None and in_combat)
+        else (
+            [e.strip() for e in enemy_name.split(",") if e.strip()]
+            if (enemy_name and in_combat)
+            else []
+        )
+    )
+    return {
+        "timestamp": time.time() if timestamp is None else timestamp,
+        "zone": zone,
+        "in_combat": in_combat,
+        "enemy_name": enemy_name if in_combat else "",
+        "enemies": resolved_enemies,
+        "tower_trial": tower_trial,
+        "checkpoint": checkpoint,
+        "floor": floor,
+    }
+
+
 class GameSessionSimulator:
     """Fluent test harness simulating game lifecycles, zone exploration, and combat telemetry."""
 
@@ -27,7 +59,9 @@ class GameSessionSimulator:
         process_name: str = "Sandfall-Win64-Shipping.exe",
     ) -> None:
         if base_dir is None:
-            self._temp_dir_obj: tempfile.TemporaryDirectory | None = tempfile.TemporaryDirectory()
+            self._temp_dir_obj: tempfile.TemporaryDirectory[str] | None = (
+                tempfile.TemporaryDirectory()
+            )
             self.root_path = Path(self._temp_dir_obj.name)
         else:
             self._temp_dir_obj = None
@@ -130,16 +164,15 @@ class GameSessionSimulator:
 
     def _flush_telemetry(self) -> None:
         """Writes current telemetry to the Bridge status JSON file."""
-        payload = {
-            "timestamp": time.time(),
-            "zone": self.current_zone,
-            "in_combat": self.in_combat,
-            "enemy_name": self.current_enemy,
-            "enemies": self.current_enemies,
-            "tower_trial": self.current_tower_trial,
-            "checkpoint": self.current_checkpoint,
-            "floor": self.current_floor,
-        }
+        payload = create_telemetry_payload(
+            zone=self.current_zone,
+            in_combat=self.in_combat,
+            enemy_name=self.current_enemy,
+            enemies=self.current_enemies,
+            tower_trial=self.current_tower_trial,
+            checkpoint=self.current_checkpoint,
+            floor=self.current_floor,
+        )
         self.bridge_path.write_text(json.dumps(payload), encoding="utf-8")
 
     def create_detector(self) -> GameDetector:

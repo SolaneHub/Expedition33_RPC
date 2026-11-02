@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from tests.harness.game_session import create_telemetry_payload
+
 
 def get_default_telemetry_path() -> Path:
     """Resolves default telemetry file path in Windows temp directory."""
@@ -29,26 +31,18 @@ def write_telemetry(
     floor: int | None = None,
     checkpoint: str = "Entrance",
     enemies: list[str] | None = None,
+    tower_trial: Any | None = None,
 ) -> dict[str, Any]:
     """Atomically writes telemetry payload matching UE4SS Lua bridge IPC schema."""
-    resolved_enemies: list[str] = (
-        enemies
-        if (enemies is not None and in_combat)
-        else (
-            [e.strip() for e in enemy_name.split(",") if e.strip()]
-            if (enemy_name and in_combat)
-            else []
-        )
+    payload = create_telemetry_payload(
+        zone=zone,
+        in_combat=in_combat,
+        enemy_name=enemy_name,
+        enemies=enemies,
+        tower_trial=tower_trial,
+        checkpoint=checkpoint,
+        floor=floor,
     )
-    payload: dict[str, Any] = {
-        "timestamp": time.time(),
-        "zone": zone,
-        "in_combat": in_combat,
-        "enemy_name": enemy_name if in_combat else "",
-        "enemies": resolved_enemies,
-        "floor": floor,
-        "checkpoint": checkpoint,
-    }
 
     file_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = file_path.with_name(f"{file_path.name}.tmp")
