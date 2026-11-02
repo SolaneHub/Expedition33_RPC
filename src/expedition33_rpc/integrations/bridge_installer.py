@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
-import sys
 import zipfile
 from collections.abc import Iterable
 from pathlib import Path
@@ -99,25 +98,6 @@ def find_game_win64_directory(
             except Exception:
                 pass
 
-    # Add standard root drives as fallback
-    drives: list[Path] = []
-    try:
-        for part in psutil.disk_partitions():
-            mount = part.mountpoint
-            if mount:
-                p = Path(mount)
-                if p not in drives:
-                    drives.append(p)
-    except Exception:
-        pass
-    if not drives:
-        drives = [Path("C:\\")] if (sys.platform == "win32" or os.name == "nt") else [Path("/")]
-
-    for drive in drives:
-        libraries.append(str(drive / "SteamLibrary"))
-        libraries.append(str(drive / "Program Files (x86)" / "Steam"))
-        libraries.append(str(drive / "Program Files" / "Steam"))
-
     checked_dirs = set()
     for lib in libraries:
         if not lib or lib in checked_dirs:
@@ -140,74 +120,6 @@ def find_game_win64_directory(
                         return win64_candidate
             except OSError:
                 pass
-
-    # 3. Check Xbox PC Game Pass and Epic Games standard installation directories
-    for drive in drives:
-        platform_candidates = [
-            str(
-                drive
-                / "XboxGames"
-                / "Clair Obscur Expedition 33"
-                / "Content"
-                / "Sandfall"
-                / "Binaries"
-                / "WinGDK"
-            ),
-            str(
-                drive
-                / "XboxGames"
-                / "Clair Obscur Expedition 33"
-                / "Content"
-                / "Sandfall"
-                / "Binaries"
-                / "Win64"
-            ),
-            str(
-                drive
-                / "XboxGames"
-                / "Expedition 33"
-                / "Content"
-                / "Sandfall"
-                / "Binaries"
-                / "WinGDK"
-            ),
-            str(
-                drive
-                / "XboxGames"
-                / "Expedition 33"
-                / "Content"
-                / "Sandfall"
-                / "Binaries"
-                / "Win64"
-            ),
-            str(
-                drive
-                / "Program Files"
-                / "Epic Games"
-                / "Expedition 33"
-                / "Sandfall"
-                / "Binaries"
-                / "Win64"
-            ),
-            str(
-                drive
-                / "Program Files (x86)"
-                / "Epic Games"
-                / "Expedition 33"
-                / "Sandfall"
-                / "Binaries"
-                / "Win64"
-            ),
-            str(drive / "Epic Games" / "Expedition 33" / "Sandfall" / "Binaries" / "Win64"),
-        ]
-        for candidate in platform_candidates:
-            if os.path.isdir(candidate):
-                try:
-                    for entry in os.listdir(candidate):
-                        if entry.lower() in target_names:
-                            return candidate
-                except OSError:
-                    pass
 
     return None
 
