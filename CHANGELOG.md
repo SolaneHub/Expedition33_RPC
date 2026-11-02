@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.8] - 2026-11-02
+
+### Architecture & Platform Hardening
+- **Non-Blocking Pipe Polling (`core.platform`, `integrations.discord_rpc`)**:
+  - Centralized Win32 named pipe readiness inspection (`PeekNamedPipe`) into a reusable, cross-platform functional primitive (`peek_named_pipe_ready`).
+  - Completely decoupled low-level ctypes and msvcrt calls from the Discord IPC transport loop, enabling seamless mocking and immediate pass-through in non-Windows environments.
+- **Save Reader Protocol Decoupling (`detection.detector`, `detection.save_reader`)**:
+  - Introduced `SaveReaderProtocol` to formalize the boundary between game telemetry detection and save file parsing.
+  - Enabled pure dependency injection in `GameDetector`, allowing unit tests to exercise detector states without spawning filesystem watchers or save parsers.
+- **De-bloated Bridge Installer Directory Resolution (`integrations.bridge_installer`)**:
+  - Eliminated slow, exhaustive disk partition scans (`psutil.disk_partitions()`) and redundant drive search loops.
+  - Streamlined candidate directory discovery directly through known Steam library manifests and registry entries, cutting startup latency and preventing disk spin-ups.
+
+### Quality Assurance & SSOT Tooling
+- **Static Catalog & Endless Tower Validator (`tools/verify_game_data.py`, `tests/ci`)**:
+  - Created an autonomous SSOT validator ensuring 100% presentation key symmetry across all 20 supported languages and validating the strict schema of all 33 Endless Tower stages.
+  - Integrated static catalog validation directly into the CI test suite.
+- **Unified Test Harness (`tests/harness`)**:
+  - Introduced `FakeProcess` test double implementing both `ProcessLike` and `subprocess.Popen` protocols with line-buffered stream simulation.
+  - Extracted standardized `create_telemetry_payload` factory shared across simulation tools and session harnesses.
+  - Re-architected process lifecycle tests (`tests/e2e/test_process_lifecycle.py`) to execute deterministically across any host operating system without `@pytest.mark.skipif`.
+- **Wire Protocol UTF-8 Boundary Tests (`tests/ui`)**:
+  - Consolidated UI test suites into `test_presentation_and_ui.py`.
+  - Added strict boundary assertions verifying that 128-byte Discord field truncations never slice multi-byte UTF-8 sequences (3-byte Chinese, 2-byte Cyrillic, 4-byte emojis).
+
 ## [v2.0.7] - 2026-10-19
 
 ### Fixed & Hardened
