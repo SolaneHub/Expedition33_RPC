@@ -13,6 +13,7 @@ import ctypes
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -243,7 +244,7 @@ def read_file_shared_text(path: str | Path) -> str:
                 _kernel32.CloseHandle(handle)
                 raise
 
-            # with open gestisce closefd=True alla chiusura o in caso di eccezione
+            # with open handles closefd=True on exit or upon exception
             with open(fd, encoding="utf-8", closefd=True) as f:
                 return f.read()
         except Exception:
@@ -254,9 +255,64 @@ def read_file_shared_text(path: str | Path) -> str:
         return f.read()
 
 
+def peek_named_pipe_ready(pipe_or_fd: Any, timeout: float = 0.0) -> bool:
+    """Checks whether bytes are available to read from a Win32 named pipe without blocking.
+
+    On POSIX or non-Windows platforms, returns True immediately (sockets/files handled via standard I/O).
+    On Windows:
+    - Resolves the underlying Win32 HANDLE from an int file descriptor, an object with fileno(),
+      or an already raw handle integer.
+    - If no valid handle can be resolved (e.g. non-file objects / custom mocks), returns True immediately.
+    - Polls PeekNamedPipe until data is available, the pipe is broken/closed (ConnectionError),
+      or the timeout expires (False).
+    """
+    if sys.platform != "win32":
+        return True
+
+    handle: Any = None
+    if isinstance(pipe_or_fd, int):
+        if _msvcrt is not None:
+            try:
+                handle = _msvcrt.get_osfhandle(pipe_or_fd)
+            except (AttributeError, OSError, ValueError):
+                handle = pipe_or_fd
+        else:
+            handle = pipe_or_fd
+    else:
+        fileno_fn = getattr(pipe_or_fd, "fileno", None)
+        if callable(fileno_fn):
+            try:
+                fd = fileno_fn()
+                if isinstance(fd, int) and _msvcrt is not None:
+                    handle = _msvcrt.get_osfhandle(fd)
+            except (AttributeError, OSError, ValueError):
+                pass
+
+    if handle is None or handle in (_INVALID_HANDLE_VALUE, -1, 0, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
+        return True
+
+    peek_fn = getattr(getattr(ctypes, "windll", None), "kernel32", None)
+    if peek_fn is None or not hasattr(peek_fn, "PeekNamedPipe"):
+        return True
+
+    avail = ctypes.c_ulong(0)
+    deadline = time.monotonic() + max(0.0, timeout)
+
+    while True:
+        res = peek_fn.PeekNamedPipe(handle, None, 0, None, ctypes.byref(avail), None)
+        if res == 0:
+            raise ConnectionError("Named pipe broken or closed")
+        if avail.value > 0:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+
+
 __all__ = [
     "acquire_posix_file_lock",
     "is_already_running",
+    "peek_named_pipe_ready",
     "read_file_shared_text",
     "release_posix_file_lock",
     "release_single_instance_lock",

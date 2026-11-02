@@ -7,7 +7,6 @@ and Unix domain sockets without third-party dependencies or asynchronous event l
 from __future__ import annotations
 
 import contextlib
-import ctypes
 import json
 import os
 import socket
@@ -19,13 +18,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any, BinaryIO, Protocol
 
+from expedition33_rpc.core import platform
 from expedition33_rpc.core.presence import PresencePayload
-
-msvcrt: Any = None
-if sys.platform == "win32":
-    import msvcrt
-else:
-    msvcrt = None
 
 EMBEDDED_CLIENT_ID = "1552405358503272468"
 
@@ -131,30 +125,9 @@ class DiscordIPCClient:
         deadline = time.monotonic() + self.timeout
         while len(buf) < n:
             remaining = n - len(buf)
-            if sys.platform == "win32" and msvcrt is not None:
-                fileno_fn = getattr(self._pipe, "fileno", None)
-                if callable(fileno_fn):
-                    handle = None
-                    try:
-                        fd = fileno_fn()
-                        if isinstance(fd, int):
-                            handle = msvcrt.get_osfhandle(fd)
-                    except (AttributeError, OSError, ValueError):
-                        pass
-
-                    if handle is not None and handle != -1:
-                        avail = ctypes.c_ulong(0)
-                        while time.monotonic() < deadline:
-                            res = ctypes.windll.kernel32.PeekNamedPipe(
-                                handle, None, 0, None, ctypes.byref(avail), None
-                            )
-                            if res == 0:
-                                raise ConnectionError("Named pipe broken or closed")
-                            if avail.value > 0:
-                                break
-                            time.sleep(0.01)
-                        else:
-                            raise TimeoutError(f"Discord IPC read timed out after {self.timeout}s")
+            remaining_time = max(0.0, deadline - time.monotonic())
+            if not platform.peek_named_pipe_ready(self._pipe, timeout=remaining_time):
+                raise TimeoutError(f"Discord IPC read timed out after {self.timeout}s")
 
             chunk = self._pipe.read(remaining)
             if not chunk:

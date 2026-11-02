@@ -7,7 +7,9 @@ import json
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -349,6 +351,67 @@ def test_posix_file_lock_lifecycle_and_cleanup(tmp_path: Path) -> None:
                 assert mock_file.close.called
     finally:
         release_single_instance_lock()
+
+
+@pytest.mark.unit
+def test_peek_named_pipe_ready_cross_platform_and_handles() -> None:
+    """Verifies peek_named_pipe_ready behaviour across platforms, mocks, and invalid handles."""
+    from expedition33_rpc.core.platform import peek_named_pipe_ready
+
+    # 1. Non-Windows fallback returns True immediately
+    with patch("sys.platform", "linux"):
+        assert peek_named_pipe_ready(123) is True
+        assert peek_named_pipe_ready(None) is True
+
+    # 2. On Windows, invalid/None/mock objects without valid handles return True immediately
+    class MockStream:
+        def fileno(self) -> int:
+            raise OSError("Not a real fd")
+
+    assert peek_named_pipe_ready(None) is True
+    assert peek_named_pipe_ready(MockStream()) is True
+    assert peek_named_pipe_ready(-1) is True
+
+    # 3. Handle closing or broken pipe triggers ConnectionError
+    mock_kernel32 = MagicMock()
+    mock_kernel32.PeekNamedPipe.return_value = 0  # Win32 failure (e.g. pipe broken/closed)
+    mock_windll = MagicMock()
+    mock_windll.kernel32 = mock_kernel32
+
+    with (
+        patch("sys.platform", "win32"),
+        patch("ctypes.windll", mock_windll, create=True),
+        pytest.raises(ConnectionError, match="Named pipe broken or closed"),
+    ):
+        peek_named_pipe_ready(999)
+
+    # 4. Handle with bytes available returns True immediately
+    def mock_peek_success(
+        _h: Any, _buf: Any, _sz: Any, _read: Any, avail_ref: Any, _left: Any
+    ) -> int:
+        avail_ref._obj.value = 42
+        return 1
+
+    mock_kernel32.PeekNamedPipe.side_effect = mock_peek_success
+    with (
+        patch("sys.platform", "win32"),
+        patch("ctypes.windll", mock_windll, create=True),
+    ):
+        assert peek_named_pipe_ready(999, timeout=0.1) is True
+
+    # 5. Handle with 0 bytes available returns False on timeout
+    def mock_peek_zero(_h: Any, _buf: Any, _sz: Any, _read: Any, avail_ref: Any, _left: Any) -> int:
+        avail_ref._obj.value = 0
+        return 1
+
+    mock_kernel32.PeekNamedPipe.side_effect = mock_peek_zero
+    with (
+        patch("sys.platform", "win32"),
+        patch("ctypes.windll", mock_windll, create=True),
+    ):
+        start = time.perf_counter()
+        assert peek_named_pipe_ready(999, timeout=0.03) is False
+        assert time.perf_counter() - start >= 0.02
 
 
 @pytest.mark.unit
