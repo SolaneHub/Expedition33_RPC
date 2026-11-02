@@ -31,8 +31,9 @@ The repository follows a clean, modular structure under `src/expedition33_rpc/`:
 ```text
 src/expedition33_rpc/
 ├── core/                   # Application lifecycle and core utilities
-│   ├── app.py              # Single instance mutex/file lock and app entrypoint
+│   ├── app.py              # Application entrypoint and lifecycle coordinator
 │   ├── orchestrator.py     # Headless AppOrchestrator coordinator with facade and pub/sub
+│   ├── platform.py         # Centralized Win32 & POSIX OS abstraction (mutex, flock, shared file reads, winreg)
 │   ├── settings.py         # Persistent JSON configuration with legacy registry migration
 │   ├── startup.py          # Windows autostart (Run registry key) management
 │   └── resources.py        # Bundled asset path resolution (PyInstaller _MEIPASS)
@@ -62,6 +63,12 @@ src/expedition33_rpc/
 4. **Mirrored Test Suite Architecture (`tests/`)**:
    - Follows clean layering mirroring `src/` (`core/`, `detection/`, `integrations/`, `ui/`, `e2e/`, `harness/`).
    - Shared mock utilities and binary fixtures are consolidated in `tests/harness/`.
+5. **Centralized Platform Abstraction (`core/platform.py`)**:
+   - Consolidates low-level operating system operations into standalone, stateless functional primitives:
+     - Single-instance lifecycle: `is_already_running` and `release_single_instance_lock` (Win32 Named Mutex on Windows, POSIX advisory flock on Linux/macOS).
+     - Concurrent I/O: `read_file_shared_text` using Win32 `CreateFileW` with `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE` (flags `0x7`) to prevent NTFS file lock collisions during Lua bridge telemetry churn.
+     - Registry access: `winreg_read_value`, `winreg_set_value`, and `winreg_delete_value` with automatic POSIX fallbacks and mock injection for deterministic testing.
+
 
 ---
 

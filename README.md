@@ -54,7 +54,7 @@
 
 - **Continuous Autonomous Detection**: Runs quietly in the system tray and establishes a Discord Rich Presence session the moment the game begins running (`SandFall-Win64-Shipping.exe` or `SandFall-WinGDK-Shipping.exe`), cleanly disconnecting when the game closes.
 - **Decoupled Presence Engine**: Clean architectural separation between UI, presence formatting, and Discord IPC via immutable `PresencePayload` Data Transfer Objects (DTO), enabling headless presence management and deterministic testing.
-- **Native Platform Abstraction Layer (`core.platform`)**: Robust cross-platform primitives (`PlatformMutex`, `FileLock`, `PlatformRegistry`) providing native Win32 named mutexes on Windows and POSIX advisory flock on Unix, eliminating low-level ctypes and winreg calls from business logic.
+- **Native Platform Abstraction Layer (`core.platform`)**: Robust cross-platform functional primitives (`is_already_running`, `release_single_instance_lock`, `read_file_shared_text`, `winreg_read_value`, `winreg_set_value`, `winreg_delete_value`) providing native Win32 named mutexes on Windows, POSIX advisory flock on Unix, non-blocking shared file reads with NTFS deletion resilience, and safe Windows registry access with graceful POSIX fallbacks, eliminating low-level ctypes and winreg calls from business logic.
 - **Multi-Target Process Unification**: First-class simultaneous support for both **Steam** (`SandFall-Win64-Shipping.exe`) and **PC Game Pass / Microsoft Store** (`SandFall-WinGDK-Shipping.exe`) game editions with dynamic process resolution.
 - **Universal 20-Language Localization**: Full native presence support across all 20 officially supported game languages extracted directly from Unreal Engine `.locres` binary catalogs: English (`en`), Italian (`it`), French (`fr`), German (`de`), Spanish (`es`), Latin American Spanish (`es-419`), Japanese (`ja`), Korean (`ko`), Polish (`pl`), Brazilian Portuguese (`pt-BR`), Russian (`ru`), Simplified Chinese (`zh-Hans`), Traditional Chinese (`zh-Hant`), and more.
 - **100% Checkpoint & Trial Symmetry**: All **765 official checkpoint tags** and all **33 Endless Tower stages & trials** are fully mapped with localized titles across all 20 languages.
@@ -132,7 +132,7 @@ src/expedition33_rpc/
 ├── core/                     # Application lifecycle, platform abstraction & presence
 │   ├── app.py                # Single-instance application entrypoint
 │   ├── orchestrator.py       # Headless AppOrchestrator lifecycle coordinator
-│   ├── platform.py           # Native OS abstraction (PlatformMutex, FileLock, PlatformRegistry)
+│   ├── platform.py           # Centralized Win32 & POSIX OS abstraction (mutex, flock, shared file reads, winreg)
 │   ├── presence.py           # Decoupled PresencePayload DTO
 │   ├── settings.py           # Persistent configuration management
 │   ├── startup.py            # Windows autostart management via platform abstraction
@@ -160,6 +160,23 @@ src/expedition33_rpc/
     ├── icon.ico              # Windows executable icon
     └── icon.png              # System tray & notification icon
 ```
+
+### Architecture & Platform Abstraction Layer (`core/platform.py`)
+
+Low-level OS operations are centralized in `expedition33_rpc.core.platform` using lightweight, tested functional primitives rather than heavyweight class wrappers:
+
+- **Single-Instance Synchronization (`is_already_running`, `release_single_instance_lock`)**:
+  - **Windows**: Enforces single-instance execution via a Win32 Named Mutex (`CreateMutexW`). Reliably checks `GetLastError()` for `ERROR_ALREADY_EXISTS` (183) and `ERROR_ACCESS_DENIED` (5), automatically releasing the mutex handle on app exit via `release_single_instance_lock`.
+  - **POSIX**: Enforces single-instance execution via non-blocking advisory file locking (`fcntl.flock` with `LOCK_EX | LOCK_NB`), automatically releasing lock files across Linux, macOS, and SteamOS/Proton.
+- **Shared Non-Blocking File Reads (`read_file_shared_text`)**:
+  - **Windows**: Reads active telemetry files using Win32 `CreateFileW` configured with `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE` (flags `0x1 | 0x2 | 0x4 = 0x7`). This eliminates NTFS file sharing collisions while the UE4SS Lua bridge concurrently writes or churns telemetry files.
+  - **POSIX**: Gracefully falls back to standard file reads with native POSIX shared read and unlinking semantics.
+- **Windows Registry Abstraction (`winreg_read_value`, `winreg_set_value`, `winreg_delete_value`)**:
+  - Safely reads, writes, and deletes values in the Windows Registry (e.g. `Software\Microsoft\Windows\CurrentVersion\Run` for startup management and Valve Steam installation paths).
+  - Automatically falls back to safe no-ops (`None` / `False`) on POSIX environments without requiring platform guards in caller business logic, with full support for injected `winreg_module` test doubles.
+- **Non-Blocking Pipe Polling (`peek_named_pipe_ready`)**:
+  - Inspects Win32 named pipes (`kernel32.PeekNamedPipe`) without blocking Discord IPC asynchronous event loops, with immediate pass-through on non-Windows platforms.
+
 
 ---
 
