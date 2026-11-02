@@ -57,6 +57,7 @@ exclude = [
     "dist",
     ".venv",
     ".ruff_cache",
+    ".agents",
 ]
 
 [tool.ruff.lint]
