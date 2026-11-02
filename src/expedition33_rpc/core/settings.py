@@ -45,11 +45,6 @@ class SettingsService:
         self.load()
 
     @property
-    def target_path(self) -> Path:
-        """Alias for settings file path."""
-        return self.path
-
-    @property
     def anti_spoiler(self) -> bool:
         """Checks if anti-spoiler mode is enabled."""
         return self.settings.anti_spoiler

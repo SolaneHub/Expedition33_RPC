@@ -25,7 +25,6 @@ def test_settings_service_default_path() -> None:
     service = SettingsService()
     expected_path = get_default_settings_dir() / "settings.json"
     assert service.path == expected_path
-    assert service.target_path == expected_path
     assert service.anti_spoiler is False
 
 
