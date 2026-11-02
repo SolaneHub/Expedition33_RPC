@@ -2,7 +2,14 @@ from pathlib import Path
 
 import pytest
 
+from expedition33_rpc.detection.detector import SaveReaderProtocol
 from expedition33_rpc.detection.save_reader import SaveFileReader
+
+
+@pytest.mark.unit
+def test_save_file_reader_implements_protocol() -> None:
+    reader = SaveFileReader()
+    assert isinstance(reader, SaveReaderProtocol)
 
 
 @pytest.mark.unit

@@ -13,6 +13,7 @@ from typing import Any, Protocol, runtime_checkable
 from expedition33_rpc.core import startup
 from expedition33_rpc.core.settings import SettingsService
 from expedition33_rpc.detection.detector import GameDetector, GameState
+from expedition33_rpc.detection.save_reader import SaveFileReader
 from expedition33_rpc.integrations import bridge_installer as bridge_installer_module
 from expedition33_rpc.integrations.discord_rpc import DiscordRPCManager
 from expedition33_rpc.integrations.updater import AppUpdater, UpdateInfo, UpdateState
@@ -77,7 +78,9 @@ class AppOrchestrator:
         self.settings_service = (
             settings_service if settings_service is not None else SettingsService()
         )
-        self.detector = detector if detector is not None else GameDetector()
+        self.detector = (
+            detector if detector is not None else GameDetector(save_reader=SaveFileReader())
+        )
         self.time_provider = time_provider if time_provider is not None else time.monotonic
         self.updater = (
             updater

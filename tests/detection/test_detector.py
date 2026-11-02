@@ -15,53 +15,16 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.harness import FakeProcess
 
 from expedition33_rpc.detection.detector import (
     BridgeStateProvider,
     GameDetector,
     GameState,
+    SaveReaderProtocol,
     _read_file_shared_text,
 )
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
-
-# ---------------------------------------------------------------------------
-# Test Doubles
-# ---------------------------------------------------------------------------
-
-
-class FakeProcess:
-    """Mock process implementing ProcessLike static protocol for deterministic unit tests."""
-
-    def __init__(
-        self,
-        pid: int,
-        name: str,
-        is_running: bool = True,
-        create_time: float = 100.0,
-        exe_path: str | None = None,
-    ):
-        self._pid = pid
-        self._name = name
-        self._is_running = is_running
-        self._create_time = create_time
-        self._exe_path = exe_path
-
-    @property
-    def pid(self) -> int:
-        return self._pid
-
-    def name(self) -> str:
-        return self._name
-
-    def exe(self) -> str | None:
-        return self._exe_path
-
-    def is_running(self) -> bool:
-        return self._is_running
-
-    def create_time(self) -> float:
-        return self._create_time
-
 
 # ---------------------------------------------------------------------------
 # ZoneTimerTracker State Machine Tests
@@ -735,3 +698,86 @@ def test_get_game_state_propagates_now_timestamp() -> None:
     mock_timer_tracker.update.assert_called_once()
     _, kwargs = mock_timer_tracker.update.call_args
     assert kwargs.get("now") == fixed_now
+
+
+@pytest.mark.unit
+def test_save_reader_protocol_runtime_checkable() -> None:
+    class DummySaveReader:
+        def resolve_checkpoint_for_zone(self, raw_zone: str, zone_display: str = "") -> str:
+            del raw_zone, zone_display
+            return "Checkpoint_1"
+
+        def reset(self) -> None:
+            pass
+
+    dummy = DummySaveReader()
+    assert isinstance(dummy, SaveReaderProtocol)
+
+
+@pytest.mark.unit
+def test_detector_save_reader_defaults_to_none() -> None:
+    detector = GameDetector()
+    assert detector.save_reader is None
+
+
+@pytest.mark.unit
+def test_detector_fallback_to_save_reader_when_provided() -> None:
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    mock_save_reader = MagicMock(spec=SaveReaderProtocol)
+    mock_save_reader.resolve_checkpoint_for_zone.return_value = "SpawnPoint_VersosDraft"
+
+    bridge_provider = MagicMock(spec=BridgeStateProvider)
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_Side_VersosDraft",
+        "in_combat": False,
+        "enemy_name": "",
+        "checkpoint": "",
+        "timestamp": 1000.0,
+    }
+
+    detector = GameDetector(
+        bridge_provider=bridge_provider,
+        process_scanner=lambda: [mock_proc],
+        save_reader=mock_save_reader,
+    )
+
+    state = detector.get_game_state(now=1000.0)
+    assert state.is_running is True
+    assert state.raw_checkpoint == "SpawnPoint_VersosDraft"
+    mock_save_reader.resolve_checkpoint_for_zone.assert_called_once_with("Level_Side_VersosDraft")
+
+
+@pytest.mark.unit
+def test_detector_no_save_reader_fallback_when_none() -> None:
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    bridge_provider = MagicMock(spec=BridgeStateProvider)
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_Side_VersosDraft",
+        "in_combat": False,
+        "enemy_name": "",
+        "checkpoint": "",
+        "timestamp": 1000.0,
+    }
+
+    detector = GameDetector(
+        bridge_provider=bridge_provider,
+        process_scanner=lambda: [mock_proc],
+        save_reader=None,
+    )
+
+    state = detector.get_game_state(now=1000.0)
+    assert state.is_running is True
+    assert state.raw_checkpoint == ""
+
+
+@pytest.mark.unit
+def test_detector_resets_save_reader_when_game_stops() -> None:
+    mock_save_reader = MagicMock(spec=SaveReaderProtocol)
+    detector = GameDetector(
+        process_scanner=lambda: [],
+        save_reader=mock_save_reader,
+    )
+
+    state = detector.get_game_state()
+    assert state.is_running is False
+    mock_save_reader.reset.assert_called_once()

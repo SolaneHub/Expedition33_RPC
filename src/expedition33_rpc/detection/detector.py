@@ -33,6 +33,15 @@ type RawGameData = dict[str, Any]
 
 
 @runtime_checkable
+class SaveReaderProtocol(Protocol):
+    """Protocol for optional save file reader implementations."""
+
+    def resolve_checkpoint_for_zone(self, raw_zone: str, zone_display: str = "") -> str: ...
+
+    def reset(self) -> None: ...
+
+
+@runtime_checkable
 class ProcessLike(Protocol):
     """Static protocol decoupling process enumeration from concrete psutil instances."""
 
@@ -329,7 +338,7 @@ class GameDetector:
         game_user_settings_path: Path | str | None = None,
         idle_poll_interval: float = 5.0,
         time_provider: Callable[[], float] | None = None,
-        save_reader: SaveFileReader | None = None,
+        save_reader: SaveReaderProtocol | None = None,
     ):
         self.cached_pid: int | None = None
         self.game_exe_path: str | None = None
@@ -367,9 +376,7 @@ class GameDetector:
         self.bridge_provider: BridgeProviderProtocol | None = (
             BridgeStateProvider() if bridge_provider is _DEFAULT_BRIDGE else bridge_provider
         )
-        self.save_reader: SaveFileReader | None = (
-            save_reader if save_reader is not None else SaveFileReader()
-        )
+        self.save_reader: SaveReaderProtocol | None = save_reader
 
     @property
     def exe_path(self) -> str | None:
@@ -638,6 +645,7 @@ class GameDetector:
 __all__ = [
     "ProcessLike",
     "BridgeProviderProtocol",
+    "SaveReaderProtocol",
     "GameProcessInfo",
     "GameState",
     "BridgeStateProvider",
