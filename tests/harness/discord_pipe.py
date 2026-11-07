@@ -4,6 +4,7 @@ from typing import Any
 from expedition33_rpc.integrations.discord_rpc import (
     OP_FRAME,
     OP_HANDSHAKE,
+    VALID_OPCODES,
     DiscordFrameCodec,
 )
 
@@ -31,14 +32,40 @@ class DiscordPipeSimulator:
         with self._lock:
             self.incoming_bytes.extend(DiscordFrameCodec.encode(op, data))
 
+    def _validate_frame_header(self, header_bytes: bytes) -> tuple[int, int]:
+        """Validates the 8-byte little-endian binary header (<II: Opcode, Length).
+
+        Raises ValueError if opcode or length violate the Discord binary protocol specification.
+        """
+        op, length = DiscordFrameCodec.decode_header(header_bytes)
+        if op not in VALID_OPCODES:
+            raise ValueError(
+                f"Invalid Discord IPC opcode: {op} (expected one of {sorted(VALID_OPCODES)})"
+            )
+        if length < 0:
+            raise ValueError(f"Negative frame payload length: {length}")
+        return op, length
+
     def write(self, data: bytes) -> int:
-        """Called by the client when sending bytes into the pipe."""
+        """Called by the client when sending bytes into the pipe. Validates binary frame headers."""
         with self._lock:
+            # Validate complete frames present in data
+            idx = 0
+            while idx + DiscordFrameCodec.HEADER_SIZE <= len(data):
+                _op, length = self._validate_frame_header(
+                    data[idx : idx + DiscordFrameCodec.HEADER_SIZE]
+                )
+                total_len = DiscordFrameCodec.HEADER_SIZE + length
+                if idx + total_len <= len(data):
+                    idx += total_len
+                else:
+                    break
+
             self.outgoing_bytes.extend(data)
             if self.auto_respond_set_activity:
                 is_handshake = False
                 if len(data) >= DiscordFrameCodec.HEADER_SIZE:
-                    op, _ = DiscordFrameCodec.decode_header(data[: DiscordFrameCodec.HEADER_SIZE])
+                    op, _ = self._validate_frame_header(data[: DiscordFrameCodec.HEADER_SIZE])
                     if op == OP_HANDSHAKE:
                         is_handshake = True
                 if is_handshake:
@@ -73,7 +100,7 @@ class DiscordPipeSimulator:
         with self._lock:
             if len(self.outgoing_bytes) < DiscordFrameCodec.HEADER_SIZE:
                 return None
-            _out_op, out_len = DiscordFrameCodec.decode_header(
+            _out_op, out_len = self._validate_frame_header(
                 bytes(self.outgoing_bytes[: DiscordFrameCodec.HEADER_SIZE])
             )
             total_frame_len = DiscordFrameCodec.HEADER_SIZE + out_len
@@ -91,7 +118,7 @@ class DiscordPipeSimulator:
             idx = 0
             data = bytes(self.outgoing_bytes)
             while idx + DiscordFrameCodec.HEADER_SIZE <= len(data):
-                _op, length = DiscordFrameCodec.decode_header(
+                _op, length = self._validate_frame_header(
                     data[idx : idx + DiscordFrameCodec.HEADER_SIZE]
                 )
                 total_frame_len = DiscordFrameCodec.HEADER_SIZE + length

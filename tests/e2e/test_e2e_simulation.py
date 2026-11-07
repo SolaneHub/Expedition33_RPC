@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import time
 from pathlib import Path
 from typing import Any
@@ -18,8 +19,10 @@ from tests.harness import (
 from expedition33_rpc.core.orchestrator import AppOrchestrator
 from expedition33_rpc.core.settings import SettingsService
 from expedition33_rpc.integrations.discord_rpc import (
+    OP_CLOSE,
     OP_FRAME,
     OP_HANDSHAKE,
+    DiscordFrameCodec,
     DiscordIPCClient,
     DiscordRPCManager,
 )
@@ -522,3 +525,231 @@ def test_async_concurrent_orchestrator_e2e_simulation(tmp_path: Path) -> None:
             if orchestrator.worker_thread is not None:
                 assert not orchestrator.worker_thread.is_alive()
             assert not rpc_manager.is_connected
+
+
+# ---------------------------------------------------------------------------
+# Requirement R3: Enhanced Dry-Run Lifecycle & Binary Wire Framing Integration
+# ---------------------------------------------------------------------------
+
+
+def _verify_binary_frames(
+    pipe_sim: DiscordPipeSimulator,
+) -> list[tuple[int, dict[str, Any]]]:
+    """Drains pipe and validates exact binary <II header layout and JSON body."""
+    raw_bytes = pipe_sim.written_data
+    frames = pipe_sim.drain_all_frames()
+    assert len(raw_bytes) >= DiscordFrameCodec.HEADER_SIZE * len(frames)
+
+    offset = 0
+    for op, body in frames:
+        header_bytes = raw_bytes[offset : offset + DiscordFrameCodec.HEADER_SIZE]
+        unpacked_op, unpacked_len = struct.unpack("<II", header_bytes)
+        assert unpacked_op == op
+        assert unpacked_op in (OP_HANDSHAKE, OP_FRAME, OP_CLOSE)
+        offset += DiscordFrameCodec.HEADER_SIZE
+
+        body_bytes = raw_bytes[offset : offset + unpacked_len]
+        assert len(body_bytes) == unpacked_len
+        decoded_json = json.loads(body_bytes.decode("utf-8"))
+        assert decoded_json == body
+        offset += unpacked_len
+
+        # Schema constraint checks (Discord 128-byte string length limit)
+        if op == OP_FRAME and body.get("cmd") == "SET_ACTIVITY":
+            act = body.get("args", {}).get("activity")
+            if act is not None:
+                if "details" in act and act["details"] is not None:
+                    assert len(act["details"].encode("utf-8")) <= 128
+                if "state" in act and act["state"] is not None:
+                    assert len(act["state"].encode("utf-8")) <= 128
+
+    assert offset == len(raw_bytes)
+    return frames
+
+
+def test_dry_run_full_lifecycle_with_binary_wire_frame_verification(
+    tmp_path: Path,
+) -> None:
+    """Verifies complete dry-run lifecycle: Launch -> Exploration -> Combat -> Tower
+
+    -> Discord Flapping -> Shutdown, strictly verifying binary <II wire frames.
+    """
+    settings_file = tmp_path / "dry_run_settings.json"
+    settings = SettingsService(custom_path=settings_file)
+
+    pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    ipc_client = DiscordIPCClient(client_id="1552405358503272468", transport=pipe)
+    rpc_manager = DiscordRPCManager(client=ipc_client)
+
+    with GameSessionSimulator(base_dir=tmp_path) as session:
+        orchestrator = AppOrchestrator(
+            detector=session.detector,
+            rpc_manager=rpc_manager,
+            settings_service=settings,
+            auto_install_bridge=False,
+            sync_startup=False,
+        )
+
+        # -------------------------------------------------------------------
+        # 1. Idle State (Game not launched)
+        # -------------------------------------------------------------------
+        state_idle = session.get_game_state()
+        assert state_idle.is_running is False
+        assert len(pipe.written_data) == 0
+
+        # -------------------------------------------------------------------
+        # 2. Game Launch & Process Detection
+        # -------------------------------------------------------------------
+        session.start_game(pid=8765)
+        state_launch = orchestrator.step_update()
+        assert state_launch is not None
+        assert state_launch.is_running is True
+        assert state_launch.process_pid == 8765
+
+        frames_launch = _verify_binary_frames(pipe)
+        assert len(frames_launch) == 2  # Handshake + initial presence
+        assert frames_launch[0][0] == OP_HANDSHAKE
+        assert frames_launch[0][1]["client_id"] == "1552405358503272468"
+        assert frames_launch[1][0] == OP_FRAME
+        assert frames_launch[1][1]["cmd"] == "SET_ACTIVITY"
+        assert frames_launch[1][1]["args"]["pid"] == 8765
+
+        # -------------------------------------------------------------------
+        # 3. Transition: Exploration with Checkpoint
+        # -------------------------------------------------------------------
+        session.enter_zone("Level_Main_OldLumiere", checkpoint="Level.SpawnPoint.Camp01")
+        state_explore = orchestrator.step_update()
+        assert state_explore is not None
+        assert state_explore.zone_name == "Old Lumière"
+        assert state_explore.in_combat is False
+
+        frames_explore = _verify_binary_frames(pipe)
+        assert len(frames_explore) == 1
+        explore_act = frames_explore[0][1]["args"]["activity"]
+        assert explore_act["details"] == "Exploring"
+        assert "Old Lumière" in explore_act["state"]
+
+        # Dirty-checking: repeated tick without changes sends NO new frames
+        orchestrator.step_update()
+        assert len(pipe.written_data) == 0
+
+        # -------------------------------------------------------------------
+        # 4. Transition: Combat with Boss
+        # -------------------------------------------------------------------
+        session.trigger_combat("Duollistes", checkpoint="Level.SpawnPoint.Camp01")
+        state_combat = orchestrator.step_update()
+        assert state_combat is not None
+        assert state_combat.in_combat is True
+        assert state_combat.enemy_name == "Duollistes"
+
+        frames_combat = _verify_binary_frames(pipe)
+        assert len(frames_combat) == 1
+        combat_act = frames_combat[0][1]["args"]["activity"]
+        assert combat_act["details"] == "Fighting: Duollistes"
+        assert "Old Lumière" in combat_act["state"]
+
+        # -------------------------------------------------------------------
+        # 5. Transition: Infinite Tower with Trial / Phase
+        # -------------------------------------------------------------------
+        session.enter_zone("Level_EndlessTower").trigger_combat(
+            "Alpha Gold Chevaliere (+2)",
+            tower_trial=[10, 2],
+            enemies=["Alpha Gold Chevaliere", "Alpha Steel Chevaliere", "Alpha Ceramic Chevaliere"],
+        )
+        state_tower = orchestrator.step_update()
+        assert state_tower is not None
+        assert state_tower.in_combat is True
+        assert state_tower.tower_stage_trial in ((10, 2), [10, 2])
+        assert state_tower.zone_name == "Endless Tower"
+
+        frames_tower = _verify_binary_frames(pipe)
+        assert len(frames_tower) == 1
+        tower_act = frames_tower[0][1]["args"]["activity"]
+        assert "Alpha Gold Chevaliere" in tower_act["details"]
+        assert "Endless Tower" in tower_act["state"]
+        assert "Stage 10, Trial 2" in tower_act["state"]
+
+        # -------------------------------------------------------------------
+        # 6. Discord Flapping: Disconnect & Reconnect
+        # -------------------------------------------------------------------
+        # Simulate pipe breakage mid-combat
+        ipc_client.close()
+        pipe.close()
+        assert rpc_manager.is_connected is False
+
+        # Step update during disconnect does not crash and preserves state
+        state_flap = orchestrator.step_update()
+        assert state_flap is not None
+        assert state_flap.in_combat is True
+
+        # Reconnect with fresh pipe simulator
+        new_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+        ipc_client._transport = new_pipe
+        rpc_manager.last_retry_time = 0.0  # Bypass backoff
+        rpc_manager.invalidate()
+
+        state_reconnected = orchestrator.step_update()
+        assert state_reconnected is not None
+        assert rpc_manager.is_connected is True
+
+        frames_reconnected = _verify_binary_frames(new_pipe)
+        assert len(frames_reconnected) == 2  # Handshake + SET_ACTIVITY
+        assert frames_reconnected[0][0] == OP_HANDSHAKE
+        assert frames_reconnected[1][0] == OP_FRAME
+        reconnected_act = frames_reconnected[1][1]["args"]["activity"]
+        assert "Endless Tower" in reconnected_act["state"]
+
+        # -------------------------------------------------------------------
+        # 7. Game Shutdown
+        # -------------------------------------------------------------------
+        session.stop_game()
+        state_stop = orchestrator.step_update()
+        assert state_stop is not None
+        assert state_stop.is_running is False
+
+        frames_stop = _verify_binary_frames(new_pipe)
+        assert len(frames_stop) == 1
+        assert frames_stop[0][0] == OP_FRAME
+        assert frames_stop[0][1]["args"]["activity"] is None
+
+        orchestrator.stop()
+
+
+def test_dry_run_infinite_tower_progression_binary_framing(tmp_path: Path) -> None:
+    """Verifies multi-trial progression in Infinite Tower and wire encoding integrity."""
+    pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    ipc_client = DiscordIPCClient(client_id="1552405358503272468", transport=pipe)
+    rpc_manager = DiscordRPCManager(client=ipc_client)
+
+    with GameSessionSimulator(base_dir=tmp_path) as session:
+        orchestrator = AppOrchestrator(
+            detector=session.detector,
+            rpc_manager=rpc_manager,
+            settings_service=SettingsService(custom_path=tmp_path / "settings_tower.json"),
+            auto_install_bridge=False,
+            sync_startup=False,
+        )
+
+        session.start_game(pid=7000).enter_zone("Level_EndlessTower")
+        orchestrator.step_update()
+        _verify_binary_frames(pipe)
+
+        trials = [
+            ([1, 1], "Trial 1 Mob", "Stage 1, Trial 1"),
+            ([1, 2], "Trial 2 Pack", "Stage 1, Trial 2"),
+            ([1, 3], "Trial 3 Elite", "Stage 1, Trial 3"),
+        ]
+
+        for trial_coord, enemy, expected_label in trials:
+            session.trigger_combat(enemy, tower_trial=trial_coord)
+            orchestrator.step_update()
+
+            frames = _verify_binary_frames(pipe)
+            assert len(frames) == 1
+            op, payload = frames[0]
+            assert op == OP_FRAME
+            act = payload["args"]["activity"]
+            assert expected_label in act["state"]
+            assert enemy in act["details"]
+
+        orchestrator.stop()

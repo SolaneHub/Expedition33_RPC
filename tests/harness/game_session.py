@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
-from unittest.mock import MagicMock
+
+from tests.harness.fake_process import FakeProcess
 
 from expedition33_rpc.detection.detector import (
     BridgeStateProvider,
@@ -15,6 +17,141 @@ from expedition33_rpc.detection.detector import (
     GameState,
 )
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
+
+
+@dataclass(frozen=True, slots=True)
+class StoryboardStep:
+    """Represents a single step in a timed telemetry storyboard playback scenario."""
+
+    duration: float
+    zone: str
+    in_combat: bool = False
+    enemy_name: str = ""
+    enemies: list[str] | None = None
+    floor: int | None = None
+    checkpoint: str = "Entrance"
+    tower_trial: Any | None = None
+    description: str = ""
+
+
+SCENARIOS: dict[str, list[StoryboardStep]] = {
+    "boss_fight": [
+        StoryboardStep(
+            duration=5.0,
+            zone="Level_Main_OldLumiere",
+            in_combat=False,
+            enemy_name="",
+            checkpoint="Entrance",
+            description="Exploration in Level_Main_OldLumiere",
+        ),
+        StoryboardStep(
+            duration=10.0,
+            zone="Level_Main_OldLumiere",
+            in_combat=True,
+            enemy_name="Duollistes",
+            enemies=["Duollistes"],
+            checkpoint="Entrance",
+            description="Boss encounter with Duollistes",
+        ),
+        StoryboardStep(
+            duration=5.0,
+            zone="Level_Main_OldLumiere",
+            in_combat=False,
+            enemy_name="",
+            checkpoint="Manor Gardens",
+            description="Victory and exploration at Manor Gardens",
+        ),
+    ],
+    "tower_climb": [
+        StoryboardStep(
+            duration=5.0,
+            zone="Level_EndlessTower",
+            in_combat=True,
+            enemy_name="Gault, Luster, Ramasseur",
+            enemies=["Gault", "Luster", "Ramasseur"],
+            floor=1,
+            tower_trial=(1, 1),
+            checkpoint="Stage 1, Trial 1",
+            description="Endless Tower - Stage 1, Trial 1",
+        ),
+        StoryboardStep(
+            duration=5.0,
+            zone="Level_EndlessTower",
+            in_combat=True,
+            enemy_name="Potier, Steel Chevaliere, Greatsword Cultist",
+            enemies=["Potier", "Steel Chevaliere", "Greatsword Cultist"],
+            floor=1,
+            tower_trial=(1, 2),
+            checkpoint="Stage 1, Trial 2",
+            description="Endless Tower - Stage 1, Trial 2",
+        ),
+        StoryboardStep(
+            duration=5.0,
+            zone="Level_EndlessTower",
+            in_combat=True,
+            enemy_name="Dualliste, Luster, Troubadour",
+            enemies=["Dualliste", "Luster", "Troubadour"],
+            floor=1,
+            tower_trial=(1, 3),
+            checkpoint="Stage 1, Trial 3",
+            description="Endless Tower - Stage 1, Trial 3",
+        ),
+    ],
+    "rare_boss": [
+        StoryboardStep(
+            duration=5.0,
+            zone="Level_Main_OldLumiere",
+            in_combat=False,
+            enemy_name="",
+            checkpoint="Manor Gardens",
+            description="Exploration near Manor Gardens",
+        ),
+        StoryboardStep(
+            duration=12.0,
+            zone="Level_Main_OldLumiere",
+            in_combat=True,
+            enemy_name="Simon the Divergent Star",
+            enemies=["Simon the Divergent Star"],
+            checkpoint="Manor Gardens",
+            description="Encounter with Super Boss Simon the Divergent Star",
+        ),
+        StoryboardStep(
+            duration=5.0,
+            zone="Level_Main_OldLumiere",
+            in_combat=False,
+            enemy_name="",
+            checkpoint="Sanctuary",
+            description="Victory over rare boss and rest at Sanctuary",
+        ),
+    ],
+    "multi_enemy": [
+        StoryboardStep(
+            duration=5.0,
+            zone="Level_Sirene_Main_V2",
+            in_combat=False,
+            enemy_name="",
+            checkpoint="Coast Entrance",
+            description="Sirene Coastal Exploration",
+        ),
+        StoryboardStep(
+            duration=8.0,
+            zone="Level_Sirene_Main_V2",
+            in_combat=True,
+            enemy_name="Potier, Steel Chevaliere, Greatsword Cultist",
+            enemies=["Potier", "Steel Chevaliere", "Greatsword Cultist"],
+            checkpoint="Coast Entrance",
+            description="Multi-enemy skirmish against 3 cultists",
+        ),
+        StoryboardStep(
+            duration=5.0,
+            zone="Level_Sirene_Main_V2",
+            in_combat=False,
+            enemy_name="",
+            checkpoint="Cliffside",
+            description="Post-skirmish rest at Cliffside",
+        ),
+    ],
+}
 
 
 def create_telemetry_payload(
@@ -73,12 +210,13 @@ class GameSessionSimulator:
 
         # Mock process
         self.proc_start_time = time.time()
-        self.mock_proc = MagicMock()
-        self.mock_proc.pid = self.pid
-        self.mock_proc.name.return_value = self.process_name
-        self.mock_proc.exe.return_value = str(self.root_path / self.process_name)
-        self.mock_proc.create_time.return_value = self.proc_start_time
-        self.mock_proc.is_running.return_value = False
+        self.mock_proc = FakeProcess(
+            pid=self.pid,
+            name=self.process_name,
+            is_running=False,
+            create_time=self.proc_start_time,
+            exe_path=str(self.root_path / self.process_name),
+        )
 
         self.running_procs: list[Any] = []
 
@@ -101,15 +239,15 @@ class GameSessionSimulator:
         """Simulates launching the game executable."""
         if pid is not None:
             self.pid = pid
-            self.mock_proc.pid = pid
-        self.mock_proc.is_running.return_value = True
+            self.mock_proc._pid = pid
+        self.mock_proc._is_running = True
         if self.mock_proc not in self.running_procs:
             self.running_procs.append(self.mock_proc)
         return self
 
     def stop_game(self) -> Self:
         """Simulates closing the game executable."""
-        self.mock_proc.is_running.return_value = False
+        self.mock_proc._is_running = False
         self.running_procs.clear()
         return self
 
@@ -160,6 +298,42 @@ class GameSessionSimulator:
         """Simulates reaching an in-game flag or checkpoint."""
         self.current_checkpoint = checkpoint
         self._flush_telemetry()
+        return self
+
+    def apply_storyboard_step(self, step: StoryboardStep) -> Self:
+        """Applies a single StoryboardStep state immediately to the game session."""
+        self.current_zone = step.zone
+        self.current_checkpoint = step.checkpoint
+        self.in_combat = step.in_combat
+        self.current_enemy = step.enemy_name
+        self.current_enemies = list(step.enemies) if step.enemies is not None else []
+        self.current_floor = step.floor
+        self.current_tower_trial = step.tower_trial
+        self._flush_telemetry()
+        return self
+
+    def play_storyboard_scenario(
+        self,
+        scenario_name: str,
+        step_index: int | None = None,
+    ) -> Self:
+        """Applies a scenario storyboard to the session.
+
+        If step_index is provided (0-based), only that step is applied.
+        Otherwise, all steps are applied in sequence, leaving the session in the final step's state.
+        """
+        if scenario_name not in SCENARIOS:
+            valid = ", ".join(SCENARIOS.keys())
+            raise ValueError(f"Unknown scenario '{scenario_name}'. Available scenarios: {valid}")
+        steps = SCENARIOS[scenario_name]
+        if step_index is not None:
+            if not 0 <= step_index < len(steps):
+                raise IndexError(
+                    f"step_index {step_index} out of range for scenario '{scenario_name}' (len={len(steps)})"
+                )
+            return self.apply_storyboard_step(steps[step_index])
+        for step in steps:
+            self.apply_storyboard_step(step)
         return self
 
     def _flush_telemetry(self) -> None:
