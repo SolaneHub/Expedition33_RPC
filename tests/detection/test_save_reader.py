@@ -106,3 +106,98 @@ def test_save_reader_linux_cross_platform_path(tmp_path: Path) -> None:
 
     resolved = resolve_user_data_path(is_windows=False, home_dir=fake_home)
     assert Path(resolved).resolve() == save_dir.resolve()
+
+
+@pytest.mark.unit
+def test_save_reader_semantic_aliases_all() -> None:
+    reader = SaveFileReader()
+    # 1. Monolith / Paintress
+    assert (
+        reader.is_checkpoint_for_zone(
+            "Level_Monolith", "Level.SpawnPoint.Paintress", "Level_Monolith", "The Monolith"
+        )
+        is True
+    )
+    # 2. Manor / Flyinghouse
+    assert (
+        reader.is_checkpoint_for_zone(
+            "Level_Manor", "Level.SpawnPoint.FlyingHouse", "Level_Manor", "The Manor"
+        )
+        is True
+    )
+    # 3. Chroma / Sunless
+    assert (
+        reader.is_checkpoint_for_zone(
+            "Level_ChromaZone", "Level.SpawnPoint.Chroma", "Level_Sunless", "Sunless Shore"
+        )
+        is True
+    )
+    # 4. Yellow / Harvest
+    assert (
+        reader.is_checkpoint_for_zone(
+            "Level_YellowForest", "Level.SpawnPoint.Yellow", "Level_Harvest", "Harvest Realm"
+        )
+        is True
+    )
+    # 5. Reacher / Scalatore
+    assert (
+        reader.is_checkpoint_for_zone(
+            "Level_Reacher", "Level.SpawnPoint.Reacher", "Level_Reacher", "Scalatore"
+        )
+        is True
+    )
+    # 6. Seacliff / Stone Wave
+    assert (
+        reader.is_checkpoint_for_zone(
+            "Level_SeaCliff", "Level.SpawnPoint.SeaCliff", "Level_StoneWave", "Stone Wave"
+        )
+        is True
+    )
+    # 7. Goblu / Flying Waters
+    assert (
+        reader.is_checkpoint_for_zone(
+            "Level_Goblu", "Level.SpawnPoint.Goblu", "Level_FlyingWaters", "Flying Waters"
+        )
+        is True
+    )
+
+
+@pytest.mark.unit
+def test_save_reader_corrupt_or_partial_binary_save(tmp_path: Path) -> None:
+    profile_dir = tmp_path / "12345"
+    profile_dir.mkdir(parents=True)
+    sav_file = profile_dir / "EXPEDITION_0.sav"
+
+    # 1. Payload with no LastUsedSavePoint
+    sav_file.write_bytes(b"\x00" * 500)
+    reader = SaveFileReader(base_save_dir=tmp_path)
+    lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
+    assert lvl is None
+    assert tag is None
+
+    # 2. Payload with LastUsedSavePoint near the EOF (< 4096 bytes)
+    payload_near_eof = (
+        b"\x00" * 10
+        + b"LastUsedSavePoint\x00\x0f\x00\x00\x00StructProperty\x00\x02\x00\x00\x00"
+        + b"LevelAssetName\x00\r\x00\x00\x00NameProperty\x00\x00\x00\x00\x00Level_Short\x00"
+        + b"SpawnPointTag\x00Level.SpawnPoint.Short.Tag\x00"
+        + b"\x00" * 10
+    )
+    sav_file.write_bytes(payload_near_eof)
+    reader.reset()
+    lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
+    assert lvl == "Level_Short"
+    assert tag == "Level.SpawnPoint.Short.Tag"
+
+    # 3. Cache hit: verify cached result is returned without re-parsing
+    sav_str = str(sav_file)
+    assert sav_str in reader._checkpoint_cache
+    cached_entry = reader._checkpoint_cache[sav_str]
+    reader._checkpoint_cache[sav_str] = (
+        cached_entry[0],
+        cached_entry[1],
+        ("CachedLevel", "CachedTag"),
+    )
+    lvl_cached, tag_cached = reader.read_checkpoint_from_save(str(profile_dir))
+    assert lvl_cached == "CachedLevel"
+    assert tag_cached == "CachedTag"

@@ -15,17 +15,41 @@ from expedition33_rpc.detection.normalization import (
     strip_accents,
 )
 
-type SemanticAlias = dict[str, list[str]]
+type SemanticAlias = dict[str, frozenset[str]]
 
 SEMANTIC_ZONE_ALIASES: list[SemanticAlias] = [
-    {"cp_tokens": ["paintress", "monolith"], "zone_tokens": ["monolith"]},
-    {"cp_tokens": ["flyinghouse", "manor"], "zone_tokens": ["manor"]},
-    {"cp_tokens": ["esquie", "francois"], "zone_tokens": ["esquie", "nest", "nido"]},
-    {"cp_tokens": ["chromazone", "chroma"], "zone_tokens": ["sunless", "senza sole", "chroma"]},
-    {"cp_tokens": ["yellowforest", "yellow"], "zone_tokens": ["yellow", "giallo", "harvest"]},
-    {"cp_tokens": ["reacher"], "zone_tokens": ["reacher", "scalatore"]},
-    {"cp_tokens": ["seacliff"], "zone_tokens": ["stone wave", "onda di pietra", "seacliff"]},
-    {"cp_tokens": ["goblu"], "zone_tokens": ["goblu", "flying waters", "acque volanti"]},
+    {
+        "cp_tokens": frozenset({"paintress", "monolith"}),
+        "zone_tokens": frozenset({"monolith"}),
+    },
+    {
+        "cp_tokens": frozenset({"flyinghouse", "manor"}),
+        "zone_tokens": frozenset({"manor"}),
+    },
+    {
+        "cp_tokens": frozenset({"esquie", "francois"}),
+        "zone_tokens": frozenset({"esquie", "nest", "nido"}),
+    },
+    {
+        "cp_tokens": frozenset({"chromazone", "chroma"}),
+        "zone_tokens": frozenset({"sunless", "senza sole", "chroma"}),
+    },
+    {
+        "cp_tokens": frozenset({"yellowforest", "yellow"}),
+        "zone_tokens": frozenset({"yellow", "giallo", "harvest"}),
+    },
+    {
+        "cp_tokens": frozenset({"reacher"}),
+        "zone_tokens": frozenset({"reacher", "scalatore"}),
+    },
+    {
+        "cp_tokens": frozenset({"seacliff"}),
+        "zone_tokens": frozenset({"stone wave", "onda di pietra", "seacliff"}),
+    },
+    {
+        "cp_tokens": frozenset({"goblu"}),
+        "zone_tokens": frozenset({"goblu", "flying waters", "acque volanti"}),
+    },
 ]
 
 SAVE_READER_IGNORED_ZONE_WORDS: frozenset[str] = frozenset(
@@ -35,6 +59,16 @@ SAVE_READER_IGNORED_ZONE_WORDS: frozenset[str] = frozenset(
 SAVE_READER_IGNORED_CP_WORDS: frozenset[str] = frozenset(
     {"climb", "interior", "exterior", "intro", "savepoint", "entry", "field"}
 )
+
+_RE_LEVEL_ASSET: re.Pattern[bytes] = re.compile(
+    rb"LevelAssetName.*?NameProperty[^\x00]*\x00.*?([A-Za-z0-9_]{3,60})\x00",
+    re.DOTALL,
+)
+_RE_SPAWN_POINT: re.Pattern[bytes] = re.compile(rb"(Level\.SpawnPoint\.[A-Za-z0-9_\.]+)\x00")
+_RE_CLEAN_PREFIXES: re.Pattern[str] = re.compile(
+    r"level_|sidelevel_|smalllevel_|levelmain_|_main|_v\d+|spawnpoint"
+)
+_RE_NON_ALPHANUMERIC: re.Pattern[str] = re.compile(r"[^a-z0-9]")
 
 
 class SaveFileReader:
@@ -74,19 +108,26 @@ class SaveFileReader:
     def read_checkpoint_from_save(self, save_dir: str) -> tuple[str | None, str | None]:
         """Extracts (level_name, spawn_point_tag) from the latest EXPEDITION_*.sav file."""
         try:
-            candidates = sorted(
-                Path(save_dir).glob("EXPEDITION_*.sav"),
-                key=lambda p: p.stat().st_mtime if p.exists() else 0.0,
-                reverse=True,
-            )
+            candidates = list(Path(save_dir).glob("EXPEDITION_*.sav"))
             if not candidates:
                 return None, None
-            latest = candidates[0]
+
+            def _mtime(p: Path) -> float:
+                try:
+                    return p.stat().st_mtime
+                except OSError:
+                    return 0.0
+
+            latest = max(candidates, key=_mtime)
             sav_path = str(latest)
+            try:
+                st = latest.stat()
+            except OSError:
+                return None, None
+
             if not os.path.isfile(sav_path):
                 return None, None
 
-            st = latest.stat()
             cache_key = (st.st_mtime, st.st_size)
             if (
                 sav_path in self._checkpoint_cache
@@ -110,13 +151,9 @@ class SaveFileReader:
                     self._checkpoint_cache[sav_path] = (st.st_mtime, st.st_size, res)
                     return res
 
-                block = mm[idx : min(idx + 4096, mm.size())]
-                lvl_m = re.search(
-                    rb"LevelAssetName.*?NameProperty[^\x00]*\x00.*?([A-Za-z0-9_]{3,60})\x00",
-                    block,
-                    re.DOTALL,
-                )
-                tag_m = re.search(rb"(Level\.SpawnPoint\.[A-Za-z0-9_\.]+)\x00", block)
+                endpos = min(idx + 4096, mm.size())
+                lvl_m = _RE_LEVEL_ASSET.search(mm, idx, endpos)
+                tag_m = _RE_SPAWN_POINT.search(mm, idx, endpos)
                 lvl = lvl_m.group(1).decode("latin1") if lvl_m else None
                 tag = tag_m.group(1).decode("latin1") if tag_m else None
 
@@ -150,26 +187,24 @@ class SaveFileReader:
         )
 
         full_cp = f"{lvl_clean} {tag_clean}"
-        full_cp = re.sub(
-            r"level_|sidelevel_|smalllevel_|levelmain_|_main|_v\d+|spawnpoint", " ", full_cp
-        )
-        full_cp = re.sub(r"[^a-z0-9]", " ", full_cp)
+        full_cp = _RE_CLEAN_PREFIXES.sub(" ", full_cp)
+        full_cp = _RE_NON_ALPHANUMERIC.sub(" ", full_cp)
 
         # 1. Semantic zone aliases
         for alias in SEMANTIC_ZONE_ALIASES:
-            cp_tokens = alias.get("cp_tokens", [])
-            zone_tokens = alias.get("zone_tokens", [])
+            cp_tokens = alias["cp_tokens"]
+            zone_tokens = alias["zone_tokens"]
             if any(t in full_cp for t in cp_tokens) and any(t in zone_all for t in zone_tokens):
                 return True
 
         # 2. Match zone words inside cp identifier
-        clean_zone_words = re.sub(r"[^a-z0-9]", " ", zone_all).split()
+        clean_zone_words = set(_RE_NON_ALPHANUMERIC.sub(" ", zone_all).split())
         for w in clean_zone_words:
             if len(w) >= 3 and w not in SAVE_READER_IGNORED_ZONE_WORDS and w in full_cp:
                 return True
 
         # 3. Match cp tokens inside zone name
-        cp_words = full_cp.split()
+        cp_words = set(full_cp.split())
         for w in cp_words:
             if len(w) >= 4 and w not in SAVE_READER_IGNORED_CP_WORDS and w in zone_all:
                 return True
