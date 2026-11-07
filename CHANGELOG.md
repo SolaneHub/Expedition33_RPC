@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.2.0] - 2026-11-07
+
+### New Features & Test Harness
+- **Fluent Game Session Simulator (`tests.harness.game_session`)**:
+  - Introduced `GameSessionSimulator` context manager providing high-level deterministic game session simulation with telemetry, process scanning, and combat transitions.
+  - Built-in multi-stage storyboard scenarios (`boss_fight`, `tower_climb`, `rare_boss`, `multi_enemy`) for reproducible dry-run integration testing.
+- **Discord Wire Protocol & Adversarial Testing Suite (`tests.integrations.test_adversarial_discord`, `tests.harness.discord_pipe`)**:
+  - Implemented comprehensive 620+ line adversarial test suite validating `<II` binary wire framing, little-endian struct packing, opcode bounds (`VALID_OPCODES`), Discord 128-byte string field truncation, and connection flapping resilience.
+  - Added binary header layout validation directly into `DiscordPipeSimulator`.
+- **Telemetry Storyboard Tooling (`tools.simulate_telemetry`)**:
+  - Added `--list-scenarios` CLI flag to inspect all registered playback scenarios, step counts, and duration estimates.
+  - Decoupled scenario definitions directly to the test harness SSOT.
+- **Calibrated 1:1 Discord Activity Preview Generator (`tools.generate_discord_preview`, `docs/`)**:
+  - Added preview generator script utilizing genuine Discord `gg sans` typography and official dark-theme (#1e1f22) styling.
+  - Optimized animated GIFs in `docs/github/`, reducing asset weight by >80% while enhancing visual fidelity.
+
+### Performance & Engine Hardening
+- **Throttled Language Resolution (`detection.detector`)**:
+  - Implemented 5.0-second interval throttling on `GameUserSettings.ini` language discovery, eliminating disk I/O and mtime inspections during continuous active detection.
+- **O(1) Main Menu Detection (`detection.normalization`)**:
+  - Converted title and menu string lookups across all 20 localization catalogs into a precomputed `frozenset` (`_MAIN_MENU_DISPLAYS`), eliminating iterative table scans.
+- **Orchestrator Lifecycle & Memory Streamlining (`core.orchestrator`)**:
+  - Eliminated redundant tracking attributes (`_started`, `_is_installing_bridge`, `_last_detected_pid`, `_last_detected_create_time`), deriving process transitions directly from atomic `GameState` snapshots.
+  - Enforced structured logging (`logger.error`, `logger.info`) across bridge installation and subscriber error handlers.
+
+### Refactoring & Code Cleanup
+- **Dead Code Purge (`core.orchestrator`, `detection.detector`)**:
+  - Removed deprecated `bridge_auto_installed` property and empty updater event handlers.
+  - Cleaned up unreferenced `last_zone` attributes and redundant `SaveFileReader` re-export from `detector.py`.
+- **Direct Test Double Conformance (`tests.harness.game_session`, `tests.harness.test_fake_process`)**:
+  - Decoupled `MagicMock` in favor of direct `FakeProcess` protocol implementation.
+  - Refactored `test_fake_process.py` to focus on observable interface contracts.
+
+### Documentation
+- **Architecture Blueprints & Agent Directives (`ARCHITECTURE.md`, `AGENTS.md`, `README.md`)**:
+  - Deepened architecture documentation covering the 5-minute mental model, data pipeline, and dry-run test harness design.
+  - Formulated imperative developer and AI agent directives with strict quality gate rules.
+
 ## [v2.1.0] - 2026-11-07
 
 ### New Features
