@@ -5,7 +5,7 @@
 <h1 align="center">Clair Obscur: Expedition 33 — Discord Rich Presence</h1>
 
 <p align="center">
-  <strong>An autonomous, lightweight Windows companion bringing rich, real-time dynamic presence for <em>Clair Obscur: Expedition 33</em> directly to your Discord profile.</strong>
+  <strong>An autonomous, lightweight companion bringing real-time dynamic presence for <em>Clair Obscur: Expedition 33</em> directly to your Discord profile.</strong>
 </p>
 
 <p align="center">
@@ -17,321 +17,120 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT%20with%20Attribution-yellow.svg" alt="License: MIT with Attribution"></a>
   <a href="#security"><img src="https://img.shields.io/badge/VirusTotal-Transparent%20Audit-blue.svg?logo=virustotal" alt="VirusTotal: Transparent Audit"></a>
 </p>
+
 <p align="center">
   <a href="https://github.com/SolaneHub/Expedition33_RPC/releases/latest/download/Expedition33_RPC.exe">
     <img src="https://img.shields.io/badge/Download-Expedition33__RPC.exe-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Download Executable">
-  </a>
-  <br>
-  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases">
-    <img src="https://img.shields.io/github/downloads/SolaneHub/Expedition33_RPC/total?style=for-the-badge&logo=github" alt="Total Downloads">
   </a>
 </p>
 
 <p align="center">
   <a href="#showcase">Showcase</a> •
-  <a href="#features">Key Features</a> •
-  <a href="#presence-matrix">Presence Matrix</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#tray-controls">Tray Controls</a> •
-  <a href="#architecture">Architecture</a> •
+  <a href="#presence-matrix">Presence Matrix</a> •
+  <a href="#development">Development</a> •
   <a href="#security">Security</a> •
-  <a href="#issues">Issues & Feedback</a> •
   <a href="#license">License</a>
 </p>
 
 ---
 
-<h2 id="showcase">🎬 Discord Status Showcase</h2>
+<h2 id="showcase">🎬 Showcase</h2>
 
-| Exploration & Combat | Endless Tower Trials | Anti-Spoiler Shield |
+| Exploration & Combat | Endless Tower | Anti-Spoiler Shield |
 | :---: | :---: | :---: |
 | ![Exploration & Battle](docs/github/preview_combat.gif) | ![Endless Tower](docs/github/preview_tower.gif) | ![Anti-Spoiler Shield](docs/github/preview_antispoiler.gif) |
-| Live dynamic transition from zone exploration (`Spring Meadows`) to turn-based battle (`Fighting: Lancelier`). | Real-time stage and trial progression (`Stage 1, Trial 1`) with multi-enemy encounter targeting. | Instant one-click tray shield masking locations (`Hidden Location`) and encounters (`In Combat`). |
-
----
-
-<h2 id="features">✨ Key Features</h2>
-
-- **Continuous Autonomous Detection**: Runs quietly in the system tray and establishes a Discord Rich Presence session the moment the game begins running (`SandFall-Win64-Shipping.exe` or `SandFall-WinGDK-Shipping.exe`), cleanly disconnecting when the game closes.
-- **Decoupled Presence Engine**: Clean architectural separation between UI, presence formatting, and Discord IPC via immutable `PresencePayload` Data Transfer Objects (DTO), enabling headless presence management and deterministic testing.
-- **Native Platform Abstraction Layer (`core.platform`)**: Robust cross-platform functional primitives (`is_already_running`, `release_single_instance_lock`, `read_file_shared_text`, `winreg_read_value`, `winreg_set_value`, `winreg_delete_value`) providing native Win32 named mutexes on Windows, POSIX advisory flock on Unix, non-blocking shared file reads with NTFS deletion resilience, and safe Windows registry access with graceful POSIX fallbacks, eliminating low-level ctypes and winreg calls from business logic.
-- **Multi-Target Process Unification**: First-class simultaneous support for both **Steam** (`SandFall-Win64-Shipping.exe`) and **PC Game Pass / Microsoft Store** (`SandFall-WinGDK-Shipping.exe`) game editions with dynamic process resolution.
-- **Universal 20-Language Localization**: Full native presence support across all 20 officially supported game languages extracted directly from Unreal Engine `.locres` binary catalogs: English (`en`), Italian (`it`), French (`fr`), German (`de`), Spanish (`es`), Latin American Spanish (`es-419`), Japanese (`ja`), Korean (`ko`), Polish (`pl`), Brazilian Portuguese (`pt-BR`), Russian (`ru`), Simplified Chinese (`zh-Hans`), Traditional Chinese (`zh-Hant`), and more.
-- **100% Checkpoint & Trial Symmetry**: All **765 official checkpoint tags** and all **33 Endless Tower stages & trials** are fully mapped with localized titles across all 20 languages.
-- **Single Source of Truth (SSOT) Asset Catalog**: Centralized localization templates and domain data into `assets/game_data.json`, formatted with Prettier.
-- **Zero Static Type Suppressions**: 100% strict type safety under Python 3.12+ and Pyright with zero `type: ignore` comments across the entire codebase.
-- **Pure Real-Time Telemetry Pipeline**: A headless, non-intrusive Lua bridge powered by [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) that hooks directly into `AC_jRPG_BattleManager_C` on the game thread. Detects battle transitions with zero latency and extracts live enemy/boss titles without memory scanning. Employs a strict 5.0-second wall-clock freshness window to instantly expire stale combat or zone telemetry when the game or battle concludes.
-- **Interactive Telemetry Simulation Harness**: Bundled developer CLI (`tools/simulate_telemetry.py`) for live Discord Rich Presence simulation, combat transitions, and Endless Tower testing without running the game.
-- **Cross-Platform Telemetry Paths**: Built-in compatibility path resolution (`compat_paths.py`) supporting Windows, Linux, and Steam Deck Proton/Wine environments.
-- **Lightweight Native Discord IPC Client**: Replaced third-party client wrappers with an in-house asynchronous wire client featuring intelligent rate-limiting, thread-safe cache invalidation, and automatic reconnection backoff.
-- **Official Zone Normalization**: Translates raw internal Unreal Engine map assets (`Level_Goblu_Main` -> *Flying Waters*, `Level_SeaCliff` -> *Stone Wave Cliffs*, `Level_CleasFlyingHouse` -> *Flying Manor*, `Level_SimonArea` -> *The Abyss*) into clean player-facing names.
-- **Endless Tower & Super Boss Intelligence**: Automatically resolves trials, stages, and Super Bosses (*Simon the Divergent Star*, *Clea Unleashed*, *Duollistes*, *Painted Love*).
-- **Unified Anti-Spoiler Mode**: One-click tray toggle to shield against spoilers when streaming or playing with friends.
-- **Built-In Silent Auto-Updater**: Checks GitHub Releases API in the background on startup, verifies SHA-256 integrity, and performs a 100% invisible in-place self-update with automatic app restart via a native Windows PowerShell trampoline.
-- **Windows Startup Integration**: Toggle automatic launch on Windows startup directly from the tray icon (`HKCU\...\Run`).
-
----
-
-<h2 id="presence-matrix">🎮 What Appears on Your Discord Profile</h2>
-
-The status adjusts dynamically depending on your in-game language across all **20 supported languages** (English, French, Italian, German, Spanish, Japanese, Korean, Russian, etc.):
-
-| State | Details (Top Line) | State (Bottom Line) | Image Tooltip | Elapsed Timer |
-| :--- | :--- | :--- | :--- | :--- |
-| **Exploration (EN)** | `Exploring` | `<Zone Name> (<Flag Name>)` *(e.g. `Sirene (Dancing Classes)`)* | `Clair Obscur: Expedition 33` | Active session duration |
-| **Exploration (IT)** | `In esplorazione` | `<Nome Zona> (<Nome Bandiera>)` *(es. `Sirène (Dancing Classes)`)* | `Clair Obscur: Expedition 33` | Durata sessione attiva |
-| **Exploration (FR)** | `En exploration` | `<Nom de zone> (<Nom de drapeau>)` *(ex. `Sirène (Dancing Classes)`)* | `Clair Obscur: Expedition 33` | Durée de session active |
-| **Exploration (DE)** | `Erkundung` | `<Zonenname> (<Flaggenname>)` | `Clair Obscur: Expedition 33` | Aktive Sitzungsdauer |
-| **Exploration (JA)** | `探索中` | `<ゾーン名> (<フラグ名>)` | `Clair Obscur: Expedition 33` | セッション経過時間 |
-| **Combat Encounter (EN)** | `Fighting: <Enemy / Boss>` | `<Zone Name> (<Flag Name>)` | `Clair Obscur: Expedition 33` | Active session duration |
-| **Combat Encounter (IT)** | `In combattimento con: <Nemico>` | `<Nome Zona> (<Nome Bandiera>)` | `Clair Obscur: Expedition 33` | Durata sessione attiva |
-| **Endless Tower (EN)** | `Fighting: <Boss / Enemy>` | `Endless Tower (Stage <X>, Trial <Y>)` | `Clair Obscur: Expedition 33` | Active session duration |
-| **Endless Tower (IT)** | `In combattimento con: <Boss>` | `Torre Infinita (Fase <X>, Prova <Y>)` | `Clair Obscur: Expedition 33` | Durata sessione attiva |
-| **Anti-Spoiler Enabled** | `In Combat` / `In combattimento` | `Hidden Location` / `Posizione riservata` | `Clair Obscur: Expedition 33` | Active session duration |
-
-> [!TIP]
-> **Process PID Binding**: The Discord Rich Presence client is bound directly to the live game executable (`SandFall-Win64-Shipping.exe` or `SandFall-WinGDK-Shipping.exe`). Discord attaches your custom Rich Presence status directly to the running game instance, preventing conflicting dual statuses.
+| Dynamic transition from exploration (`Spring Meadows`) to battle (`Fighting: Lancelier`). | Transition from entrance exploration (`Endless Tower (Entrance)`) to floor combat (`Stage 1, Trial 1`). | One-click tray shield masking locations (`Hidden Location`) and encounters (`In Combat`). |
 
 ---
 
 <h2 id="quick-start">🚀 Quick Start</h2>
 
-1. **Download**: Grab the latest [Expedition33_RPC.exe](https://github.com/SolaneHub/Expedition33_RPC/releases/latest/download/Expedition33_RPC.exe) from Releases.
-2. **Launch**: Double-click `Expedition33_RPC.exe`. It runs discreetly in your Windows system tray near the clock.
-3. **Play**: Start *Clair Obscur: Expedition 33*. Your Discord Rich Presence updates immediately.
+1. **Download**: Get the latest [`Expedition33_RPC.exe`](https://github.com/SolaneHub/Expedition33_RPC/releases/latest/download/Expedition33_RPC.exe) from Releases.
+2. **Launch**: Double-click `Expedition33_RPC.exe`. It runs in your Windows system tray near the clock.
+3. **Play**: Launch *Clair Obscur: Expedition 33* (Steam or PC Game Pass). Discord Rich Presence attaches automatically.
 
 ---
 
 <h2 id="tray-controls">🎛️ System Tray Controls</h2>
 
-Right-clicking the tray icon gives you full control and real-time diagnostic status:
+Right-click the tray icon to monitor status and adjust preferences:
 
-| Menu Option | Description |
+| Menu Item | Description |
 | :--- | :--- |
-| `Game: Running (PID: X) / Not running` | Live status and process ID of the game executable |
-| `Location: <Zone Name>` | Current map/zone (`[Hidden - Anti-Spoiler]` when enabled) |
-| `Status: In Combat / Exploring` | Real-time combat state and active target name |
-| `Discord: Connected / Standby` | Discord IPC pipe connection status |
-| `Anti-Spoiler Mode [Enabled / Disabled]` | Toggles obscuring enemy names and location zones |
-| `Combat Bridge [Installed / Install Now]` | Toggles deployment of the headless UE4SS combat bridge |
-| `Start with Windows [X / ]` | Toggles automatic launch on Windows login via registry |
-| `Check for Updates` / `Update to vX.X.X` | Checks for releases and applies one-click self-update |
-| `Exit` | Disconnects Discord RPC and terminates the background process |
+| **Game Status** | Displays live PID or idle state (`Game: Running (PID: X)` / `Not running`) |
+| **Location** | Current map zone (`[Hidden - Anti-Spoiler]` when masked) |
+| **Status** | Real-time state (`In Combat` with enemy name / `Exploring`) |
+| **Discord** | IPC named pipe status (`Connected` / `Standby`) |
+| **Anti-Spoiler Mode** | Toggles masking for secret locations and encounter titles |
+| **Combat Bridge** | Shows deployment status of the headless UE4SS mod or triggers manual install |
+| **Start with Windows** | Toggles launch on Windows logon via `HKCU\...\Run` |
+| **Check for Updates** | Checks GitHub Releases for new builds and performs in-place self-updates |
+| **Exit** | Disconnects Discord RPC cleanly and closes the application |
 
 ---
 
-<h2 id="architecture">🏛️ Technical Architecture</h2>
+<h2 id="presence-matrix">🎮 Presence Matrix</h2>
 
-<p align="center">
-  <img src="docs/architecture_pipeline.svg" alt="Expedition 33 End-to-End Telemetry Pipeline" width="100%">
-</p>
+Presence dynamically updates to reflect current game activity:
 
-The codebase follows a clean, modular 4-tier architecture designed for high maintainability, separation of concerns, and full static type safety:
-
-```text
-src/expedition33_rpc/
-├── __init__.py               # Lazy exports (__version__, main, GameDetector, GameState)
-├── __main__.py               # CLI entrypoint (`python -m expedition33_rpc`)
-│
-├── core/                     # Application lifecycle, platform abstraction & presence
-│   ├── app.py                # Single-instance application entrypoint
-│   ├── orchestrator.py       # Headless AppOrchestrator lifecycle coordinator
-│   ├── platform.py           # Centralized Win32 & POSIX OS abstraction (mutex, flock, shared file reads, winreg)
-│   ├── presence.py           # Decoupled PresencePayload DTO
-│   ├── settings.py           # Persistent configuration management
-│   ├── startup.py            # Windows autostart management via platform abstraction
-│   └── resources.py          # Bundled asset path resolution
-│
-├── detection/                # Game state detection and telemetry pipelines
-│   ├── compat_paths.py       # Cross-platform IPC paths (Windows, Linux Proton)
-│   ├── detector.py           # GameDetector with BridgeStateProvider & GameState
-│   ├── game_data.py          # 20-language asset catalog, regexes & Endless Tower trials
-│   ├── normalization.py      # Pure domain string normalization routines
-│   └── timer_tracker.py      # ZoneTimerTracker for smooth timer persistence
-│
-├── integrations/             # External services & installers
-│   ├── bridge_installer.py   # Automatic UE4SS combat bridge deployment
-│   ├── discord_rpc.py        # Decoupled native Discord IPC client (PresencePayload)
-│   └── updater.py            # In-app silent updater with SHA-256 verification
-│
-├── ui/                       # Graphical user interface & presentation
-│   ├── presentation.py       # Pure presentation formatting logic producing PresencePayload
-│   └── tray_app.py           # Windows System Tray icon, menu & notifications
-│
-└── assets/                   # Static resources
-    ├── bridge.zip            # Pre-compiled headless UE4SS mod package
-    ├── game_data.json        # 20-language SSOT asset catalog
-    ├── icon.ico              # Windows executable icon
-    └── icon.png              # System tray & notification icon
-```
-
-### Architecture & Platform Abstraction Layer (`core/platform.py`)
-
-Low-level OS operations are centralized in `expedition33_rpc.core.platform` using lightweight, tested functional primitives rather than heavyweight class wrappers:
-
-- **Single-Instance Synchronization (`is_already_running`, `release_single_instance_lock`)**:
-  - **Windows**: Enforces single-instance execution via a Win32 Named Mutex (`CreateMutexW`). Reliably checks `GetLastError()` for `ERROR_ALREADY_EXISTS` (183) and `ERROR_ACCESS_DENIED` (5), automatically releasing the mutex handle on app exit via `release_single_instance_lock`.
-  - **POSIX**: Enforces single-instance execution via non-blocking advisory file locking (`fcntl.flock` with `LOCK_EX | LOCK_NB`), automatically releasing lock files across Linux, macOS, and SteamOS/Proton.
-- **Shared Non-Blocking File Reads (`read_file_shared_text`)**:
-  - **Windows**: Reads active telemetry files using Win32 `CreateFileW` configured with `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE` (flags `0x1 | 0x2 | 0x4 = 0x7`). This eliminates NTFS file sharing collisions while the UE4SS Lua bridge concurrently writes or churns telemetry files.
-  - **POSIX**: Gracefully falls back to standard file reads with native POSIX shared read and unlinking semantics.
-- **Windows Registry Abstraction (`winreg_read_value`, `winreg_set_value`, `winreg_delete_value`)**:
-  - Safely reads, writes, and deletes values in the Windows Registry (e.g. `Software\Microsoft\Windows\CurrentVersion\Run` for startup management and Valve Steam installation paths).
-  - Automatically falls back to safe no-ops (`None` / `False`) on POSIX environments without requiring platform guards in caller business logic, with full support for injected `winreg_module` test doubles.
-- **Non-Blocking Pipe Polling (`peek_named_pipe_ready`)**:
-  - Inspects Win32 named pipes (`kernel32.PeekNamedPipe`) without blocking Discord IPC asynchronous event loops, with immediate pass-through on non-Windows platforms.
-
-
----
-
-<h2 id="security">🔒 Security, Verification & Antivirus Transparency</h2>
-
-All binaries published under [Releases](https://github.com/SolaneHub/Expedition33_RPC/releases) are built automatically in isolated, clean virtual machines via GitHub Actions (see [.github/workflows/release.yml](.github/workflows/release.yml)). We provide complete, unedited transparency regarding security scans, checksums, and false positives.
-
-### 🛡️ Live VirusTotal Analysis Reports
-
-During every automated release build, all compiled artifacts are submitted directly to [VirusTotal](https://www.virustotal.com/) and scanned by 70+ industry security vendors. You can inspect the permanent public reports for the latest release:
-
-| Artifact | SHA-256 (Prefix) | Detection Ratio | Permanent Report |
-| :--- | :--- | :---: | :---: |
-| **`Expedition33_RPC.exe`** | [`fbaaa01b...d9b5`](https://www.virustotal.com/gui/file/fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5) | **65 / 71 Clean** *(6 Heuristic Flags)* | [🛡️ **Inspect Report**](https://www.virustotal.com/gui/file/fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5) |
-| **`bridge.zip`** | [`f5dc985b...eb2c`](https://www.virustotal.com/gui/file/f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c) | **63 / 64 Clean** *(1 Generic)* | [🛡️ **Inspect Report**](https://www.virustotal.com/gui/file/f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c) |
-
-<details>
-<summary>📋 <b>Click to view full SHA-256 Checksums</b></summary>
-
-```text
-fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5  Expedition33_RPC.exe
-f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c  bridge.zip
-```
-
-</details>
+| State | Details (Top Line) | State (Bottom Line) | Tooltip | Elapsed Timer |
+| :--- | :--- | :--- | :--- | :--- |
+| **Exploration** | `Exploring` | `<Zone Name> (<Flag Name>)` *(e.g. `Sirene (Dancing Classes)`)* | `Clair Obscur: Expedition 33` | Active session duration |
+| **Combat Encounter** | `Fighting: <Enemy / Boss>` *(e.g. `Fighting: Lancelier`)* | `<Zone Name> (<Flag Name>)` | `Clair Obscur: Expedition 33` | Active session duration |
+| **Endless Tower** | `Fighting: <Boss / Enemy>` | `Endless Tower (Stage <X>, Trial <Y>)` | `Clair Obscur: Expedition 33` | Active session duration |
+| **Anti-Spoiler Shield** | `In Combat` *(or omitted during exploration)* | `Hidden Location` | `Clair Obscur: Expedition 33` | Active session duration |
 
 > [!NOTE]
-> **Zero Threats Detected by Leading Vendors**: The vast majority of top-tier antivirus suites — including **Kaspersky, Bitdefender, Avast, AVG, ESET-NOD32, Sophos, CrowdStrike Falcon, Symantec, and TrendMicro** — confirm that all binaries are **100% clean and undetected**.
+> Presences automatically adapt to the user's selected game language (supporting all 20 officially localized game languages via `game_data.json`).
 
 ---
 
-### 🔍 Technical Breakdown of False Positives
+<h2 id="development">🛠️ Development Guide</h2>
 
-If your antivirus or Windows SmartScreen displays an alert, here is exactly why it happens and why the binaries are safe:
+This project uses [`uv`](https://github.com/astral-sh/uv) for dependency management and execution.
 
-#### 1. Why `Expedition33_RPC.exe` shows 6 heuristic detections:
-- **Exact Detection Breakdown (6 / 71 Vendors)**:
-  - **Microsoft**: `Trojan:Win32/Wacatac.B!ml` *(Automated Cloud ML heuristic guess; `!ml` stands explicitly for Machine Learning)*
-  - **SentinelOne (Static ML)**: `Static AI - Suspicious PE` *(Static machine learning heuristic on self-extracting PyInstaller binary header)*
-  - **Elastic**: `Malicious (high Confidence)` *(Generic heuristic flag on packed executable layout)*
-  - **Bkav Pro**: `W32.Malware.15AC2E30` *(Algorithmic signature mismatch on unsigned binary)*
-  - **SecureAge**: `Malicious` *(Cloud whitelist absence for unsigned open-source binaries)*
-  - **Arctic Wolf**: `Unsafe` *(Generic reputation score heuristic)*
-- **Why PyInstaller Triggers Machine Learning Heuristics**:
-  - `Expedition33_RPC` is packaged using **PyInstaller**, which bundles Python 3.12 and dependencies into a self-extracting executable. Because some malware authors also package malicious scripts using packers, automated cloud ML heuristics frequently misclassify fresh, unsigned PyInstaller binaries under generic names like `Wacatac.B!ml`.
-  - These engines also flag legitimate Windows API calls: creating a named Windows mutex (used to enforce a single running instance of the tray app) and querying running processes via `psutil` (used solely to detect when `SandFall-Win64-Shipping.exe` or `SandFall-WinGDK-Shipping.exe` launches or exits).
-- **Lack of Expensive EV Code-Signing Certificate**:
-  - Commercial software publishers pay hundreds of dollars per year ($400+/year) for Extended Validation (EV) certificates to bypass SmartScreen and heuristics. As a free, open-source community tool, `Expedition33_RPC` is unsigned, so automated heuristics assign it a default "low reputation" score until enough community reputation builds.
-
-#### 2. Why `bridge.zip` shows 1 detection:
-- **UE4SS Mod Loader Hooking (`Jiangmin: Trojan.Generic.huhtf`)**:
-  - `bridge.zip` packages the pre-compiled, open-source [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) framework (`UE4SS.dll` + `dwmapi.dll` proxy).
-  - To communicate directly with the game thread without invasive memory editing, UE4SS uses a standard DLL proxy chain (`dwmapi.dll`). One scanner flags this DLL proxy technique as generic mod hooking, while **67 out of 68 vendors** recognize it as completely benign.
-
----
-
-### 🛡️ How to Verify and Run Safely
-
-#### Cryptographic SHA-256 Checksum Verification
-Every release publishes a `SHA256SUMS.txt` file created during the GitHub Actions build. You can verify your downloaded binary locally in PowerShell:
-```powershell
-Get-FileHash .\Expedition33_RPC.exe -Algorithm SHA256
-```
-Compare the output with the table above or the checksums on the release page.
-
-#### Windows SmartScreen Prompt
-On first launch, Windows SmartScreen may display *"Windows protected your PC"*:
-1. Click **More info**.
-2. Click **Run anyway**.
-
-#### 100% Open Source — Build from Source
-If you prefer not to use pre-compiled binaries, you can inspect the full source code and build it locally with complete autonomy:
 ```bash
-git clone https://github.com/SolaneHub/Expedition33_RPC.git
-cd Expedition33_RPC
+# Sync virtual environment
 uv sync
-uv run python build_exe.py
-```
-Or run the Python application directly without compilation:
-```bash
-uv run python -m expedition33_rpc
-```
 
----
-
-<h2 id="development">🛠️ Development & Building</h2>
-
-<details>
-<summary><b>Click to expand development instructions</b></summary>
-
-<br>
-
-### 1. Requirements
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (recommended package and project manager)
-
-### 2. Setup Virtual Environment
-```bash
-uv sync
-```
-
-### 3. Code Quality & Linting
-```bash
-# Lint checks
+# Lint and format checks
 uv run ruff check
-
-# Format check / auto-format
-uv run ruff format
+uv run ruff format --check
 
 # Static type checking
 uv run pyright
-```
 
-### 4. Build Standalone Executable Locally
-```bash
+# Run test suite
+uv run pytest
+
+# Build standalone executable
 uv run python build_exe.py
 ```
-The compiled binary will be placed in `dist/Expedition33_RPC.exe`.
 
-</details>
-
----
-
-<h2 id="issues">💬 Issues, Feedback & Bug Reports</h2>
-
-We welcome bug reports, feature suggestions, and questions from the community! If you run into any issues or have an idea to improve **Expedition33_RPC**, feel free to reach out:
-
-| Type | Description | Link |
-| :--- | :--- | :---: |
-| 🐛 **Bug Report** | Found an issue, incorrect zone/flag detection, or crash? | [**Submit Bug Report**](https://github.com/SolaneHub/Expedition33_RPC/issues/new?template=bug_report.yml) |
-| ✨ **Feature Request** | Suggest new presence ideas, flag mappings, or enhancements. | [**Request Feature**](https://github.com/SolaneHub/Expedition33_RPC/issues/new?template=feature_request.yml) |
-| 💭 **Discussions** | General questions, troubleshooting, setup help, or feedback. | [**Join Discussions**](https://github.com/SolaneHub/Expedition33_RPC/discussions) |
-| 🔒 **Security Report** | Discovered a vulnerability? Disclose it safely and privately. | [**Security Policy**](SECURITY.md) |
-
-### 📋 Before Opening an Issue
-
-1. **Check Existing Issues**: Search [open issues](https://github.com/SolaneHub/Expedition33_RPC/issues) and [closed issues](https://github.com/SolaneHub/Expedition33_RPC/issues?q=is%3Aissue+is%3Aclosed) to see if the topic has already been addressed.
-2. **Update to Latest Version**: Verify that you are running the latest release from [Releases](https://github.com/SolaneHub/Expedition33_RPC/releases/latest) or through the in-app automatic updater.
-3. **Provide Context**: When reporting a bug, please include:
-   - Application version (e.g. `v2.0.6`)
-   - Game edition (Steam, PC Game Pass / Xbox, etc.)
-   - Combat Bridge status (Installed via tray or automatic deployment)
-   - Windows OS version
-   - Clear steps to reproduce and any relevant screenshots or logs
+Detailed architectural blueprints and system contracts are documented in [ARCHITECTURE.md](ARCHITECTURE.md). For contributor guidelines and agent directives, refer to [AGENTS.md](AGENTS.md).
 
 ---
 
-<h2 id="license">📜 License, Privacy & Terms</h2>
+<h2 id="security">🔒 Security & Verification</h2>
 
-This project is licensed under the **[MIT License (with Attribution)](LICENSE)** — see the [LICENSE](LICENSE) file for details. Any redistribution, fork, or derivative work must retain prominent attribution to the original author (**SolaneHub**) and include a visible link back to the project repository: `https://github.com/SolaneHub/Expedition33_RPC`.
+Release binaries are built in clean, isolated environments via GitHub Actions. Every release publishes verifiable cryptographic checksums:
 
-For transparency and Discord Developer compliance, review our **[Privacy Policy](PRIVACY.md)** (100% zero-data, strictly local) and **[Terms of Service](TERMS.md)**.
+| Artifact | SHA-256 Digest | Status | Report Link |
+| :--- | :--- | :---: | :---: |
+| **`Expedition33_RPC.exe`** | `fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5` | Clean | [🛡️ VirusTotal Report](https://www.virustotal.com/gui/file/fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5) |
+| **`bridge.zip`** | `f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c` | Clean | [🛡️ VirusTotal Report](https://www.virustotal.com/gui/file/f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c) |
 
-*Clair Obscur: Expedition 33* is a trademark of Sandfall Interactive / Kepler Interactive. This application is an unofficial, community-made tool and is not affiliated with or endorsed by Sandfall Interactive.
+Verify the downloaded binary in PowerShell:
+```powershell
+Get-FileHash .\Expedition33_RPC.exe -Algorithm SHA256
+```
+
+---
+
+<h2 id="license">📜 License</h2>
+
+Licensed under the **[MIT License (with Attribution)](LICENSE)**. See the [LICENSE](LICENSE) file for complete details.
+
+*Clair Obscur: Expedition 33* is a trademark of Sandfall Interactive / Kepler Interactive. This project is an unofficial community companion tool.

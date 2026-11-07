@@ -1,75 +1,141 @@
-# Expedition33_RPC Architecture
+# Architecture & System Design: Expedition33_RPC
 
-Expedition33_RPC is a native, lightweight Windows and POSIX daemon for Discord Rich Presence tailored for *Clair Obscur: Expedition 33*. It reads real-time telemetry from the Unreal Engine 5 runtime, normalizes it through static Single Source of Truth (SSOT) catalogs, and transmits it directly to the local Discord client over Named Pipes without external dependencies or asynchronous runtime overhead.
-
----
-
-## 1. Mental Model and Design Philosophy
-
-The architecture adheres to three core engineering principles:
-
-1. **Zero Game Footprint**: No process injection, no external DLL hooks. Hot telemetry is emitted asynchronously by the game (via a lightweight UE4SS Lua mod) into an IPC file in `%TEMP%`. The RPC daemon reads this file using Win32 non-blocking shared reads (`FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`).
-2. **Deterministic Tiered Fallback**: If the Lua bridge mod is missing or unresponsive, the system gracefully degrades by reading binary Unreal Engine 5 save files (`.sav`) via memory mapping (`mmap`).
-3. **Pure Functional Pipelines**: Every polling tick creates an immutable Data Transfer Object (`GameState`), processed through pure normalization routines (`ui/presentation.py`) before serializing binary frames to Discord.
+This document defines the architectural mental model, module hierarchy, state machine invariants, and frozen contracts of `expedition33-discord-rpc`.
 
 ---
 
-## 2. End-to-End Data Pipeline
-
-The animated diagram below illustrates the live data lifecycle from in-game telemetry through detection, normalization, and output to Discord:
+## 1. 5-Minute Mental Model
 
 <p align="center">
   <img src="docs/architecture_pipeline.svg" alt="Expedition 33 End-to-End Telemetry Pipeline" width="100%">
 </p>
 
-### Data Lifecycle Stages:
-1. **Hot Telemetry Generation**: The client-side Lua mod writes atomic state frames directly to `%TEMP%\expedition33_status.json`.
-2. **Non-Blocking Ingestion**: `BridgeStateProvider` opens the status file using Win32 `CreateFileW` with `0x7` flags (`FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`), preventing file lock contention while the game writes.
-3. **Emergency Fallback**: If the Lua mod is inactive or its checkpoint string is empty, `SaveFileReader` inspects binary `.sav` files on disk using `mmap` to retrieve `LastUsedSavePoint`.
-4. **State Normalization**: `GameDetector` verifies freshness (5.0s SLA) and builds an immutable `GameState` snapshot via pure catalog mappings in `game_data.json`.
-5. **Presence Delivery**: `AppOrchestrator` formats text fields according to Discord's 128-byte boundary rules and serializes `<II` binary frames to the local named pipe.
+The application operates as a deterministic, unidirectional data pipeline:
+
+```text
+┌─────────────────┐       ┌──────────────────────┐       ┌─────────────────┐
+│ Process Watcher │ ----> │     State Engine     │ ----> │ Discord Client  │
+│  & Telemetry    │       │ (Detection & Normal) │       │  (Native IPC)   │
+└─────────────────┘       └──────────────────────┘       └─────────────────┘
+                                     │                            │
+                                     ▼                            ▼
+                          ┌──────────────────────┐       ┌─────────────────┐
+                          │     Presentation     │       │   System Tray   │
+                          │   (PresencePayload)  │       │  (pystray loop) │
+                          └──────────────────────┘       └─────────────────┘
+```
+
+1. **Watcher & Ingestion**: Detects game process (`SandFall-Win64-Shipping.exe` / `SandFall-WinGDK-Shipping.exe`). Reads telemetry file written by the UE4SS Lua mod using non-blocking Win32 shared reads (`0x7`).
+2. **State Engine**: Validates freshness against a strict 5.0s TTL. Resolves raw map and flag tokens against immutable catalog mappings (`assets/game_data.json`), producing an immutable `GameState` snapshot.
+3. **Presentation**: Pure functional mapping from `GameState` to `PresencePayload` DTO according to active localization and anti-spoiler settings.
+4. **Discord IPC & UI**: Dispatches formatted payload to Discord's local named pipe via binary `<II` framing only when dirty. Updates system tray status asynchronously.
 
 ---
 
-## 3. Threading Model and Platform Abstraction
+## 2. Unified Modular Architecture (SSOT)
 
-The daemon avoids heavy runtime systems, isolating blocking I/O and UI loops into dedicated execution threads:
+All source code lives under `src/expedition33_rpc/`. This structure is the project's single source of truth:
 
-| Thread | Lifecycle | Purpose & Scope |
-| :--- | :--- | :--- |
-| **Main Thread** | Application lifetime | Acquires single-instance lock, bootstraps `AppOrchestrator`, and runs the `pystray` Win32 message pump. |
-| **Worker Loop** | Background daemon | Drives periodic polling: process detection, telemetry consumption, state normalization, and presence dispatch. |
-| **Auto-Installer** | Ephemeral worker | Spawns upon discovering a new game PID to copy UE4SS bridge assets into the game's `Win64` directory. |
-| **Updater Thread** | Ephemeral worker | Checks GitHub Releases in the background to prevent network latency from blocking the main loop. |
+```text
+src/expedition33_rpc/
+├── __init__.py               # Public API exports (__version__, main, GameDetector, GameState)
+├── __main__.py               # Entrypoint execution (`python -m expedition33_rpc`)
+│
+├── core/                     # Application lifecycle, platform primitives & orchestrator
+│   ├── app.py                # Single-instance application bootstrap and clean shutdown
+│   ├── orchestrator.py       # Headless AppOrchestrator coordinating detector, IPC, and UI
+│   ├── platform.py           # OS abstraction: Win32 mutex, flock, CreateFileW 0x7, winreg
+│   ├── presence.py           # Decoupled immutable PresencePayload DTO
+│   ├── resources.py          # PyInstaller bundle (_MEIPASS) and development path resolution
+│   ├── settings.py           # Persistent JSON user preferences
+│   ├── smoke.py              # Startup validation and sanity verification
+│   └── startup.py            # Windows autostart (HKCU Run key) manager
+│
+├── detection/                # Game telemetry ingestion, detection & normalization
+│   ├── compat_paths.py       # Cross-platform IPC paths (Windows, Linux, Steam Deck Proton)
+│   ├── detector.py           # GameDetector, BridgeStateProvider & immutable GameState
+│   ├── game_data.py          # SSOT catalog accessors, regexes & Endless Tower matchers
+│   ├── normalization.py      # Pure normalization routines for levels, checkpoints, and bosses
+│   ├── save_reader.py        # Emergency fallback parser for binary UE5 .sav files via mmap
+│   └── timer_tracker.py      # ZoneTimerTracker state machine for persistent Discord timestamps
+│
+├── integrations/             # External boundaries and daemon installers
+│   ├── bridge_installer.py   # Automatic and manual UE4SS Lua mod bridge deployment
+│   ├── discord_rpc.py        # Native Discord IPC client with binary <II framing & rate limits
+│   └── updater.py            # GitHub Releases auto-update checker and background worker
+│
+├── ui/                       # Presentation layer and graphical shell
+│   ├── presentation.py       # Pure formatting functions for Discord status and tray text
+│   └── tray_app.py           # System tray menu, background polling pump, and user actions
+│
+└── assets/                   # Bundled static data and binaries
+    ├── bridge.zip            # Pre-compiled headless UE4SS mod package
+    ├── game_data.json        # Single Source of Truth localization and entity dictionary
+    ├── icon.ico              # Windows executable icon
+    └── icon.png              # System tray icon
+```
+
+---
+
+## 3. Asynchronous State Machine & Invariant Guarantees
 
 <p align="center">
   <img src="docs/architecture_threading.svg" alt="Expedition 33 Threading & Platform Abstraction" width="100%">
 </p>
 
+The application runtime maintains resilient execution across host process faults through strict invariant handling:
+
+```text
+               ┌─────────────┐
+        ┌───── │ Game Idle   │ ◄─────────────────────────┐
+        │      └─────────────┘                           │
+  Game Launched       ▲                                  │
+  (psutil check)      │ Game Terminated                  │
+        │             │ (cached_pid dead)                │
+        ▼             │                                  │
+ ┌─────────────┐      │                           ┌─────────────┐
+ │ Game Active │ ─────┘                           │ Discord IPC │
+ └─────────────┘                                  │ Reconnect   │
+        │                                         └─────────────┘
+  Telemetry Tick                                         ▲
+  (2.0s loop)                                     Pipe Broken /
+        │                                         Crash Detected
+        ▼                                                │
+ ┌──────────────────────┐                         ┌─────────────┐
+ │ Freshness Validation │ ─── [Discord OK] ─────► │ Active Pipe │
+ └──────────────────────┘                         └─────────────┘
+        │
+   Stale (> 5.0s)
+        │
+        ▼
+ ┌──────────────────────┐
+ │ Fallback Exploration │
+ └──────────────────────┘
+```
+
+### Critical Invariants:
+1. **Discord Crash & Disconnect**:
+   - Outbound writes detect broken pipes (`BrokenPipeError`, `OSError`).
+   - The connection transitions to `DISCONNECTED` immediately.
+   - Reconnection runs with exponential backoff and jitter without interrupting the game detection worker loop.
+2. **Game Closure / Crash**:
+   - The active loop polls `cached_pid` with $O(1)$ efficiency.
+   - Upon process exit, `AppOrchestrator` resets state instantly, clears `cached_pid`, transmits an empty/cleared Rich Presence frame to Discord, and drops back to the 5.0s idle cadence.
+3. **Telemetry Freshness SLA (TTL 5.0s)**:
+   - Status JSON files carry a mandatory Unix epoch `timestamp`.
+   - If `abs(current_time - telemetry.timestamp) > 5.0`, telemetry is marked stale.
+   - When telemetry is stale or missing, the state machine drops active combat/boss status to prevent ghost presences and falls back to zone exploration or `.sav` checkpoint inspection.
+4. **Frame Dirty-Checking**:
+   - Presence payloads are hashed/compared against the previous broadcast frame. Identical states are not re-sent, preventing pipe saturations and Discord rate-limit throttling.
+
 ---
 
-## 4. Telemetry Boundary: Hot Path vs. Emergency Fallback
+## 4. The 4 Frozen Contracts
 
-The detection subsystem uses an asymmetric tiered strategy to maximize telemetry accuracy while maintaining zero overhead:
+These four contracts are immutable boundaries. Modifications require explicit approval and compatibility guarantees.
 
-| Feature | Hot Path: `BridgeStateProvider` | Emergency Fallback: `SaveFileReader` |
-| :--- | :--- | :--- |
-| **Channel** | Local IPC file (`%TEMP%\expedition33_status.json`) | UE5 `.sav` binary on disk (`%LOCALAPPDATA%\Sandfall\Saved\SaveGames\...`) |
-| **I/O Mechanism** | Win32 `CreateFileW` with share flags `0x7` (`FILE_SHARE_READ \| FILE_SHARE_WRITE \| FILE_SHARE_DELETE`) | `mmap.mmap` read-only token scanning |
-| **Frequency / Latency** | Every active tick (2.0s) / `< 1 ms` | Lazy on-demand: executed only when bridge telemetry lacks active checkpoint |
-| **Freshness SLA** | **5.0 seconds**: if `timestamp` differs from `now()` by `> 5.0s`, data is discarded as stale | Cached by `(mtime, size)` to prevent re-reading identical save files |
-| **Extracted State** | Active zone, combat status, enemy names, Endless Tower floor/trial, active checkpoint | Level name and spawn point (`LastUsedSavePoint`, `LevelAssetName`, `SpawnPoint`) |
-
----
-
-## 5. Frozen Contracts (Non-Negotiable)
-
-Any modification or refactoring must preserve these four contracts without divergence.
-
-### 5.1. IPC JSON Schema (`%TEMP%\expedition33_status.json`)
-
-Written by the UE4SS Lua bridge mod in UTF-8 without BOM:
-
+### 4.1. UE4SS Telemetry IPC JSON (`%TEMP%\expedition33_status.json`)
+Written atomically by the client-side UE4SS Lua mod in UTF-8:
 ```json
 {
   "timestamp": 1727788800.0,
@@ -84,54 +150,53 @@ Written by the UE4SS Lua bridge mod in UTF-8 without BOM:
   "tower_trial": [11, 3]
 }
 ```
+- `timestamp`: Float epoch time; checked against 5.0s TTL.
+- `raw_zone` / `zone`: UE5 internal level identifier.
+- `in_combat`: Boolean state toggle.
+- `enemy_name` / `enemies`: Encounter targets.
+- `checkpoint`: Spawn tag mapped in `game_data.json`.
 
-- `timestamp`: Mandatory Unix epoch float used by the 5.0s freshness filter.
-- `raw_zone` / `zone`: Raw Unreal Engine map identifier.
-- `in_combat`: Boolean toggling exploration vs. combat presence templates.
-- `checkpoint`: Raw spawn point / flag tag.
-
-### 5.2. Discord Named Pipe Binary Frame (`<II`)
-
-Discord exposes a local IPC pipe on Windows (`\\.\pipe\discord-ipc-0` through `9`) and a Unix domain socket on POSIX. Every packet MUST conform to the native 8-byte binary layout:
-
+### 4.2. Discord Native IPC Binary Frame (`<II`)
+Discord Named Pipe (`\\.\pipe\discord-ipc-0`..`9` on Windows, UNIX socket on POSIX) packet wire format:
 ```text
 ┌───────────────────────┬───────────────────────┬───────────────────────────────────────┐
 │ Opcode (uint32 LE)    │ Length (uint32 LE)    │ JSON Payload (UTF-8, "Length" bytes)  │
-│ 4 Bytes               │ 4 Bytes               │ Serialized JSON (separators: ',',':') │
+│ 4 Bytes               │ 4 Bytes               │ Serialized JSON (compact)             │
 ├───────────────────────┴───────────────────────┴───────────────────────────────────────┤
-│ <II Binary Header (8 Bytes)                   │ Body Data                             │
+│ Header: struct.pack("<II", opcode, length)    │ Payload                               │
 └───────────────────────────────────────────────┴───────────────────────────────────────┘
 ```
+- Standard opcodes: `HANDSHAKE = 0`, `FRAME = 1`, `CLOSE = 2`, `PING = 3`, `PONG = 4`.
+- Field limits: Strings in `details`, `state`, and tooltips are bounded to **128 UTF-8 bytes**, safely sliced at code point boundaries by `truncate_presence_field`.
 
-Standard Opcodes:
-- `OP_HANDSHAKE = 0`: Initial handshake payload (`{"v": 1, "client_id": "..."}`)
-- `OP_FRAME = 1`: Rich Presence activity frame (`SET_ACTIVITY`)
-- `OP_CLOSE = 2`: Pipe closure
-- `OP_PING = 3` / `OP_PONG = 4`: IPC heartbeat
+### 4.3. SSOT Static Catalog (`assets/game_data.json`)
+Central repository for all static entities and translations:
+- `target_process_names`: Canonical list of executable targets.
+- `main_menu_tokens`: Substrings identifying title and loading screens.
+- `localized_presentation`: Multilingual format strings across all supported languages.
+- `zone_name_overrides_by_lang`: Maps raw level strings to human-facing zone titles.
+- `checkpoint_names_by_lang`: Maps 765 UE5 flag identifiers to localized checkpoint names.
+- `endless_tower_trials`: Stage, trial, and boss encounter lookup tables.
 
-*Discord Limit*: Strings in `details` and `state` must not exceed **128 UTF-8 bytes**. `truncate_presence_field` truncates directly on byte boundaries without breaking multibyte code points.
-
-### 5.3. Static SSOT Catalog (`game_data.json`)
-
-All mapping tables reside strictly in `src/expedition33_rpc/assets/game_data.json`. CI tests (`tests/ci/test_game_data_schema.py`) enforce the presence and consistency of:
-
-- `target_process_names`: Known game binaries (e.g. `sandfall-win64-shipping.exe`).
-- `main_menu_tokens`: Substrings identifying title, loading, or splash screens.
-- `localized_presentation`: Bilingual (`en-US`, `it`) templates (`exploring`, `fighting`, `stage_trial`).
-- `zone_name_overrides_by_lang`: Mapping from raw level tokens to localized names.
-- `checkpoint_names_by_lang`: Mapping from UE5 spawn tags to human-readable names.
-- `endless_tower_trials`: Static table for Endless Tower trial and boss matching.
-
-### 5.4. Windows Autostart Registry Contract
-
-System startup registration targets `HKEY_CURRENT_USER` (requiring no elevated UAC permissions):
-
+### 4.4. Windows Autostart Registry Contract
+Startup persistence is registered under `HKEY_CURRENT_USER` (requiring zero administrator privileges):
 ```text
 Hive:      HKEY_CURRENT_USER
 Subkey:    Software\Microsoft\Windows\CurrentVersion\Run
 Value:     Expedition33_DiscordRPC
 Type:      REG_SZ
-Content:   "C:\Path\To\Expedition33_RPC.exe" (Quoted absolute path)
+Content:   "C:\Path\To\Expedition33_RPC.exe"
 ```
+In development mode, points to `pythonw.exe` to suppress console allocation.
 
-In development environments, the command points to the windowless Python executable (`pythonw.exe`) to prevent terminal consoles from opening upon Windows logon.
+---
+
+## 5. Dry-Run Test Harness Design
+
+The codebase decouples domain logic from OS system calls and external sockets through dedicated test doubles located in `tests/harness/`:
+
+- **`FakeProcessScanner`**: Simulates process discovery, lifecycle state transitions, PID allocation, and abrupt crashes without launching external executables.
+- **`FakeBridgeProvider`**: Injects synthetic telemetry payloads and triggers edge-case timings (e.g. stale timestamps, corrupt JSON, missing keys).
+- **`DiscordPipeSimulator`**: Acts as a loopback Discord Named Pipe server in-memory, asserting opcode sequences, verifying `<II` packet parsing, and simulating pipe dropouts or invalid responses.
+
+This enables sub-second, 100% deterministic end-to-end integration test execution across macOS, Linux, and Windows in CI without requiring the game or Discord to be installed.
