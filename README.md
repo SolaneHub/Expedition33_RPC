@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v2.2.0-blue.svg" alt="Release"></a>
+  <a href="https://github.com/SolaneHub/Expedition33_RPC/releases"><img src="https://img.shields.io/badge/release-v2.3.0-blue.svg" alt="Release"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python"></a>
   <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="Platform"></a>
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/badge/code%20style-ruff-000000.svg" alt="Code Style: Ruff"></a>
@@ -40,7 +40,7 @@
 
 | Exploration & Combat | Endless Tower | Anti-Spoiler Shield |
 | :---: | :---: | :---: |
-| ![Exploration & Battle](docs/github/preview_combat.gif?v=2.2.0) | ![Endless Tower](docs/github/preview_tower.gif?v=2.2.0) | ![Anti-Spoiler Shield](docs/github/preview_antispoiler.gif?v=2.2.0) |
+| ![Exploration & Battle](docs/github/preview_combat.gif?v=2.3.0) | ![Endless Tower](docs/github/preview_tower.gif?v=2.3.0) | ![Anti-Spoiler Shield](docs/github/preview_antispoiler.gif?v=2.3.0) |
 | Dynamic transition from exploration (`Spring Meadows`) to battle (`Fighting: Lancelier`). | Transition from entrance exploration (`Endless Tower (Entrance)`) to floor combat (`Stage 1, Trial 1`). | One-click tray shield masking locations (`Hidden Location`) and encounters (`In Combat`). |
 
 ---

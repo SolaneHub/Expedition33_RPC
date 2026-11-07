@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.3.0] - 2026-11-07
+
+### New Features
+- **Granular Menu Substate Resolution (`detection.normalization`, `ui.presentation`)**:
+  - Introduced `resolve_menu_substate` and `MenuSubstate` detecting specific game menu stages: *Initial Screen* (Bootstrap/Logos), *Title Screen* ("Press Any Key"), *Main Menu*, *Loading Save*, *In Settings*, and *New Game*.
+  - Full native localization across all 20 supported languages in Discord Rich Presence details/state and Windows system tray menus.
+- **Process Startup & Loading Phase (`detection.detector`, `ui.presentation`)**:
+  - Added discrete `is_starting` lifecycle tracking for process launch before the first telemetry frame arrives ("Starting... / Loading...").
+  - Locked `has_received_telemetry` flag prevents false regressions to starting screens during transient telemetry delays.
+- **Dynamic Checkpoint Synchronization (`detection.detector`)**:
+  - Enabled sub-millisecond dynamic checkpoint synchronization via `SaveFileReader` when bridge checkpoint data is empty.
+  - Automatically captures intra-zone fast travel and resting camp transitions via O(1) `st_mtime` caching without CPU polling overhead.
+- **Combat Telemetry Heartbeat (`bridge.zip`)**:
+  - Lua mod continuously emits heartbeat telemetry frames during combat encounters to preserve the 5.0s TTL freshness SLA across extended boss fights.
+  - Added safe widget visibility introspection for settings and save menu screens.
+
+### Bug Fixes & Hardening
+- **Save Reader Checkpoint Resolution Guard (`detection.detector`)**:
+  - Eliminated redundant conditional checks in checkpoint fallback branch, centralizing Endless Tower and starting state filters.
+  - Deduplicated fallback state assignment between active and fallback detector branches.
+- **Tray Menu Redraw Suppression (`ui.tray_app`)**:
+  - Extended menu comparison cache to include `raw_zone` and `is_starting`, preventing redundant tray context menu redraws during substate transitions.
+
+### Refactoring & Code Quality
+- **Strict PEP 695 Typing (`detection.normalization`)**:
+  - Strongly typed `resolve_menu_substate` with `MenuSubstate` return type alias, exported in `__all__` under zero Pyright warnings.
+  - Cleaned unreferenced temporary variables in string normalizer routines.
+- **Test Suite Expansion (`tests.detection.test_detector`, `tests.ui.test_presentation_and_ui`)**:
+  - Added unit test coverage for initial startup telemetry delays, fast-travel save reader updates, and localized menu substate presentation across Italian and English.
+
+### Documentation & Architecture
+- **Interactive SVG Architecture Diagrams (`docs/`, `tools.generate_diagrams`)**:
+  - Updated pipeline and state machine diagrams illustrating dynamic checkpoint synchronization and fallback exploration.
+- **Agent & Developer Directives (`AGENTS.md`, `ARCHITECTURE.md`)**:
+  - Codified runtime invariants for startup telemetry lifecycle, heartbeat SLAs, and save reader checkpoint fallbacks.
+
 ## [v2.2.0] - 2026-11-07
 
 ### New Features & Test Harness
