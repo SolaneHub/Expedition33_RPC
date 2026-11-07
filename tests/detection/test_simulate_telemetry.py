@@ -231,7 +231,7 @@ def test_simulate_telemetry_cli_scenario_boss_fight(
         "--speed",
         "100.0",
         "--interval",
-        "0.05",
+        "5.0",
         "--path",
         str(target_file),
     ]
@@ -266,7 +266,7 @@ def test_simulate_telemetry_cli_scenario_tower_climb(
         "--speed",
         "100.0",
         "--interval",
-        "0.05",
+        "5.0",
         "--path",
         str(target_file),
     ]
@@ -524,3 +524,66 @@ def test_bridge_provider_concurrent_corrupt_ipc_stress(tmp_path: Path) -> None:
 
     assert not writer_errors, f"Writer thread failed unexpectedly: {writer_errors}"
     assert not reader_errors, f"Orchestrator encountered unhandled exceptions: {reader_errors}"
+
+
+@pytest.mark.unit
+def test_simulate_telemetry_cli_list_scenarios(capsys: pytest.CaptureFixture[str]) -> None:
+    """Verifies CLI execution with --list-scenarios prints all scenario details."""
+    cli_args = ["simulate_telemetry.py", "--list-scenarios"]
+    with patch("sys.argv", cli_args):
+        main()
+
+    out = capsys.readouterr().out
+    assert "Available Predefined Storyboard Scenarios:" in out
+    assert "boss_fight" in out
+    assert "tower_climb" in out
+    assert "rare_boss" in out
+    assert "multi_enemy" in out
+
+
+@pytest.mark.unit
+def test_game_session_simulator_storyboard_playback() -> None:
+    """Verifies GameSessionSimulator fluent storyboard injection and step indexing."""
+    from tests.harness.game_session import GameSessionSimulator
+
+    with GameSessionSimulator() as session:
+        session.start_game()
+        # Inject whole scenario
+        session.play_storyboard_scenario("rare_boss")
+        state = session.get_game_state()
+        assert state.raw_zone == "Level_Main_OldLumiere"
+        assert state.in_combat is False
+        assert state.raw_checkpoint == "Sanctuary"
+
+        # Inject single step (step 1 is boss encounter)
+        session.play_storyboard_scenario("rare_boss", step_index=1)
+        state_boss = session.get_game_state()
+        assert state_boss.in_combat is True
+        assert "Simon" in state_boss.enemy_name
+
+        # Invalid scenario or index raises
+        with pytest.raises(ValueError, match="Unknown scenario"):
+            session.play_storyboard_scenario("non_existent")
+
+        with pytest.raises(IndexError, match="out of range"):
+            session.play_storyboard_scenario("rare_boss", step_index=99)
+
+
+@pytest.mark.unit
+def test_discord_pipe_simulator_header_validation() -> None:
+    """Verifies that DiscordPipeSimulator enforces binary header <II constraints."""
+    import struct
+
+    from tests.harness.discord_pipe import DiscordPipeSimulator
+
+    pipe = DiscordPipeSimulator()
+
+    # Valid frame succeeds
+    valid_header = struct.pack("<II", 1, 4) + b"test"
+    pipe.write(valid_header)
+    assert len(pipe.written_data) == 12
+
+    # Invalid opcode raises ValueError
+    bad_op_header = struct.pack("<II", 999, 4) + b"test"
+    with pytest.raises(ValueError, match="Invalid Discord IPC opcode: 999"):
+        pipe.write(bad_op_header)

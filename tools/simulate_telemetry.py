@@ -13,7 +13,6 @@ import os
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,88 +21,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.harness.game_session import create_telemetry_payload  # noqa: E402
-
-
-@dataclass(frozen=True, slots=True)
-class StoryboardStep:
-    """Represents a single step in a timed telemetry storyboard playback scenario."""
-
-    duration: float
-    zone: str
-    in_combat: bool = False
-    enemy_name: str = ""
-    enemies: list[str] | None = None
-    floor: int | None = None
-    checkpoint: str = "Entrance"
-    tower_trial: Any | None = None
-    description: str = ""
-
-
-SCENARIOS: dict[str, list[StoryboardStep]] = {
-    "boss_fight": [
-        StoryboardStep(
-            duration=5.0,
-            zone="Level_Main_OldLumiere",
-            in_combat=False,
-            enemy_name="",
-            checkpoint="Entrance",
-            description="Exploration in Level_Main_OldLumiere",
-        ),
-        StoryboardStep(
-            duration=10.0,
-            zone="Level_Main_OldLumiere",
-            in_combat=True,
-            enemy_name="Duollistes",
-            enemies=["Duollistes"],
-            checkpoint="Entrance",
-            description="Boss encounter with Duollistes",
-        ),
-        StoryboardStep(
-            duration=5.0,
-            zone="Level_Main_OldLumiere",
-            in_combat=False,
-            enemy_name="",
-            checkpoint="Manor Gardens",
-            description="Victory and exploration at Manor Gardens",
-        ),
-    ],
-    "tower_climb": [
-        StoryboardStep(
-            duration=5.0,
-            zone="Level_EndlessTower",
-            in_combat=True,
-            enemy_name="Gault, Luster, Ramasseur",
-            enemies=["Gault", "Luster", "Ramasseur"],
-            floor=1,
-            tower_trial=(1, 1),
-            checkpoint="Stage 1, Trial 1",
-            description="Endless Tower - Stage 1, Trial 1",
-        ),
-        StoryboardStep(
-            duration=5.0,
-            zone="Level_EndlessTower",
-            in_combat=True,
-            enemy_name="Potier, Steel Chevaliere, Greatsword Cultist",
-            enemies=["Potier", "Steel Chevaliere", "Greatsword Cultist"],
-            floor=1,
-            tower_trial=(1, 2),
-            checkpoint="Stage 1, Trial 2",
-            description="Endless Tower - Stage 1, Trial 2",
-        ),
-        StoryboardStep(
-            duration=5.0,
-            zone="Level_EndlessTower",
-            in_combat=True,
-            enemy_name="Dualliste, Luster, Troubadour",
-            enemies=["Dualliste", "Luster", "Troubadour"],
-            floor=1,
-            tower_trial=(1, 3),
-            checkpoint="Stage 1, Trial 3",
-            description="Endless Tower - Stage 1, Trial 3",
-        ),
-    ],
-}
+from tests.harness.game_session import (  # noqa: E402
+    SCENARIOS,
+    create_telemetry_payload,
+)
 
 
 def get_default_telemetry_path() -> Path:
@@ -280,6 +201,11 @@ def main() -> None:
         help="Refresh interval in seconds when --loop or --scenario is active (default: 1.0)",
     )
     parser.add_argument(
+        "--list-scenarios",
+        action="store_true",
+        help="List all available predefined telemetry storyboard scenarios and exit",
+    )
+    parser.add_argument(
         "--clean",
         action="store_true",
         help="Remove telemetry file and exit",
@@ -287,6 +213,15 @@ def main() -> None:
 
     args = parser.parse_args()
     target_path = args.path if args.path is not None else get_default_telemetry_path()
+
+    if args.list_scenarios:
+        print("Available Predefined Storyboard Scenarios:")
+        for name, steps in SCENARIOS.items():
+            total_duration = sum(s.duration for s in steps)
+            print(f"  - {name} ({len(steps)} steps, ~{total_duration:.1f}s)")
+            for i, step in enumerate(steps, 1):
+                print(f"      Step {i}: {step.description} [{step.zone}]")
+        return
 
     if args.clean:
         if target_path.exists():
