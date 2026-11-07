@@ -31,6 +31,13 @@ REQUIRED_PRESENTATION_KEYS: frozenset[str] = frozenset(
         "traveling",
         "floor",
         "stage_trial",
+        "starting",
+        "loading",
+        "initial_screen",
+        "main_menu",
+        "loading_save",
+        "in_settings",
+        "new_game",
     }
 )
 

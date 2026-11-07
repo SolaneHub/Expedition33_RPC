@@ -4,7 +4,11 @@
     "sandfall-wingdk-shipping.exe"
   ],
   "main_menu_tokens": [
+    "bootstrap",
+    "gamebootstrap",
     "level_mainmenu",
+    "map_game_bootstrap",
+    "map_gamebootstrap",
     "wbp_gm_mainmenucontainer",
     "wbp_gm_mainmenucontainer_c",
     "wbp_loadingscreen",
@@ -19,10 +23,20 @@
     "wbp_mm_loadscreen_c",
     "wbp_mm_mainmenu",
     "wbp_mm_mainmenu_c",
+    "wbp_mm_newgame",
+    "wbp_mm_newgame_c",
     "wbp_mm_saveslot",
     "wbp_mm_saveslot_c",
+    "wbp_mm_settings",
+    "wbp_mm_settings_c",
     "wbp_mm_titlescreen",
     "wbp_mm_titlescreen_c",
+    "wbp_newgame",
+    "wbp_newgame_c",
+    "wbp_settings",
+    "wbp_settings_c",
+    "wbp_settings_options",
+    "wbp_settings_options_c",
     "wbp_splashscreen_epilepsy",
     "wbp_splashscreen_epilepsy_c",
     "wbp_splashscreen_savewarning",
@@ -18095,7 +18109,14 @@
       "traveling": "Traveling",
       "hidden_location": "Hidden Location",
       "floor": "Floor {floor}",
-      "stage_trial": "Stage {stage}, Trial {trial}"
+      "stage_trial": "Stage {stage}, Trial {trial}",
+      "starting": "Starting...",
+      "loading": "Loading...",
+      "initial_screen": "Initial Screen",
+      "main_menu": "Main Menu",
+      "loading_save": "Loading Save",
+      "in_settings": "In Settings",
+      "new_game": "New Game"
     },
     "it": {
       "in_menu": "Nel menu principale",
@@ -18106,7 +18127,14 @@
       "traveling": "In viaggio",
       "hidden_location": "Posizione riservata",
       "floor": "Piano {floor}",
-      "stage_trial": "Fase {stage}, Prova {trial}"
+      "stage_trial": "Fase {stage}, Prova {trial}",
+      "starting": "Avvio in corso...",
+      "loading": "Caricamento...",
+      "initial_screen": "Schermata iniziale",
+      "main_menu": "Menu principale",
+      "loading_save": "Caricamento salvataggio",
+      "in_settings": "Nelle impostazioni",
+      "new_game": "Nuova partita"
     },
     "fr-FR": {
       "in_menu": "Dans le menu principal",
@@ -18117,7 +18145,14 @@
       "traveling": "En voyage",
       "hidden_location": "Lieu masqué",
       "floor": "Étage {floor}",
-      "stage_trial": "Niveau {stage}, Épreuve {trial}"
+      "stage_trial": "Niveau {stage}, Épreuve {trial}",
+      "starting": "Démarrage en cours...",
+      "loading": "Chargement...",
+      "initial_screen": "Écran initial",
+      "main_menu": "Menu principal",
+      "loading_save": "Chargement de sauvegarde",
+      "in_settings": "Dans les paramètres",
+      "new_game": "Nouvelle partie"
     },
     "de": {
       "in_menu": "Im Hauptmenü",
@@ -18128,7 +18163,14 @@
       "traveling": "Auf Reisen",
       "hidden_location": "Verborgener Ort",
       "floor": "Ebene {floor}",
-      "stage_trial": "Phase {stage}, {trial}. Prüfung"
+      "stage_trial": "Phase {stage}, {trial}. Prüfung",
+      "starting": "Wird gestartet...",
+      "loading": "Laden...",
+      "initial_screen": "Startbildschirm",
+      "main_menu": "Hauptmenü",
+      "loading_save": "Spielstand wird geladen",
+      "in_settings": "In den Einstellungen",
+      "new_game": "Neues Spiel"
     },
     "es": {
       "in_menu": "En el menú principal",
@@ -18139,7 +18181,14 @@
       "traveling": "De viaje",
       "hidden_location": "Ubicación oculta",
       "floor": "Piso {floor}",
-      "stage_trial": "Fase {stage}, Prueba {trial}"
+      "stage_trial": "Fase {stage}, Prueba {trial}",
+      "starting": "Iniciando...",
+      "loading": "Cargando...",
+      "initial_screen": "Pantalla inicial",
+      "main_menu": "Menú principal",
+      "loading_save": "Cargando partida",
+      "in_settings": "En ajustes",
+      "new_game": "Nueva partida"
     },
     "es-419": {
       "in_menu": "En el menú principal",
@@ -18150,7 +18199,14 @@
       "traveling": "De viaje",
       "hidden_location": "Ubicación oculta",
       "floor": "Piso {floor}",
-      "stage_trial": "Fase {stage}, Prueba {trial}"
+      "stage_trial": "Fase {stage}, Prueba {trial}",
+      "starting": "Iniciando...",
+      "loading": "Cargando...",
+      "initial_screen": "Pantalla inicial",
+      "main_menu": "Menú principal",
+      "loading_save": "Cargando partida",
+      "in_settings": "En ajustes",
+      "new_game": "Nueva partida"
     },
     "pt-BR": {
       "in_menu": "No Menu Principal",
@@ -18161,7 +18217,14 @@
       "traveling": "Viajando",
       "hidden_location": "Local Oculto",
       "floor": "Andar {floor}",
-      "stage_trial": "{stage}ª Fase, Desafio {trial}"
+      "stage_trial": "{stage}ª Fase, Desafio {trial}",
+      "starting": "Iniciando...",
+      "loading": "Carregando...",
+      "initial_screen": "Tela inicial",
+      "main_menu": "Menu principal",
+      "loading_save": "Carregando jogo salvo",
+      "in_settings": "Nas configurações",
+      "new_game": "Novo jogo"
     },
     "ja": {
       "in_menu": "メインメニュー",
@@ -18172,7 +18235,14 @@
       "traveling": "移動中",
       "hidden_location": "非公開の場所",
       "floor": "{floor}階",
-      "stage_trial": "ステージ{stage}、試練{trial}"
+      "stage_trial": "ステージ{stage}、試練{trial}",
+      "starting": "起動中...",
+      "loading": "読み込み中...",
+      "initial_screen": "初期画面",
+      "main_menu": "メインメニュー",
+      "loading_save": "セーブデータ読み込み中",
+      "in_settings": "設定中",
+      "new_game": "ニューゲーム"
     },
     "ko": {
       "in_menu": "메인 메뉴",
@@ -18183,7 +18253,14 @@
       "traveling": "이동 중",
       "hidden_location": "비공개 위치",
       "floor": "{floor}층",
-      "stage_trial": "스테이지 {stage}, 시험 {trial}"
+      "stage_trial": "스테이지 {stage}, 시험 {trial}",
+      "starting": "시작 중...",
+      "loading": "로딩 중...",
+      "initial_screen": "초기 화면",
+      "main_menu": "메인 메뉴",
+      "loading_save": "저장 데이터 불러오는 중",
+      "in_settings": "설정 중",
+      "new_game": "새 게임"
     },
     "zh-Hans": {
       "in_menu": "主菜单",
@@ -18194,7 +18271,14 @@
       "traveling": "旅行中",
       "hidden_location": "隐藏地点",
       "floor": "第{floor}层",
-      "stage_trial": "第{stage}层，试炼{trial}"
+      "stage_trial": "第{stage}层，试炼{trial}",
+      "starting": "正在启动...",
+      "loading": "加载中...",
+      "initial_screen": "初始画面",
+      "main_menu": "主菜单",
+      "loading_save": "正在读取存档",
+      "in_settings": "设置中",
+      "new_game": "新游戏"
     },
     "zh-Hant": {
       "in_menu": "主選單",
@@ -18205,7 +18289,14 @@
       "traveling": "旅行中",
       "hidden_location": "隱藏地點",
       "floor": "第{floor}層",
-      "stage_trial": "試煉{stage}，第{trial}關"
+      "stage_trial": "試煉{stage}，第{trial}關",
+      "starting": "正在啟動...",
+      "loading": "載入中...",
+      "initial_screen": "初始畫面",
+      "main_menu": "主選單",
+      "loading_save": "正在讀取存檔",
+      "in_settings": "設定中",
+      "new_game": "新遊戲"
     },
     "ru": {
       "in_menu": "В главном меню",
@@ -18216,7 +18307,14 @@
       "traveling": "В пути",
       "hidden_location": "Скрытая локация",
       "floor": "Этаж {floor}",
-      "stage_trial": "Этап {stage}, Испытание {trial}"
+      "stage_trial": "Этап {stage}, Испытание {trial}",
+      "starting": "Запуск...",
+      "loading": "Загрузка...",
+      "initial_screen": "Начальный экран",
+      "main_menu": "Главное меню",
+      "loading_save": "Загрузка сохранения",
+      "in_settings": "В настройках",
+      "new_game": "Новая игра"
     },
     "pl": {
       "in_menu": "W menu głównym",
@@ -18227,7 +18325,14 @@
       "traveling": "W podróży",
       "hidden_location": "Ukryta lokacja",
       "floor": "Piętro {floor}",
-      "stage_trial": "Etap {stage}, Próba {trial}"
+      "stage_trial": "Etap {stage}, Próba {trial}",
+      "starting": "Uruchamianie...",
+      "loading": "Wczytywanie...",
+      "initial_screen": "Ekran początkowy",
+      "main_menu": "Menu główne",
+      "loading_save": "Wczytywanie zapisu",
+      "in_settings": "W ustawieniach",
+      "new_game": "Nowa gra"
     },
     "ar": {
       "in_menu": "في القائمة الرئيسية",
@@ -18238,7 +18343,14 @@
       "traveling": "في ترحال",
       "hidden_location": "موقع مخفي",
       "floor": "الطابق {floor}",
-      "stage_trial": "المرحلة {stage}، الاختبار {trial}"
+      "stage_trial": "المرحلة {stage}، الاختبار {trial}",
+      "starting": "جارٍ بدء التشغيل...",
+      "loading": "جارٍ التحميل...",
+      "initial_screen": "الشاشة الأولية",
+      "main_menu": "القائمة الرئيسية",
+      "loading_save": "تحميل ملف الحفظ",
+      "in_settings": "في الإعدادات",
+      "new_game": "لعبة جديدة"
     },
     "cs": {
       "in_menu": "V hlavní nabídce",
@@ -18249,7 +18361,14 @@
       "traveling": "Na cestách",
       "hidden_location": "Skrytá lokace",
       "floor": "Patro {floor}",
-      "stage_trial": "{stage}. fáze, {trial}. zkouška"
+      "stage_trial": "{stage}. fáze, {trial}. zkouška",
+      "starting": "Spouštění...",
+      "loading": "Načítání...",
+      "initial_screen": "Úvodní obrazovka",
+      "main_menu": "Hlavní nabídka",
+      "loading_save": "Načítání uložené hry",
+      "in_settings": "V nastavení",
+      "new_game": "Nová hra"
     },
     "tr": {
       "in_menu": "Ana Menüde",
@@ -18260,7 +18379,14 @@
       "traveling": "Seyahatte",
       "hidden_location": "Gizli Konum",
       "floor": "Kat {floor}",
-      "stage_trial": "{stage}. Aşama, {trial}. Sınama"
+      "stage_trial": "{stage}. Aşama, {trial}. Sınama",
+      "starting": "Başlatılıyor...",
+      "loading": "Yükleniyor...",
+      "initial_screen": "Başlangıç Ekranı",
+      "main_menu": "Ana Menü",
+      "loading_save": "Kayıt Yükleniyor",
+      "in_settings": "Ayarlarda",
+      "new_game": "Yeni Oyun"
     },
     "uk": {
       "in_menu": "У головному меню",
@@ -18271,7 +18397,14 @@
       "traveling": "У дорозі",
       "hidden_location": "Прихована локація",
       "floor": "Поверх {floor}",
-      "stage_trial": "Етап {stage}, Випробування {trial}"
+      "stage_trial": "Етап {stage}, Випробування {trial}",
+      "starting": "Запуск...",
+      "loading": "Завантаження...",
+      "initial_screen": "Початковий екран",
+      "main_menu": "Головне меню",
+      "loading_save": "Завантаження збереження",
+      "in_settings": "У налаштуваннях",
+      "new_game": "Нова гра"
     },
     "th": {
       "in_menu": "อยู่ในเมนูหลัก",
@@ -18282,7 +18415,14 @@
       "traveling": "กำลังเดินทาง",
       "hidden_location": "สถานที่ลับ",
       "floor": "ชั้นที่ {floor}",
-      "stage_trial": "ด่านที่ {stage} บททดสอบที่ {trial}"
+      "stage_trial": "ด่านที่ {stage} บททดสอบที่ {trial}",
+      "starting": "กำลังเริ่ม...",
+      "loading": "กำลังโหลด...",
+      "initial_screen": "หน้าจอเริ่มต้น",
+      "main_menu": "เมนูหลัก",
+      "loading_save": "กำลังโหลดเซฟ",
+      "in_settings": "อยู่ในการตั้งค่า",
+      "new_game": "เริ่มเกมใหม่"
     },
     "vi": {
       "in_menu": "Trong Menu Chính",
@@ -18293,7 +18433,14 @@
       "traveling": "Đang Di Chuyển",
       "hidden_location": "Địa Điểm Ẩn",
       "floor": "Tầng {floor}",
-      "stage_trial": "Màn {stage}, Thử Thách {trial}"
+      "stage_trial": "Màn {stage}, Thử Thách {trial}",
+      "starting": "Đang khởi động...",
+      "loading": "Đang tải...",
+      "initial_screen": "Màn hình ban đầu",
+      "main_menu": "Menu chính",
+      "loading_save": "Đang tải bản lưu",
+      "in_settings": "Trong cài đặt",
+      "new_game": "Trò chơi mới"
     },
     "id": {
       "in_menu": "Di Menu Utama",
@@ -18304,7 +18451,14 @@
       "traveling": "Bepergian",
       "hidden_location": "Lokasi Tersembunyi",
       "floor": "Lantai {floor}",
-      "stage_trial": "Tahap {stage}, Ujian {trial}"
+      "stage_trial": "Tahap {stage}, Ujian {trial}",
+      "starting": "Memulai...",
+      "loading": "Memuat...",
+      "initial_screen": "Layar Awal",
+      "main_menu": "Menu Utama",
+      "loading_save": "Memuat Simpanan",
+      "in_settings": "Di Pengaturan",
+      "new_game": "Permainan Baru"
     }
   }
 }
