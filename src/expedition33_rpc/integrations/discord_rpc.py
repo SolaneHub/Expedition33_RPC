@@ -28,6 +28,7 @@ OP_FRAME = 1
 OP_CLOSE = 2
 OP_PING = 3
 OP_PONG = 4
+VALID_OPCODES: frozenset[int] = frozenset({OP_HANDSHAKE, OP_FRAME, OP_CLOSE, OP_PING, OP_PONG})
 
 
 class DiscordFrameCodec:

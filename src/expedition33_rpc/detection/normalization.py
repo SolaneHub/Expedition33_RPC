@@ -91,6 +91,13 @@ def strip_accents(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
 
 
+_MAIN_MENU_DISPLAYS: frozenset[str] = frozenset(
+    table["mainmenu"].lower().strip()
+    for table in game_data.ZONE_NAME_OVERRIDES_BY_LANG.values()
+    if "mainmenu" in table and isinstance(table["mainmenu"], str)
+)
+
+
 def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
     """Returns True if the zone identifier or display string indicates a main menu or title screen."""
     if not raw_zone and not zone_display:
@@ -102,10 +109,7 @@ def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
     norm_display = strip_accents(display_lower)
     if "menu" in raw_lower or "menu" in norm_display:
         return True
-    return any(
-        table.get("mainmenu", "").lower() == display_lower
-        for table in game_data.ZONE_NAME_OVERRIDES_BY_LANG.values()
-    )
+    return display_lower in _MAIN_MENU_DISPLAYS
 
 
 def is_menu_zone(

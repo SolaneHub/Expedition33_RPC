@@ -12,7 +12,7 @@ import time
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from tests.harness import FakeProcess
@@ -160,11 +160,11 @@ def test_detector_custom_target_process_names_string_injection() -> None:
     detector = GameDetector(
         process_scanner=lambda: [proc],
         target_process_names="mycustomgame.exe",
+        bridge_provider=None,
     )
-    assert "mycustomgame.exe" in detector.target_process_names
-    found = detector.find_game_process()
-    assert found is not None
-    assert found.pid == 7777
+    state = detector.get_game_state()
+    assert state.is_running is True
+    assert state.process_pid == 7777
 
 
 @pytest.mark.unit
@@ -173,12 +173,11 @@ def test_detector_custom_target_process_names_injection() -> None:
     detector = GameDetector(
         process_scanner=lambda: [proc_b],
         target_process_names=["gamevarianta.exe", "gamevariantb.exe"],
+        bridge_provider=None,
     )
-    assert "gamevarianta.exe" in detector.target_process_names
-    assert "gamevariantb.exe" in detector.target_process_names
-    found = detector.find_game_process()
-    assert found is not None
-    assert found.pid == 8888
+    state = detector.get_game_state()
+    assert state.is_running is True
+    assert state.process_pid == 8888
 
 
 @pytest.mark.unit
@@ -364,42 +363,49 @@ def test_detector_bridge_grace_period_prevents_telemetry_jitter(tmp_path: Path) 
     ini_path = tmp_path / "GameUserSettings.ini"
     ini_path.write_text("[Internationalization]\nLanguage=en\n", encoding="utf-8")
 
+    status_file = tmp_path / "expedition33_status.json"
+    status_file.write_text(
+        json.dumps(
+            {
+                "timestamp": 1000.0,
+                "zone": "Level_Main_OldLumiere",
+                "in_combat": True,
+                "enemy_name": "Duollistes",
+                "tower_floor": None,
+                "checkpoint": "",
+            }
+        ),
+        encoding="utf-8",
+    )
+
     current_clock = 1000.0
-    bridge_provider = BridgeStateProvider(grace_period=2.5, time_provider=lambda: current_clock)
-    glitch_responses = [
-        {
-            "timestamp": 1000.0,
-            "zone": "Level_Main_OldLumiere",
-            "in_combat": True,
-            "enemy_name": "Duollistes",
-            "tower_floor": None,
-            "checkpoint": "",
-        },
-        None,  # transient glitch within grace period
-        None,  # transient glitch past grace period
-    ]
-    with patch.object(bridge_provider, "read_bridge_status", side_effect=glitch_responses):
-        detector = GameDetector(
-            bridge_provider=bridge_provider,
-            process_scanner=lambda: [mock_proc],
-            game_user_settings_path=ini_path,
-        )
+    bridge_provider = BridgeStateProvider(
+        paths=[str(status_file)],
+        grace_period=2.5,
+        time_provider=lambda: current_clock,
+    )
+    detector = GameDetector(
+        bridge_provider=bridge_provider,
+        process_scanner=lambda: [mock_proc],
+        game_user_settings_path=ini_path,
+    )
 
-        # Tick 1: Bridge succeeds
-        st1 = detector.get_game_state()
-        assert st1.zone_name == "Old Lumière"
-        assert st1.in_combat is True
+    # Tick 1: Bridge succeeds
+    st1 = detector.get_game_state()
+    assert st1.zone_name == "Old Lumière"
+    assert st1.in_combat is True
 
-        # Tick 2: Bridge glitch (read_bridge_status returns None), bridge internal grace period returns cached state
-        current_clock = 1001.0
-        st2 = detector.get_game_state()
-        assert st2.zone_name == "Old Lumière"
-        assert st2.in_combat is True
+    # Tick 2: Bridge glitch (file removed), bridge internal grace period returns cached state
+    status_file.unlink()
+    current_clock = 1001.0
+    st2 = detector.get_game_state()
+    assert st2.zone_name == "Old Lumière"
+    assert st2.in_combat is True
 
-        # Tick 3: Past grace period (5.0s > 2.5s), telemetry expires
-        current_clock = 1005.0
-        st3 = detector.get_game_state()
-        assert st3.in_combat is False
+    # Tick 3: Past grace period (5.0s > 2.5s), telemetry expires
+    current_clock = 1005.0
+    st3 = detector.get_game_state()
+    assert st3.in_combat is False
 
 
 @pytest.mark.unit
@@ -449,7 +455,7 @@ def test_bridge_retains_checkpoint_across_ticks_for_same_zone() -> None:
 
 @pytest.mark.unit
 def test_game_process_path_and_win64_dir_propagation(tmp_path: Path) -> None:
-    """Verifies that GameDetector exposes exe_path and win64_dir when game process is detected."""
+    """Verifies that GameState exposes exe_path and win64_dir when game process is detected."""
     fake_exe = tmp_path / "Binaries" / "Win64" / "sandfall-win64-shipping.exe"
     fake_exe.parent.mkdir(parents=True, exist_ok=True)
     fake_exe.write_text("binary", encoding="utf-8")
@@ -463,19 +469,8 @@ def test_game_process_path_and_win64_dir_propagation(tmp_path: Path) -> None:
 
     detector = GameDetector(
         process_scanner=lambda: [mock_proc],
+        bridge_provider=None,
     )
-
-    assert detector.game_exe_path is None
-    assert detector.game_win64_dir is None
-    assert detector.exe_path is None
-    assert detector.win64_dir is None
-
-    proc = detector.find_game_process()
-    assert proc is mock_proc
-    assert detector.game_exe_path == os.path.normpath(str(fake_exe))
-    assert detector.game_win64_dir == fake_exe.parent
-    assert detector.exe_path == os.path.normpath(str(fake_exe))
-    assert detector.win64_dir == fake_exe.parent
 
     # Encapsulation contract: GameState emits process_info, win64_dir, and exe_path
     state = detector.get_game_state()
@@ -687,23 +682,17 @@ def test_cleas_workshop_is_not_detected_as_tower() -> None:
         "checkpoint": "Workshop Entrance",
         "timestamp": 1000.0,
     }
-    mock_timer_tracker = MagicMock(spec=ZoneTimerTracker)
-    mock_timer_tracker.current_zone_id = None
-    mock_timer_tracker.update.return_value = 1000.0
     detector = GameDetector(
         bridge_provider=bridge_provider,
         process_scanner=lambda: [mock_proc],
-        timer_tracker=mock_timer_tracker,
     )
 
     state = detector.get_game_state(now=1000.0)
     assert state.is_running is True
     assert state.raw_zone == "Level_Side_CleasWorkshop"
-    assert detector.current_tower_trial is None
+    assert state.zone_name == "Painting Workshop"
     assert state.tower_stage_trial is None
-    mock_timer_tracker.update.assert_called_once()
-    _, kwargs = mock_timer_tracker.update.call_args
-    assert kwargs.get("is_tower") is False
+    assert state.tower_floor is None
 
 
 @pytest.mark.unit
@@ -744,30 +733,97 @@ def test_save_reader_protocol_runtime_checkable() -> None:
 
 @pytest.mark.unit
 def test_detector_save_reader_defaults_to_none() -> None:
-    detector = GameDetector()
-    assert detector.save_reader is None
+    """Verifies that GameDetector defaults without save_reader and produces clean empty checkpoints."""
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    detector = GameDetector(
+        process_scanner=lambda: [mock_proc],
+        bridge_provider=None,
+    )
+    state = detector.get_game_state()
+    assert state.is_running is True
+    assert state.raw_checkpoint == ""
+    assert state.checkpoint_name == ""
 
 
 @pytest.mark.unit
 def test_detector_fallback_to_save_reader_when_provided() -> None:
+    """Verifies that GameDetector falls back to SaveReader when bridge becomes stale/inactive."""
     mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
     mock_save_reader = MagicMock(spec=SaveReaderProtocol)
     mock_save_reader.resolve_checkpoint_for_zone.return_value = "SpawnPoint_VersosDraft"
 
     bridge_provider = MagicMock(spec=BridgeStateProvider)
-    bridge_provider.read_game_data.return_value = None
-
     detector = GameDetector(
         bridge_provider=bridge_provider,
         process_scanner=lambda: [mock_proc],
         save_reader=mock_save_reader,
     )
-    detector.last_raw_zone = "Level_Side_VersosDraft"
 
-    state = detector.get_game_state(now=1000.0)
-    assert state.is_running is True
-    assert state.raw_checkpoint == "SpawnPoint_VersosDraft"
+    # Tick 1: Bridge active in Versos Draft
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_Side_VersosDraft",
+        "in_combat": False,
+        "checkpoint": "",
+        "timestamp": 1000.0,
+    }
+    st1 = detector.get_game_state(now=1000.0)
+    assert st1.is_running is True
+    assert st1.raw_zone == "Level_Side_VersosDraft"
+
+    # Tick 2: Bridge telemetry drops (returns None) -> Clean fallback to save reader
+    bridge_provider.read_game_data.return_value = None
+    st2 = detector.get_game_state(now=1002.0)
+    assert st2.is_running is True
+    assert st2.raw_checkpoint == "SpawnPoint_VersosDraft"
+    assert st2.checkpoint_name == "Spawn Point_Versos Draft"
     mock_save_reader.resolve_checkpoint_for_zone.assert_called_once_with("Level_Side_VersosDraft")
+
+
+@pytest.mark.unit
+def test_tower_trial_cleared_when_leaving_tower_combat() -> None:
+    """Verifies that current_tower_trial is cleared when transitioning out of tower or combat."""
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    bridge_provider = MagicMock(spec=BridgeStateProvider)
+    detector = GameDetector(
+        bridge_provider=bridge_provider,
+        process_scanner=lambda: [mock_proc],
+    )
+
+    # Tick 1: In tower combat with active trial
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_EndlessTower_Trial",
+        "in_combat": True,
+        "enemy_name": "Boss_Trial_1_2",
+        "enemies": ["Boss_Trial_1_2"],
+        "tower_trial": (1, 2),
+        "timestamp": 1000.0,
+    }
+    st1 = detector.get_game_state(now=1000.0)
+    assert st1.tower_stage_trial == (1, 2)
+
+    # Tick 2: Player warps to non-tower zone while still in combat -> trial must clear
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_Main_OldLumiere",
+        "in_combat": True,
+        "enemy_name": "Duollistes",
+        "enemies": ["Duollistes"],
+        "tower_trial": None,
+        "timestamp": 1002.0,
+    }
+    st2 = detector.get_game_state(now=1002.0)
+    assert st2.tower_stage_trial is None
+
+    # Tick 3: Back to tower but out of combat -> trial must remain None
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_EndlessTower_Trial",
+        "in_combat": False,
+        "enemy_name": "",
+        "enemies": [],
+        "tower_trial": None,
+        "timestamp": 1004.0,
+    }
+    st3 = detector.get_game_state(now=1004.0)
+    assert st3.tower_stage_trial is None
 
 
 @pytest.mark.unit

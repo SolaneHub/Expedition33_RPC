@@ -25,7 +25,6 @@ from expedition33_rpc.detection.normalization import (
     is_menu_zone,
     resolve_tower_trial,
 )
-from expedition33_rpc.detection.save_reader import SaveFileReader
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
 
 type TowerTrial = tuple[int, int] | str
@@ -196,7 +195,7 @@ class BridgeProviderProtocol(Protocol):
     def read_bridge_status(self) -> RawGameData | None: ...
 
     def read_game_data(
-        self, min_valid_timestamp: float | None = None, lang: str = "en"
+        self, min_valid_timestamp: float | None = None, *args: Any, **kwargs: Any
     ) -> RawGameData | None: ...
 
     def reset(self) -> None: ...
@@ -246,9 +245,8 @@ class BridgeStateProvider:
         return None
 
     def read_game_data(
-        self, min_valid_timestamp: float | None = None, lang: str = "en"
+        self, min_valid_timestamp: float | None = None, *_args: Any, **_kwargs: Any
     ) -> RawGameData | None:
-        del lang
         bridge = self.read_bridge_status()
         if bridge:
             bridge_ts = bridge.get("timestamp")
@@ -343,13 +341,13 @@ class GameDetector:
         self.cached_pid: int | None = None
         self.game_exe_path: str | None = None
         self.game_win64_dir: Path | None = None
-        self.last_zone: str = "Exploring"
         self.last_raw_zone: str = ""
         self.last_raw_checkpoint: str = ""
         self.current_tower_trial: tuple[int, int] | str | None = None
         self._cached_language: str = "en"
         self._last_ini_mtime: float | None = None
         self._last_ini_path: Path | None = None
+        self._last_language_check_time: float = -float("inf")
         self._game_user_settings_path: Path | None = (
             Path(game_user_settings_path) if game_user_settings_path is not None else None
         )
@@ -464,8 +462,13 @@ class GameDetector:
         self.game_win64_dir = None
         return None
 
-    def get_game_language(self, ini_path: Path | str | None = None) -> str:
-        """Extracts configured UI language from GameUserSettings.ini with mtime caching."""
+    def get_game_language(self, ini_path: Path | str | None = None, force: bool = False) -> str:
+        """Extracts configured UI language from GameUserSettings.ini with mtime caching and interval throttling."""
+        current_time = self.time_provider()
+        if not force and ini_path is None and (current_time - self._last_language_check_time < 5.0):
+            return self._cached_language
+
+        self._last_language_check_time = current_time
         target_ini = ini_path or self._game_user_settings_path or get_game_user_settings_path()
         if target_ini is None:
             target_ini = os.path.expandvars(
@@ -508,7 +511,6 @@ class GameDetector:
             self.game_exe_path = None
             self.game_win64_dir = None
             self.current_tower_trial = None
-            self.last_zone = "Exploring"
             self.last_raw_zone = ""
             self.last_raw_checkpoint = ""
             if self.bridge_provider is not None:
@@ -529,7 +531,7 @@ class GameDetector:
 
         # Query configured telemetry provider
         data: RawGameData | None = (
-            self.bridge_provider.read_game_data(min_valid_timestamp=proc_create_time, lang=lang)
+            self.bridge_provider.read_game_data(min_valid_timestamp=proc_create_time)
             if self.bridge_provider is not None
             else None
         )
@@ -549,12 +551,12 @@ class GameDetector:
             tower_floor = data.get("tower_floor")
             raw_checkpoint = str(data.get("checkpoint", "") or "")
 
-            if is_menu_zone(raw_zone):
-                raw_checkpoint = ""
-                in_combat = False
-
         is_menu = is_menu_zone(raw_zone)
         is_continent = is_continent_zone(raw_zone)
+
+        if is_menu:
+            raw_checkpoint = ""
+            in_combat = False
 
         # Checkpoint resolution via active telemetry source with save reader fallback
         if is_menu or is_continent:
@@ -597,12 +599,11 @@ class GameDetector:
                     effective_enemy = clean_enemy
             else:
                 self.current_tower_trial = None
-        elif not in_combat:
+        else:
             self.current_tower_trial = None
 
         # Determine zone key and update state timing machine
         zone_key = raw_zone.strip() or "Exploring"
-        self.last_zone = zone_key
         if zone_key == "Exploring" and self.timer_tracker.current_zone_id not in (
             None,
             "Exploring",
@@ -639,8 +640,6 @@ class GameDetector:
             tower_floor=tower_floor,
             tower_stage_trial=self.current_tower_trial,
             process_info=proc_info,
-            exe_path=self.game_exe_path,
-            win64_dir=self.game_win64_dir,
         )
 
 
@@ -652,7 +651,6 @@ __all__ = [
     "GameState",
     "BridgeStateProvider",
     "GameDetector",
-    "SaveFileReader",
     "TARGET_PROCESS_NAMES",
     "get_telemetry_file_path",
     "get_telemetry_file_paths",
