@@ -40,7 +40,7 @@
 
 | Exploration & Combat | Endless Tower | Anti-Spoiler Shield |
 | :---: | :---: | :---: |
-| ![Exploration & Battle](docs/github/preview_combat.gif) | ![Endless Tower](docs/github/preview_tower.gif) | ![Anti-Spoiler Shield](docs/github/preview_antispoiler.gif) |
+| ![Exploration & Battle](docs/github/preview_combat.gif?v=2.2.0) | ![Endless Tower](docs/github/preview_tower.gif?v=2.2.0) | ![Anti-Spoiler Shield](docs/github/preview_antispoiler.gif?v=2.2.0) |
 | Dynamic transition from exploration (`Spring Meadows`) to battle (`Fighting: Lancelier`). | Transition from entrance exploration (`Endless Tower (Entrance)`) to floor combat (`Stage 1, Trial 1`). | One-click tray shield masking locations (`Hidden Location`) and encounters (`In Combat`). |
 
 ---
@@ -57,17 +57,17 @@
 
 Right-click the tray icon to monitor status and adjust preferences:
 
-| Menu Item | Description |
-| :--- | :--- |
-| **Game Status** | Displays live PID or idle state (`Game: Running (PID: X)` / `Not running`) |
-| **Location** | Current map zone (`[Hidden - Anti-Spoiler]` when masked) |
-| **Status** | Real-time state (`In Combat` with enemy name / `Exploring`) |
-| **Discord** | IPC named pipe status (`Connected` / `Standby`) |
-| **Anti-Spoiler Mode** | Toggles masking for secret locations and encounter titles |
-| **Combat Bridge** | Shows deployment status of the headless UE4SS mod or triggers manual install |
-| **Start with Windows** | Toggles launch on Windows logon via `HKCU\...\Run` |
-| **Check for Updates** | Checks GitHub Releases for new builds and performs in-place self-updates |
-| **Exit** | Disconnects Discord RPC cleanly and closes the application |
+| Menu Item | Live Indicator / Display | Functionality & Action |
+| :--- | :--- | :--- |
+| **Game Status** | `Game: Running (PID: X)` / `Not running` | Displays real-time process detection status and game PID |
+| **Location** | `Location: <Zone Name>` / `[Hidden - Anti-Spoiler]` | Displays current in-game zone or hides it when anti-spoiler mode is active |
+| **Status** | `Status: In Combat (<Enemy>)` / `Exploring` | Shows active exploration or real-time battle encounter targets |
+| **Discord** | `Discord: Connected` / `Standby` | Displays local Discord IPC Named Pipe connection status |
+| **Anti-Spoiler Mode** | `[Enabled / Disabled]` | One-click toggle masking story locations and enemy encounter titles |
+| **Combat Bridge** | `[Installed / Install Now]` | Displays UE4SS Lua bridge status or initiates manual deployment |
+| **Start with Windows** | `[X / ]` | Toggles automatic startup registration in `HKCU\...\Run` |
+| **Check for Updates** | `Check for Updates` / `Update to vX.X.X` | Polls GitHub Releases API and executes seamless in-place self-update |
+| **Exit** | *(Action)* | Cleanly disconnects Discord RPC session and closes the companion |
 
 ---
 
@@ -117,10 +117,20 @@ Detailed architectural blueprints and system contracts are documented in [ARCHIT
 
 Release binaries are built in clean, isolated environments via GitHub Actions. Every release publishes verifiable cryptographic checksums:
 
-| Artifact | SHA-256 Digest | Status | Report Link |
+| Artifact | SHA-256 (Prefix) | Verification Status | VirusTotal Analysis |
 | :--- | :--- | :---: | :---: |
-| **`Expedition33_RPC.exe`** | `fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5` | Clean | [🛡️ VirusTotal Report](https://www.virustotal.com/gui/file/fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5) |
-| **`bridge.zip`** | `f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c` | Clean | [🛡️ VirusTotal Report](https://www.virustotal.com/gui/file/f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c) |
+| **`Expedition33_RPC.exe`** | [`fbaaa01b...d9b5`](https://www.virustotal.com/gui/file/fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5) | 🛡️ **Clean** | [Inspect Live Report](https://www.virustotal.com/gui/file/fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5) |
+| **`bridge.zip`** | [`f5dc985b...eb2c`](https://www.virustotal.com/gui/file/f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c) | 🛡️ **Clean** | [Inspect Live Report](https://www.virustotal.com/gui/file/f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c) |
+
+<details>
+<summary>📋 <b>Click to view full SHA-256 Checksums</b></summary>
+
+```text
+fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5  Expedition33_RPC.exe
+f5dc985bd9cb7c72c048c6ac1c29a8f920f89e9c3dc2e5d1aba336c5bd4eb82c  bridge.zip
+```
+
+</details>
 
 Verify the downloaded binary in PowerShell:
 ```powershell

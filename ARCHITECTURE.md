@@ -12,19 +12,6 @@ This document defines the architectural mental model, module hierarchy, state ma
 
 The application operates as a deterministic, unidirectional data pipeline:
 
-```text
-┌─────────────────┐       ┌──────────────────────┐       ┌─────────────────┐
-│ Process Watcher │ ----> │     State Engine     │ ----> │ Discord Client  │
-│  & Telemetry    │       │ (Detection & Normal) │       │  (Native IPC)   │
-└─────────────────┘       └──────────────────────┘       └─────────────────┘
-                                     │                            │
-                                     ▼                            ▼
-                          ┌──────────────────────┐       ┌─────────────────┐
-                          │     Presentation     │       │   System Tray   │
-                          │   (PresencePayload)  │       │  (pystray loop) │
-                          └──────────────────────┘       └─────────────────┘
-```
-
 1. **Watcher & Ingestion**: Detects game process (`SandFall-Win64-Shipping.exe` / `SandFall-WinGDK-Shipping.exe`). Reads telemetry file written by the UE4SS Lua mod using non-blocking Win32 shared reads (`0x7`).
 2. **State Engine**: Validates freshness against a strict 5.0s TTL. Resolves raw map and flag tokens against immutable catalog mappings (`assets/game_data.json`), producing an immutable `GameState` snapshot.
 3. **Presentation**: Pure functional mapping from `GameState` to `PresencePayload` DTO according to active localization and anti-spoiler settings.
@@ -80,38 +67,14 @@ src/expedition33_rpc/
 ## 3. Asynchronous State Machine & Invariant Guarantees
 
 <p align="center">
+  <img src="docs/architecture_state_machine.svg" alt="Expedition 33 Resilient State Machine & Invariant Guarantees" width="100%">
+</p>
+
+<p align="center">
   <img src="docs/architecture_threading.svg" alt="Expedition 33 Threading & Platform Abstraction" width="100%">
 </p>
 
 The application runtime maintains resilient execution across host process faults through strict invariant handling:
-
-```text
-               ┌─────────────┐
-        ┌───── │ Game Idle   │ ◄─────────────────────────┐
-        │      └─────────────┘                           │
-  Game Launched       ▲                                  │
-  (psutil check)      │ Game Terminated                  │
-        │             │ (cached_pid dead)                │
-        ▼             │                                  │
- ┌─────────────┐      │                           ┌─────────────┐
- │ Game Active │ ─────┘                           │ Discord IPC │
- └─────────────┘                                  │ Reconnect   │
-        │                                         └─────────────┘
-  Telemetry Tick                                         ▲
-  (2.0s loop)                                     Pipe Broken /
-        │                                         Crash Detected
-        ▼                                                │
- ┌──────────────────────┐                         ┌─────────────┐
- │ Freshness Validation │ ─── [Discord OK] ─────► │ Active Pipe │
- └──────────────────────┘                         └─────────────┘
-        │
-   Stale (> 5.0s)
-        │
-        ▼
- ┌──────────────────────┐
- │ Fallback Exploration │
- └──────────────────────┘
-```
 
 ### Critical Invariants:
 1. **Discord Crash & Disconnect**:
@@ -158,14 +121,14 @@ Written atomically by the client-side UE4SS Lua mod in UTF-8:
 
 ### 4.2. Discord Native IPC Binary Frame (`<II`)
 Discord Named Pipe (`\\.\pipe\discord-ipc-0`..`9` on Windows, UNIX socket on POSIX) packet wire format:
-```text
-┌───────────────────────┬───────────────────────┬───────────────────────────────────────┐
-│ Opcode (uint32 LE)    │ Length (uint32 LE)    │ JSON Payload (UTF-8, "Length" bytes)  │
-│ 4 Bytes               │ 4 Bytes               │ Serialized JSON (compact)             │
-├───────────────────────┴───────────────────────┴───────────────────────────────────────┤
-│ Header: struct.pack("<II", opcode, length)    │ Payload                               │
-└───────────────────────────────────────────────┴───────────────────────────────────────┘
-```
+
+| Field | Wire Type & Layout | Size | Semantics & Format |
+| :--- | :--- | :---: | :--- |
+| **Opcode** | `uint32` (Little-Endian) | 4 Bytes | Packet operation type (`OP_HANDSHAKE=0`, `OP_FRAME=1`, `OP_CLOSE=2`, `OP_PING=3`, `OP_PONG=4`) |
+| **Length** | `uint32` (Little-Endian) | 4 Bytes | Length in bytes of the following serialized JSON payload |
+| **Payload** | UTF-8 JSON Byte String | `Length` Bytes | Compact UTF-8 JSON payload (`{"cmd": "SET_ACTIVITY", "args": ...}`) |
+
+Header packing format: `struct.pack("<II", opcode, length)`.
 - Standard opcodes: `HANDSHAKE = 0`, `FRAME = 1`, `CLOSE = 2`, `PING = 3`, `PONG = 4`.
 - Field limits: Strings in `details`, `state`, and tooltips are bounded to **128 UTF-8 bytes**, safely sliced at code point boundaries by `truncate_presence_field`.
 
@@ -180,13 +143,14 @@ Central repository for all static entities and translations:
 
 ### 4.4. Windows Autostart Registry Contract
 Startup persistence is registered under `HKEY_CURRENT_USER` (requiring zero administrator privileges):
-```text
-Hive:      HKEY_CURRENT_USER
-Subkey:    Software\Microsoft\Windows\CurrentVersion\Run
-Value:     Expedition33_DiscordRPC
-Type:      REG_SZ
-Content:   "C:\Path\To\Expedition33_RPC.exe"
-```
+
+| Registry Parameter | Specification |
+| :--- | :--- |
+| **Hive** | `HKEY_CURRENT_USER` (HKCU) |
+| **Subkey Path** | `Software\Microsoft\Windows\CurrentVersion\Run` |
+| **Value Name** | `Expedition33_DiscordRPC` |
+| **Type** | `REG_SZ` |
+| **Payload Value** | `"C:\Path\To\Expedition33_RPC.exe"` *(points to `pythonw.exe` in development)* |
 In development mode, points to `pythonw.exe` to suppress console allocation.
 
 ---

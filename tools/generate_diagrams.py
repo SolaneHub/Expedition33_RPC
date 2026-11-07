@@ -210,17 +210,121 @@ THREADING_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 </svg>
 """
 
+STATE_MACHINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" role="img" aria-label="Expedition 33 Discord RPC State Machine: Resilient state machine tracking process lifecycle, telemetry freshness TTL, fallback degradation, and Discord IPC fault recovery.">
+  <style>
+    .flow { fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 7 7; animation: e33flow .7s linear infinite; }
+    @keyframes e33flow { to { stroke-dashoffset: -14; } }
+    @media (prefers-reduced-motion: reduce) { .flow { animation: none; } }
+    .node { fill: #0e1322; stroke-width: 1.6; }
+    .main { font: 600 13.5px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; fill: #f8fafc; text-anchor: middle; }
+    .sub { font: 400 11px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; fill: #94a3b8; text-anchor: middle; }
+    .edgelabel { font: 600 11px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+    .tag { font: 700 11px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; letter-spacing: 2.2px; fill: #38bdf8; }
+    .caption { font: 400 11.5px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; fill: #94a3b8; text-anchor: middle; }
+  </style>
+  <defs>
+    <linearGradient id="edgeState" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset=".35" stop-color="#34d399"/>
+      <stop offset=".7" stop-color="#fbbf24"/>
+      <stop offset="1" stop-color="#f43f5e"/>
+    </linearGradient>
+    <marker id="headCyanSM" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="headEmeraldSM" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#34d399"/>
+    </marker>
+    <marker id="headAmberSM" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#fbbf24"/>
+    </marker>
+    <marker id="headBlurpleSM" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#818cf8"/>
+    </marker>
+    <marker id="headRoseSM" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f43f5e"/>
+    </marker>
+  </defs>
+
+  <!-- Card Canvas -->
+  <rect x="4" y="4" width="872" height="462" rx="16" fill="#080c16" stroke="url(#edgeState)" stroke-width="1.6"/>
+
+  <!-- Brand Header -->
+  <rect x="34" y="24" width="32" height="32" rx="8" fill="#131b2e" stroke="url(#edgeState)" stroke-width="1.4"/>
+  <text x="50" y="46" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="15" font-weight="900" fill="#38bdf8" text-anchor="middle">33</text>
+  <text x="78" y="47" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="19" font-weight="800" letter-spacing="1.5" fill="url(#edgeState)">EXPEDITION&#160;33</text>
+  <text class="tag" x="254" y="45">&#183; STATE MACHINE &amp; INVARIANT GUARANTEES</text>
+
+  <!-- Row 1: Core Lifecycle Path -->
+  <rect class="node" x="36" y="84" width="176" height="58" rx="11" stroke="#38bdf8"/>
+  <text class="main" x="124" y="108">&#9208;&#65039; Game Idle</text>
+  <text class="sub" x="124" y="126">standby &#183; 5.0s psutil poll</text>
+
+  <rect class="node" x="256" y="84" width="180" height="58" rx="11" stroke="#34d399"/>
+  <text class="main" x="346" y="108">&#9654;&#65039; Game Active</text>
+  <text class="sub" x="346" y="126">cached_pid &#183; 2.0s tick</text>
+
+  <rect class="node" x="480" y="84" width="180" height="58" rx="11" stroke="#34d399"/>
+  <text class="main" x="570" y="108">&#9201;&#65039; Freshness Engine</text>
+  <text class="sub" x="570" y="126">5.0s TTL &#183; game_data SSOT</text>
+
+  <rect class="node" x="704" y="84" width="140" height="58" rx="11" stroke="#818cf8"/>
+  <text class="main" x="774" y="108">&#128172; Discord IPC</text>
+  <text class="sub" x="774" y="126">binary &lt;II &#183; dirty-check</text>
+
+  <!-- Row 1: Forward Connectors -->
+  <path class="flow" d="M212,113 L250,113" stroke="#38bdf8" marker-end="url(#headCyanSM)"/>
+  <path class="flow" d="M436,113 L474,113" stroke="#34d399" marker-end="url(#headEmeraldSM)"/>
+  <path class="flow" d="M660,113 L698,113" stroke="#34d399" marker-end="url(#headEmeraldSM)"/>
+
+  <!-- Return Flow 1: Process Exit drops back to Idle -->
+  <path class="flow" d="M320,142 C320,240 124,240 124,148" stroke="#38bdf8" marker-end="url(#headCyanSM)"/>
+  <rect x="150" y="226" width="184" height="22" rx="11" fill="#0e1322" stroke="#38bdf8" stroke-width="1.2"/>
+  <text class="edgelabel" x="242" y="241" fill="#38bdf8" text-anchor="middle">game exit &#183; instant O(1) reset</text>
+
+  <!-- Branch 2: Stale Telemetry drops to Fallback -->
+  <path class="flow" d="M570,142 L570,294" stroke="#fbbf24" marker-end="url(#headAmberSM)"/>
+  <rect x="478" y="206" width="184" height="22" rx="11" fill="#0e1322" stroke="#fbbf24" stroke-width="1.2"/>
+  <text class="edgelabel" x="570" y="221" fill="#fbbf24" text-anchor="middle">stale (&gt;5.0s) or mod inactive</text>
+
+  <!-- Row 2: Invariants & Fault Recovery -->
+  <rect class="node" x="470" y="300" width="200" height="58" rx="11" stroke="#fbbf24"/>
+  <text class="main" x="570" y="324">&#128737;&#65039; Fallback Exploration</text>
+  <text class="sub" x="570" y="342">UE5 .sav mmap &#183; clean state</text>
+
+  <!-- Flow: Fallback Restores to Active Discord Pipe -->
+  <path class="flow" d="M670,329 C720,329 744,250 744,148" stroke="#818cf8" marker-end="url(#headBlurpleSM)"/>
+
+  <!-- Branch 3: Broken Pipe drops to Reconnector -->
+  <path class="flow" d="M784,142 L784,294" stroke="#f43f5e" marker-end="url(#headRoseSM)"/>
+  <rect x="696" y="206" width="154" height="22" rx="11" fill="#0e1322" stroke="#f43f5e" stroke-width="1.2"/>
+  <text class="edgelabel" x="773" y="221" fill="#f43f5e" text-anchor="middle">pipe fault / crash</text>
+
+  <rect class="node" x="704" y="300" width="140" height="58" rx="11" stroke="#f43f5e"/>
+  <text class="main" x="774" y="324">&#128260; IPC Reconnect</text>
+  <text class="sub" x="774" y="342">backoff + jitter</text>
+
+  <!-- Return Flow: IPC Reconnect loops back into Discord Pipe -->
+  <path class="flow" d="M820,300 C835,230 835,210 820,148" stroke="#f43f5e" marker-end="url(#headRoseSM)"/>
+
+  <!-- Bottom Architecture Caption -->
+  <text class="caption" x="440" y="432">O(1) PID liveness tracking &#183; 5.0s TTL freshness SLA &#183; Exponential backoff on pipe fault &#183; Zero ghost presences</text>
+</svg>
+"""
+
 
 def generate_diagrams() -> None:
     """Writes SVGs and validates XML and file bounds."""
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     pipeline_file = DOCS_DIR / "architecture_pipeline.svg"
     threading_file = DOCS_DIR / "architecture_threading.svg"
+    state_machine_file = DOCS_DIR / "architecture_state_machine.svg"
 
     pipeline_file.write_text(PIPELINE_SVG_CONTENT.strip() + "\n", encoding="utf-8")
     threading_file.write_text(THREADING_SVG_CONTENT.strip() + "\n", encoding="utf-8")
+    state_machine_file.write_text(STATE_MACHINE_SVG_CONTENT.strip() + "\n", encoding="utf-8")
 
-    for f in (pipeline_file, threading_file):
+    for f in (pipeline_file, threading_file, state_machine_file):
         size = os.path.getsize(f)
         ET.parse(f)  # Asserts XML validity
         print(f"Generated {f.name}: {size} bytes ({size / 1024:.2f} KB) - Valid XML.")

@@ -13,6 +13,7 @@ pytestmark = pytest.mark.ci
 DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
 PIPELINE_SVG = DOCS_DIR / "architecture_pipeline.svg"
 THREADING_SVG = DOCS_DIR / "architecture_threading.svg"
+STATE_MACHINE_SVG = DOCS_DIR / "architecture_state_machine.svg"
 
 
 @pytest.mark.parametrize(
@@ -20,6 +21,7 @@ THREADING_SVG = DOCS_DIR / "architecture_threading.svg"
     [
         (PIPELINE_SVG, "TELEMETRY &amp; PRESENCE PIPELINE"),
         (THREADING_SVG, "THREADING &amp; PLATFORM ABSTRACTION"),
+        (STATE_MACHINE_SVG, "STATE MACHINE &amp; INVARIANT GUARANTEES"),
     ],
 )
 def test_architecture_svg_validity_and_compactness(svg_path: Path, expected_tag: str) -> None:
