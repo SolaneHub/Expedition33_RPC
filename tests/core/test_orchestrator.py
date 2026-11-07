@@ -295,17 +295,17 @@ def test_orchestrator_auto_install_bridge_on_process_detection() -> None:
         sync_startup=False,
     )
     # Bridge is not installed prior to game detection event
-    assert orchestrator.bridge_auto_installed is False
     assert fake_installer.installed is False
     assert orchestrator.is_bridge_installed() is False
 
     # Process detection event triggers auto installation
     orchestrator.step_update()
-    if orchestrator._bridge_install_thread is not None:
-        orchestrator._bridge_install_thread.join(timeout=1.0)
-    assert orchestrator.bridge_auto_installed is True
+    deadline = time.monotonic() + 1.0
+    while not orchestrator.is_bridge_installed() and time.monotonic() < deadline:
+        time.sleep(0.005)
     assert fake_installer.installed is True
     assert orchestrator.is_bridge_installed() is True
+    orchestrator.stop()
 
 
 @pytest.mark.unit
@@ -332,8 +332,9 @@ def test_orchestrator_event_driven_bridge_check_eliminates_parasitic_io() -> Non
 
     # Tick 1: First time PID 4242 detected -> triggers check and auto installation
     orchestrator.step_update()
-    if orchestrator._bridge_install_thread is not None:
-        orchestrator._bridge_install_thread.join(timeout=1.0)
+    deadline = time.monotonic() + 1.0
+    while not orchestrator.is_bridge_installed() and time.monotonic() < deadline:
+        time.sleep(0.005)
     assert fake_installer.installed is True
     assert orchestrator.is_bridge_installed() is True
     assert fake_installer.install_call_count == 1
@@ -347,6 +348,7 @@ def test_orchestrator_event_driven_bridge_check_eliminates_parasitic_io() -> Non
 
     assert orchestrator.is_bridge_installed() is True
     assert fake_installer.install_call_count == 1
+    orchestrator.stop()
 
 
 @pytest.mark.unit
@@ -430,8 +432,9 @@ def test_orchestrator_eliminates_parasitic_io_on_gameplay_timer_transitions() ->
             win64_dir=Path("/mock/game/win64"),
         )
         orchestrator.step_update()
-        if orchestrator._bridge_install_thread is not None:
-            orchestrator._bridge_install_thread.join(timeout=1.0)
+        deadline = time.monotonic() + 1.0
+        while spy_auto_install.call_count == 0 and time.monotonic() < deadline:
+            time.sleep(0.005)
         assert spy_auto_install.call_count == 1
 
         # 2. Zone transition: start_time resets to 1050.0, PID and process_create_time unchanged
@@ -505,8 +508,9 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
 
     # First attempt fails at t = 1000.0, backoff cooldown activated
     orchestrator.step_update()
-    if orchestrator._bridge_install_thread is not None:
-        orchestrator._bridge_install_thread.join(timeout=1.0)
+    deadline = time.monotonic() + 1.0
+    while fake_installer.install_call_count < 1 and time.monotonic() < deadline:
+        time.sleep(0.005)
     assert orchestrator.is_bridge_installed() is False
     assert fake_installer.install_call_count == 1
 
@@ -521,8 +525,7 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
         exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
     orchestrator.step_update()
-    if orchestrator._bridge_install_thread is not None:
-        orchestrator._bridge_install_thread.join(timeout=1.0)
+    time.sleep(0.05)
     # Throttled by cooldown - install is NOT re-attempted, call count remains 1
     assert orchestrator.is_bridge_installed() is False
     assert fake_installer.install_call_count == 1
@@ -536,11 +539,13 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
         exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
     orchestrator.step_update()
-    if orchestrator._bridge_install_thread is not None:
-        orchestrator._bridge_install_thread.join(timeout=1.0)
+    deadline = time.monotonic() + 1.0
+    while fake_installer.install_call_count < 2 and time.monotonic() < deadline:
+        time.sleep(0.005)
     # Now allowed - installation succeeds and status reflects True
     assert orchestrator.is_bridge_installed() is True
     assert fake_installer.install_call_count == 2
+    orchestrator.stop()
 
 
 @pytest.mark.unit
@@ -565,7 +570,6 @@ def test_orchestrator_bridge_auto_install_deterministic_cooldown() -> None:
     # 1. First attempt fails at t = 1000.0
     res1 = orchestrator.check_and_auto_install_bridge(now=1000.0)
     assert res1 is False
-    assert orchestrator.bridge_auto_installed is False
     assert fake_installer.installed is False
     assert orchestrator.is_bridge_installed() is False
     assert fake_installer.install_call_count == 1
@@ -586,7 +590,6 @@ def test_orchestrator_bridge_auto_install_deterministic_cooldown() -> None:
     fake_installer.install_msg = "Installed successfully"
     res4 = orchestrator.check_and_auto_install_bridge(now=1035.0)
     assert res4 is True
-    assert orchestrator.bridge_auto_installed is True
     assert fake_installer.installed is True
     assert orchestrator.is_bridge_installed() is True
     assert fake_installer.install_call_count == 2
@@ -614,21 +617,18 @@ def test_orchestrator_bridge_auto_install_early_boot_and_preinstalled() -> None:
     # 1. Early monotonic boot timestamp (now=0.5) must NOT be throttled by initial cooldown
     res = orchestrator.check_and_auto_install_bridge(now=0.5)
     assert res is True
-    assert orchestrator.bridge_auto_installed is True
     assert fake_installer.installed is True
     assert orchestrator.is_bridge_installed() is True
 
     # 2. toggle_bridge uninstalls bridge and is immediately re-togglable without throttling
     toggle_res = orchestrator.toggle_bridge()
     assert toggle_res is False
-    assert orchestrator.bridge_auto_installed is False
     assert fake_installer.installed is False
     assert orchestrator.is_bridge_installed() is False
 
     fake_installer.install_success = True
     toggle_res2 = orchestrator.toggle_bridge()
     assert toggle_res2 is True
-    assert orchestrator.bridge_auto_installed is True
     assert fake_installer.installed is True
     assert orchestrator.is_bridge_installed() is True
 
@@ -897,7 +897,6 @@ def test_orchestrator_install_bridge_to_success(tmp_path: Path) -> None:
 
     assert success is True
     assert "Installed to" in msg
-    assert orchestrator.bridge_auto_installed is True
     assert orchestrator.is_bridge_installed() is True
 
     # Test with string path as well
@@ -927,7 +926,6 @@ def test_orchestrator_install_bridge_to_failure(tmp_path: Path) -> None:
 
     assert success is False
     assert msg == "Permission denied"
-    assert orchestrator.bridge_auto_installed is False
     assert orchestrator.is_bridge_installed() is False
 
 
@@ -952,7 +950,6 @@ def test_orchestrator_install_bridge_to_exception(tmp_path: Path) -> None:
 
     assert success is False
     assert "Access is denied or disk is full" in msg
-    assert orchestrator.bridge_auto_installed is False
     assert orchestrator.is_bridge_installed() is False
 
 
@@ -1168,14 +1165,12 @@ def test_orchestrator_async_bridge_install_spawns_daemon_thread_and_prevents_con
         win64_dir=Path("/mock/game/win64"),
         exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
+    start_time = time.perf_counter()
     res = orchestrator.step_update()
-    assert res is not None
-    assert orchestrator._is_installing_bridge is True
-    assert orchestrator._bridge_install_thread is not None
-    assert orchestrator._bridge_install_thread.is_alive()
-    assert orchestrator._bridge_install_thread.daemon is True
+    step_duration = time.perf_counter() - start_time
 
-    # Confirm worker thread is executing
+    assert res is not None
+    assert step_duration < 0.1
     assert started_event.wait(timeout=1.0) is True
 
     # 2. Re-trigger process detection while installation is still in progress:
@@ -1183,11 +1178,10 @@ def test_orchestrator_async_bridge_install_spawns_daemon_thread_and_prevents_con
     orchestrator.step_update()
     assert installer.install_call_count == 1
 
-    # 3. Release blocking installer and wait for thread to finish
+    # 3. Release blocking installer and stop orchestrator cleanly
     continue_event.set()
-    orchestrator._bridge_install_thread.join(timeout=1.0)
+    orchestrator.stop()
 
-    assert orchestrator._is_installing_bridge is False
     assert orchestrator.is_bridge_installed() is True
     assert installer.install_call_count == 1
 
@@ -1219,9 +1213,8 @@ def test_orchestrator_async_bridge_install_catches_exception_safely() -> None:
         )
         res = orchestrator.step_update()
         assert res is not None
-        if orchestrator._bridge_install_thread is not None:
-            orchestrator._bridge_install_thread.join(timeout=1.0)
-        assert orchestrator._is_installing_bridge is False
+        orchestrator.stop()
+        assert orchestrator.is_bridge_installed() is False
 
 
 @pytest.mark.unit
@@ -1254,12 +1247,10 @@ def test_orchestrator_stop_waits_for_bridge_install_thread() -> None:
             win64_dir=Path("/mock/game/win64"),
         )
         orchestrator.step_update()
-        assert orchestrator._bridge_install_thread is not None
-        assert orchestrator._bridge_install_thread.is_alive()
+        assert thread_finished is False
 
         orchestrator.stop()
         assert thread_finished is True
-        assert orchestrator._bridge_install_thread is None
 
 
 @pytest.mark.unit

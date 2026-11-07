@@ -82,11 +82,7 @@ class AppOrchestrator:
             detector if detector is not None else GameDetector(save_reader=SaveFileReader())
         )
         self.time_provider = time_provider if time_provider is not None else time.monotonic
-        self.updater = (
-            updater
-            if updater is not None
-            else AppUpdater(on_state_change=self._on_updater_state_change)
-        )
+        self.updater = updater if updater is not None else AppUpdater()
         self.bridge_installer: BridgeInstallerProtocol = (
             bridge_installer if bridge_installer is not None else bridge_installer_module
         )
@@ -106,7 +102,6 @@ class AppOrchestrator:
         # Threading and deterministic shutdown
         self._stop_event = threading.Event()
         self.running = False
-        self._started = False
         self.worker_thread: threading.Thread | None = None
 
         # RPC manager with stop predicate injection
@@ -126,16 +121,12 @@ class AppOrchestrator:
 
         # Current state - immutable GameState DTO, assignment is atomic
         self.current_state = GameState()
-        self.bridge_auto_installed = False
 
         self.bridge_install_cooldown: float = 30.0
         self.last_bridge_install_attempt: float = -float("inf")
-        self._is_installing_bridge: bool = False
         self._bridge_install_thread: threading.Thread | None = None
 
         self._bridge_installed: bool = False
-        self._last_detected_pid: int | None = None
-        self._last_detected_create_time: float | None = None
 
         if self.sync_startup:
             self.startup_service.sync_startup_path()
@@ -165,10 +156,7 @@ class AppOrchestrator:
         return unsubscribe
 
     def _is_stopping(self) -> bool:
-        return self._stop_event.is_set() or (self._started and not self.running)
-
-    def _on_updater_state_change(self) -> None:
-        pass
+        return self._stop_event.is_set()
 
     def on_update_check_complete(self, update_info: UpdateInfo | None) -> None:
         if update_info is None:
@@ -178,13 +166,13 @@ class AppOrchestrator:
             try:
                 subscriber(update_info)
             except Exception as e:
-                print(f"[Orchestrator] Update subscriber error: {e}")
+                logger.error("Update subscriber error: %s", e)
 
         if self.on_update_available is not None:
             try:
                 self.on_update_available(update_info)
             except Exception as e:
-                print(f"[Orchestrator] Update listener error: {e}")
+                logger.error("Update listener error: %s", e)
 
     def install_bridge_to(self, folder: str | Path) -> tuple[bool, str]:
         """Atomically installs the bridge to the specified folder and updates internal state."""
@@ -192,7 +180,6 @@ class AppOrchestrator:
             target_path = Path(folder) if isinstance(folder, str) else folder
             success, msg = self.bridge_installer.install_bridge(target_path)
             if success:
-                self.bridge_auto_installed = True
                 self._bridge_installed = True
             return success, msg
         except Exception as e:
@@ -220,20 +207,18 @@ class AppOrchestrator:
             )
             if game_dir:
                 if self.bridge_installer.is_bridge_installed(game_dir):
-                    self.bridge_auto_installed = True
                     self._bridge_installed = True
                     return True
 
                 success, msg = self.bridge_installer.install_bridge(game_dir)
                 if success:
-                    self.bridge_auto_installed = True
                     self._bridge_installed = True
-                    print(f"[Orchestrator] Automatically deployed Combat Bridge to: {game_dir}")
+                    logger.info("Automatically deployed Combat Bridge to: %s", game_dir)
                     return True
                 else:
-                    print(f"[Orchestrator] Combat Bridge auto-install failed: {msg}")
+                    logger.error("Combat Bridge auto-install failed: %s", msg)
         except Exception as e:
-            print(f"[Orchestrator] Bridge auto-install check failed: {e}")
+            logger.error("Bridge auto-install check failed: %s", e)
         return False
 
     def step_update(self) -> GameState | None:
@@ -242,6 +227,7 @@ class AppOrchestrator:
             return None
         try:
             anti_spoiler = self.settings_service.is_anti_spoiler_enabled()
+            prev_state = self.current_state
             state = self.detector.get_game_state()
             self.current_state = state
 
@@ -255,27 +241,23 @@ class AppOrchestrator:
                 self.rpc_manager.update(None, pid=state.process_pid)
 
             # Event-driven bridge check on game process detection
-            current_pid = (
-                state.process_pid
-                if state.process_pid is not None
-                else (1 if state.is_running else None)
-            )
-            current_create_time = state.process_create_time
-            is_new_process = current_pid is not None and (
-                self._last_detected_pid is None
-                or current_pid != self._last_detected_pid
+            is_new_process = state.is_running and (
+                not prev_state.is_running
+                or state.process_pid != prev_state.process_pid
                 or (
-                    current_create_time is not None
-                    and self._last_detected_create_time is not None
-                    and current_create_time != self._last_detected_create_time
+                    state.process_create_time is not None
+                    and prev_state.process_create_time is not None
+                    and state.process_create_time != prev_state.process_create_time
                 )
             )
 
             if is_new_process:
                 target_dir = state.win64_dir
                 if self.auto_install_bridge:
-                    if not self._is_installing_bridge:
-                        self._is_installing_bridge = True
+                    is_installing = bool(
+                        self._bridge_install_thread and self._bridge_install_thread.is_alive()
+                    )
+                    if not is_installing:
                         now_val = self.time_provider()
                         win64_dir_str = str(target_dir) if target_dir else None
                         exe_path_val = state.exe_path
@@ -289,8 +271,6 @@ class AppOrchestrator:
                                 )
                             except Exception as e:
                                 logger.error("Combat Bridge async auto-install failed: %s", e)
-                            finally:
-                                self._is_installing_bridge = False
 
                         install_thread = threading.Thread(
                             target=_async_install,
@@ -305,18 +285,13 @@ class AppOrchestrator:
                             target_dir
                         )
 
-            self._last_detected_pid = current_pid
-            self._last_detected_create_time = (
-                current_create_time if current_pid is not None else None
-            )
-
             # Notify subscribed listeners and legacy on_state_change
             if self._state_subscribers:
                 for sub in list(self._state_subscribers):
                     try:
                         sub(state, anti_spoiler)
                     except Exception as e:
-                        print(f"[Orchestrator] State subscriber error: {e}")
+                        logger.error("State subscriber error: %s", e)
             if (
                 self.on_state_change is not None
                 and self.on_state_change not in self._state_subscribers
@@ -324,20 +299,18 @@ class AppOrchestrator:
                 try:
                     self.on_state_change(state, anti_spoiler)
                 except Exception as e:
-                    print(f"[Orchestrator] State change callback error: {e}")
+                    logger.error("State change callback error: %s", e)
 
             return state
         except Exception as e:
-            print(f"[Orchestrator] Worker step error: {e}")
+            logger.error("Worker step error: %s", e)
             return None
 
     @property
     def current_polling_interval(self) -> float:
         """Adaptive polling interval: returns idle_polling_interval when idle, else polling_interval."""
         return (
-            self.polling_interval
-            if self._last_detected_pid is not None
-            else self.idle_polling_interval
+            self.polling_interval if self.current_state.is_running else self.idle_polling_interval
         )
 
     def run_loop(self) -> None:
@@ -352,7 +325,6 @@ class AppOrchestrator:
         if self.running:
             return
         self._stop_event.clear()
-        self._started = True
         self.running = True
         self.worker_thread = threading.Thread(target=self.run_loop, daemon=True)
         self.worker_thread.start()
@@ -407,13 +379,11 @@ class AppOrchestrator:
         target_dir = self.current_state.win64_dir
         if self.is_bridge_installed():
             self.bridge_installer.uninstall_bridge(target_dir)
-            self.bridge_auto_installed = False
             self._bridge_installed = False
             return False
         else:
             success, _msg = self.bridge_installer.install_bridge(target_dir)
             if success:
-                self.bridge_auto_installed = True
                 self._bridge_installed = True
             return success
 
