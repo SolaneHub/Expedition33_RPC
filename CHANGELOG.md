@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.1.0] - 2026-11-07
+
+### New Features
+- **Storyboard Telemetry Simulator (`tools.simulate_telemetry`)**:
+  - Added `--scenario` and `--speed` command-line flags for timed multi-stage telemetry playback.
+  - Built-in scenarios include `boss_fight` (exploration, combat against Duollistes, and victory transition) and `tower_climb` (climbing consecutive Endless Tower trials).
+
+### Bug Fixes
+- **Resilient IPC Shared Text Chunking & UTF-8 Protection (`core.platform`, `detection.detector`)**:
+  - Hardened Win32 `read_file_shared_text` to read files completely via 64KB chunking before decoding UTF-8, preventing multi-byte sequence corruption straddling buffer boundaries.
+  - Handled `UnicodeDecodeError` cleanly during concurrent half-written IPC reads.
+- **Save Reader Dormancy Enforcement (`detection.detector`, `tools.verify_save_reader_dormancy`)**:
+  - Strictly restricted save reader binary parsing to when bridge telemetry is inactive or stale, ensuring zero disk overhead during normal bridge operation.
+- **Orchestrator Shutdown Deadline (`core.orchestrator`)**:
+  - Implemented cumulative monotonic deadline (3.0s total) across worker and bridge install thread join calls to prevent shutdown hangs.
+
+### Refactoring & Performance
+- **Save Reader Token Matching & Mtime Discovery (`detection.save_reader`)**:
+  - Pre-compiled regex patterns for level assets and spawn points.
+  - Converted semantic zone aliases and token comparisons to set/frozenset lookups.
+  - Streamlined latest `.sav` file discovery using `max()` with error-resilient file modification timestamps.
+- **GUI Dependency Decoupling (`core.smoke`, `build_exe`)**:
+  - Decoupled `tkinter` from smoke test suite and excluded `tkinter`/`_tkinter` modules in PyInstaller build configuration for leaner executables.
+
+### Documentation & Architecture
+- **Interactive Architecture & Telemetry Pipeline Diagrams (`ARCHITECTURE.md`, `README.md`, `docs/`)**:
+  - Published comprehensive architectural specification covering zero game footprint, tiered fallbacks, and threading models.
+  - Added interactive SVG data pipeline and threading diagrams embedded in documentation and validated by CI tests.
+
 ## [v2.0.8] - 2026-11-02
 
 ### Architecture & Platform Hardening
