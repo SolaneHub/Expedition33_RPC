@@ -8,9 +8,19 @@ from __future__ import annotations
 import functools
 import re
 import unicodedata
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import expedition33_rpc.detection.game_data as game_data
+
+type MenuSubstate = Literal[
+    "starting",
+    "initial_screen",
+    "title_screen",
+    "main_menu",
+    "loading_save",
+    "in_settings",
+    "new_game",
+]
 
 if TYPE_CHECKING:
     from expedition33_rpc.detection.game_data import TowerTrial
@@ -109,7 +119,57 @@ def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
     norm_display = strip_accents(display_lower)
     if "menu" in raw_lower or "menu" in norm_display:
         return True
+    if "bootstrap" in raw_lower:
+        return True
     return display_lower in _MAIN_MENU_DISPLAYS
+
+
+def resolve_menu_substate(
+    raw_zone_or_state: Any = None,
+    zone_name: str | None = None,
+    *,
+    raw_zone: str | None = None,
+) -> MenuSubstate:
+    """Resolves fine-grained menu substate for Discord RPC and system tray presentation."""
+    target = raw_zone if raw_zone is not None else raw_zone_or_state
+    if hasattr(target, "raw_zone"):
+        rz = getattr(target, "raw_zone", "") or ""
+        zn = getattr(target, "zone_name", "") or ""
+        if getattr(target, "is_starting", False):
+            return "starting"
+    else:
+        rz = target or ""
+        zn = zone_name or ""
+
+    raw_lower = rz.lower().strip()
+
+    if not raw_lower and not zn.strip():
+        return "starting"
+
+    if "bootstrap" in raw_lower or "splashscreen" in raw_lower or "loadingscreen" in raw_lower:
+        return "initial_screen"
+
+    if "setting" in raw_lower or "option" in raw_lower:
+        return "in_settings"
+
+    if "newgame" in raw_lower or "new_game" in raw_lower:
+        return "new_game"
+
+    if "save" in raw_lower or "loadscreen" in raw_lower or "backupsave" in raw_lower:
+        return "loading_save"
+
+    if "wbp_mm_mainmenu" in raw_lower:
+        return "main_menu"
+
+    if (
+        "titlescreen" in raw_lower
+        or "title_screen" in raw_lower
+        or "level_mainmenu" in raw_lower
+        or raw_lower == "mainmenu"
+    ):
+        return "title_screen"
+
+    return "main_menu"
 
 
 def is_menu_zone(
@@ -263,6 +323,12 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
         )
         return strings.get("exploring", "Exploring")
 
+    if raw_name.lower().strip() == "starting":
+        strings = game_data.LOCALIZED_PRESENTATION.get(
+            canon_lang, game_data.LOCALIZED_PRESENTATION.get("en-US", {})
+        )
+        return strings.get("starting", "Starting...")
+
     if is_main_menu(raw_name):
         lang_overrides = game_data.ZONE_NAME_OVERRIDES_BY_LANG.get(canon_lang) or {}
         if lang_overrides.get("mainmenu"):
@@ -301,6 +367,7 @@ def format_zone_name(raw_name: str, lang: str = "en") -> str:
         "SmallLevel_",
         "MainLevel_",
         "SubLevel_",
+        "Map_",
     ]:
         if cleaned.startswith(prefix):
             cleaned = cleaned.removeprefix(prefix)
@@ -420,11 +487,13 @@ def format_checkpoint_tag(
 
 
 __all__ = [
+    "MenuSubstate",
     "get_checkpoint_hash_map",
     "normalize_language_code",
     "strip_accents",
     "is_main_menu",
     "is_menu_zone",
+    "resolve_menu_substate",
     "is_continent_zone",
     "format_enemy_name",
     "resolve_tower_trial",

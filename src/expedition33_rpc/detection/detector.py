@@ -84,6 +84,7 @@ class GameState:
     tower_floor: int | None = None
     tower_stage_trial: TowerTrial | None = None
     process_info: GameProcessInfo | None = None
+    is_starting: bool = False
 
     @property
     def exe_path(self) -> str | None:
@@ -116,11 +117,14 @@ class GameState:
         process_info: GameProcessInfo | None = None,
         exe_path: str | None = None,
         win64_dir: Path | None = None,
+        is_starting: bool = False,
     ) -> GameState:
         """Constructs an immutable GameState value object from raw telemetry inputs."""
         # 1. Zone name
         if zone_name is not None:
             resolved_zone = zone_name
+        elif is_starting:
+            resolved_zone = format_zone_name("starting", game_language)
         else:
             resolved_zone = format_zone_name(raw_zone, game_language)
 
@@ -185,6 +189,7 @@ class GameState:
             tower_floor=tower_floor,
             tower_stage_trial=trial_info,
             process_info=effective_process_info,
+            is_starting=is_starting,
         )
 
 
@@ -343,6 +348,7 @@ class GameDetector:
         self.game_win64_dir: Path | None = None
         self.last_raw_zone: str = ""
         self.last_raw_checkpoint: str = ""
+        self.has_received_telemetry: bool = False
         self.current_tower_trial: tuple[int, int] | str | None = None
         self._cached_language: str = "en"
         self._last_ini_mtime: float | None = None
@@ -427,6 +433,7 @@ class GameDetector:
             self.cached_pid = None
             self.game_exe_path = None
             self.game_win64_dir = None
+            self.has_received_telemetry = False
 
         # 2. Optimized global enumeration with adaptive idle backoff
         current_time = self.time_provider() if now is None else now
@@ -510,6 +517,7 @@ class GameDetector:
             self.cached_pid = None
             self.game_exe_path = None
             self.game_win64_dir = None
+            self.has_received_telemetry = False
             self.current_tower_trial = None
             self.last_raw_zone = ""
             self.last_raw_checkpoint = ""
@@ -542,51 +550,61 @@ class GameDetector:
         raw_enemies: list[str] = []
         tower_floor = None
         raw_checkpoint = ""
+        is_starting = False
 
         if data:
+            self.has_received_telemetry = True
             raw_zone = str(data.get("raw_zone", "") or "")
             in_combat = bool(data.get("in_combat", False))
             raw_enemy = str(data.get("enemy_name", "") or "")
             raw_enemies = data.get("enemies", [])
             tower_floor = data.get("tower_floor")
             raw_checkpoint = str(data.get("checkpoint", "") or "")
+        else:
+            if not self.has_received_telemetry and not self.last_raw_zone:
+                is_starting = True
+                raw_zone = "Starting"
+            else:
+                is_starting = False
+                raw_zone = self.last_raw_zone
 
+        raw_lower = raw_zone.lower()
         is_menu = is_menu_zone(raw_zone)
         is_continent = is_continent_zone(raw_zone)
+        is_tower = (
+            "endlesstower" in raw_lower or "torreinfinita" in raw_lower or "tower" in raw_lower
+        ) and "workshop" not in raw_lower
 
         if is_menu:
             raw_checkpoint = ""
             in_combat = False
 
         # Checkpoint resolution via active telemetry source with save reader fallback
-        if is_menu or is_continent:
+        if is_menu or is_continent or is_starting:
             raw_checkpoint = ""
             self.last_raw_checkpoint = ""
         elif raw_checkpoint:
             self.last_raw_checkpoint = raw_checkpoint
         else:
-            if raw_zone and raw_zone == self.last_raw_zone:
+            # Fallback to save reader when bridge does not supply checkpoint
+            resolved_cp = None
+            if self.save_reader is not None:
+                zone_to_check = raw_zone or self.last_raw_zone
+                if zone_to_check and not is_tower and zone_to_check.lower() != "starting":
+                    resolved_cp = self.save_reader.resolve_checkpoint_for_zone(zone_to_check)
+
+            if resolved_cp:
+                raw_checkpoint = resolved_cp
+                self.last_raw_checkpoint = resolved_cp
+            elif raw_zone and raw_zone == self.last_raw_zone:
                 raw_checkpoint = self.last_raw_checkpoint
             else:
                 raw_checkpoint = ""
                 self.last_raw_checkpoint = ""
 
-            # Fallback to save reader strictly when bridge is inactive or stale (data is None)
-            if data is None and not raw_checkpoint and self.save_reader is not None:
-                zone_to_check = raw_zone or self.last_raw_zone
-                if zone_to_check:
-                    resolved_cp = self.save_reader.resolve_checkpoint_for_zone(zone_to_check)
-                    if resolved_cp:
-                        raw_checkpoint = resolved_cp
-                        self.last_raw_checkpoint = resolved_cp
-
         self.last_raw_zone = raw_zone
 
         # Track Endless Tower stage and trial
-        raw_lower = raw_zone.lower()
-        is_tower = (
-            "endlesstower" in raw_lower or "torreinfinita" in raw_lower or "tower" in raw_lower
-        ) and "workshop" not in raw_lower
         effective_enemy = raw_enemy
         if is_tower and in_combat:
             bridge_trial = data.get("tower_trial") if data else None
@@ -640,6 +658,7 @@ class GameDetector:
             tower_floor=tower_floor,
             tower_stage_trial=self.current_tower_trial,
             process_info=proc_info,
+            is_starting=is_starting,
         )
 
 

@@ -233,7 +233,19 @@ def test_bridge_provider_rejects_corrupted_or_partial_json(tmp_path: Path) -> No
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("menu_token", ["MainMenu", "Level_MainMenu", "WBP_MM_MainMenu"])
+@pytest.mark.parametrize(
+    "menu_token",
+    [
+        "MainMenu",
+        "Level_MainMenu",
+        "WBP_MM_MainMenu",
+        "Map_GameBootstrap",
+        "WBP_MM_TitleScreen",
+        "WBP_MM_Settings",
+        "WBP_MM_NewGame",
+        "WBP_MM_LoadScreen",
+    ],
+)
 def test_main_menu_detection(tmp_path: Path, menu_token: str) -> None:
     mock_proc = FakeProcess(pid=9999, name="Sandfall-Win64-Shipping.exe")
     ini_path = tmp_path / "GameUserSettings.ini"
@@ -259,6 +271,25 @@ def test_main_menu_detection(tmp_path: Path, menu_token: str) -> None:
     assert state.zone_name == "Main Menu"
     assert state.checkpoint_name == ""
     assert state.in_combat is False
+
+
+@pytest.mark.unit
+def test_detector_startup_state_when_telemetry_pending() -> None:
+    """Verifies that GameDetector identifies initial process startup when telemetry is not yet ready."""
+    mock_proc = FakeProcess(pid=9999, name="Sandfall-Win64-Shipping.exe")
+    bridge_provider = MagicMock(spec=BridgeStateProvider)
+    bridge_provider.read_game_data.return_value = None
+
+    detector = GameDetector(
+        bridge_provider=bridge_provider,
+        process_scanner=lambda: [mock_proc],
+    )
+
+    state = detector.get_game_state()
+    assert state.is_running is True
+    assert state.is_starting is True
+    assert state.raw_zone == "Starting"
+    assert state.zone_name == "Starting..."
 
 
 @pytest.mark.integration
@@ -759,16 +790,17 @@ def test_detector_fallback_to_save_reader_when_provided() -> None:
         save_reader=mock_save_reader,
     )
 
-    # Tick 1: Bridge active in Versos Draft
+    # Tick 1: Bridge active in Versos Draft with its own checkpoint
     bridge_provider.read_game_data.return_value = {
         "raw_zone": "Level_Side_VersosDraft",
         "in_combat": False,
-        "checkpoint": "",
+        "checkpoint": "BridgeCheckpoint",
         "timestamp": 1000.0,
     }
     st1 = detector.get_game_state(now=1000.0)
     assert st1.is_running is True
     assert st1.raw_zone == "Level_Side_VersosDraft"
+    assert st1.raw_checkpoint == "BridgeCheckpoint"
 
     # Tick 2: Bridge telemetry drops (returns None) -> Clean fallback to save reader
     bridge_provider.read_game_data.return_value = None
@@ -837,7 +869,7 @@ def test_detector_save_reader_strictly_dormant_when_bridge_fresh() -> None:
         "raw_zone": "Level_Side_VersosDraft",
         "in_combat": False,
         "enemy_name": "",
-        "checkpoint": "",
+        "checkpoint": "Level.SpawnPoint.VersosDraft.CandyLand",
         "timestamp": 1000.0,
     }
 
@@ -849,8 +881,41 @@ def test_detector_save_reader_strictly_dormant_when_bridge_fresh() -> None:
 
     state = detector.get_game_state(now=1000.0)
     assert state.is_running is True
-    assert state.raw_checkpoint == ""
+    assert state.raw_checkpoint == "Level.SpawnPoint.VersosDraft.CandyLand"
     mock_save_reader.resolve_checkpoint_for_zone.assert_not_called()
+
+
+@pytest.mark.unit
+def test_detector_save_reader_resolves_checkpoint_when_bridge_checkpoint_empty() -> None:
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    mock_save_reader = MagicMock(spec=SaveReaderProtocol)
+    mock_save_reader.resolve_checkpoint_for_zone.return_value = "SpawnPoint_VersosDraft"
+
+    bridge_provider = MagicMock(spec=BridgeStateProvider)
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_Side_VersosDraft",
+        "in_combat": False,
+        "enemy_name": "",
+        "checkpoint": "",
+        "timestamp": 1000.0,
+    }
+
+    detector = GameDetector(
+        bridge_provider=bridge_provider,
+        process_scanner=lambda: [mock_proc],
+        save_reader=mock_save_reader,
+    )
+
+    # First tick: resolves checkpoint from save reader and caches
+    st1 = detector.get_game_state(now=1000.0)
+    assert st1.raw_checkpoint == "SpawnPoint_VersosDraft"
+    mock_save_reader.resolve_checkpoint_for_zone.assert_called_once_with("Level_Side_VersosDraft")
+
+    # Second tick: player fast travels to new checkpoint in same zone; detector queries save reader and updates
+    mock_save_reader.resolve_checkpoint_for_zone.return_value = "SpawnPoint_VersosDraft_NewCamp"
+    st2 = detector.get_game_state(now=1002.0)
+    assert st2.raw_checkpoint == "SpawnPoint_VersosDraft_NewCamp"
+    assert mock_save_reader.resolve_checkpoint_for_zone.call_count == 2
 
 
 @pytest.mark.unit

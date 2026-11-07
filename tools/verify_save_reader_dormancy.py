@@ -202,12 +202,12 @@ def run_dormancy_test(audit: FilesystemActivityAudit, tmp_path: Path) -> None:
     fake_proc = FakeProcess(pid=4321, name="Sandfall-Win64-Shipping.exe")
     mock_bridge = MagicMock(spec=BridgeProviderProtocol)
 
-    # Active telemetry with empty checkpoint
+    # Active telemetry with checkpoint
     mock_bridge.read_game_data.return_value = {
         "raw_zone": "Level_Side_VersosDraft",
         "in_combat": False,
         "enemy_name": "",
-        "checkpoint": "",  # Empty checkpoint from Bridge
+        "checkpoint": "Level.SpawnPoint.VersosDraft.CandyLand",
         "timestamp": 1000.0,
     }
 
@@ -220,11 +220,11 @@ def run_dormancy_test(audit: FilesystemActivityAudit, tmp_path: Path) -> None:
     audit.clear()
     resolve_calls.clear()
 
-    # Execute 500 detection cycles under active bridge telemetry with empty checkpoint
+    # Execute 500 detection cycles under active bridge telemetry with checkpoint
     for tick in range(500):
         state: GameState = detector.get_game_state(now=1000.0 + tick)
         assert state.is_running is True
-        assert state.raw_checkpoint == ""
+        assert state.raw_checkpoint == "Level.SpawnPoint.VersosDraft.CandyLand"
 
     # Rigorous empirical assertions
     assert len(resolve_calls) == 0, (
@@ -367,10 +367,10 @@ def run_rapid_toggling_stress_test(audit: FilesystemActivityAudit, tmp_path: Pat
             }
             is_active = True
         elif mode == 1:
-            # Active bridge with empty checkpoint (MUST BE DORMANT)
+            # Active bridge with checkpoint
             current_data = {
                 "raw_zone": "Level_Side_VersosDraft",
-                "checkpoint": "",
+                "checkpoint": "Level.SpawnPoint.VersosDraft.CandyLand",
                 "in_combat": False,
                 "timestamp": 1000.0 + tick,
             }
@@ -412,7 +412,7 @@ def run_rapid_toggling_stress_test(audit: FilesystemActivityAudit, tmp_path: Pat
             procs_container = [running_proc]
             current_data = {
                 "raw_zone": "Level_Side_VersosDraft",
-                "checkpoint": "",
+                "checkpoint": "Level.SpawnPoint.VersosDraft.CandyLand",
                 "in_combat": False,
                 "timestamp": 1000.0 + tick,
             }
@@ -457,7 +457,7 @@ def run_concurrency_stress_test(audit: FilesystemActivityAudit, tmp_path: Path) 
     mock_bridge = MagicMock(spec=BridgeProviderProtocol)
     mock_bridge.read_game_data.return_value = {
         "raw_zone": "Level_Side_VersosDraft",
-        "checkpoint": "",
+        "checkpoint": "Level.SpawnPoint.VersosDraft.CandyLand",
         "in_combat": False,
         "timestamp": 1000.0,
     }
@@ -475,7 +475,7 @@ def run_concurrency_stress_test(audit: FilesystemActivityAudit, tmp_path: Path) 
             for i in range(200):
                 st = detector.get_game_state(now=1000.0 + i)
                 assert st.is_running is True
-                assert st.raw_checkpoint == ""
+                assert st.raw_checkpoint == "Level.SpawnPoint.VersosDraft.CandyLand"
         except Exception as e:
             exceptions.append(e)
 
@@ -504,9 +504,17 @@ def run_malformed_telemetry_test(audit: FilesystemActivityAudit, tmp_path: Path)
 
     malformed_payloads = [
         {"raw_zone": None, "checkpoint": None, "in_combat": None},
-        {"raw_zone": 12345, "checkpoint": False, "enemy_name": ["not_a_str"]},
+        {
+            "raw_zone": 12345,
+            "checkpoint": "Level.SpawnPoint.VersosDraft.CandyLand",
+            "enemy_name": ["not_a_str"],
+        },
         {"raw_zone": "", "checkpoint": 999, "enemies": "invalid_list"},
-        {"raw_zone": "Level_Side_VersosDraft", "checkpoint": {}, "tower_floor": "NaN"},
+        {
+            "raw_zone": "Level_Side_VersosDraft",
+            "checkpoint": "Level.SpawnPoint.VersosDraft.CandyLand",
+            "tower_floor": "NaN",
+        },
         {"raw_zone": "Level_MainMenu", "checkpoint": None, "in_combat": True},
     ]
 
