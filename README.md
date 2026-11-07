@@ -122,6 +122,10 @@ Right-clicking the tray icon gives you full control and real-time diagnostic sta
 
 <h2 id="architecture">🏛️ Technical Architecture</h2>
 
+<p align="center">
+  <img src="docs/architecture_pipeline.svg" alt="Expedition 33 End-to-End Telemetry Pipeline" width="100%">
+</p>
+
 The codebase follows a clean, modular 4-tier architecture designed for high maintainability, separation of concerns, and full static type safety:
 
 ```text

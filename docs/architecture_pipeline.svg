@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" role="img" aria-label="Expedition 33 Discord RPC Telemetry Pipeline: in-game Lua hook writes IPC JSON, GameDetector verifies 5s freshness SLA and pushes to Discord; fallback mmap reader extracts save state when bridge is inactive.">
+  <style>
+    .flow { fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 7 7; animation: e33flow .7s linear infinite; }
+    @keyframes e33flow { to { stroke-dashoffset: -14; } }
+    @media (prefers-reduced-motion: reduce) { .flow { animation: none; } }
+    .node { fill: #0e1322; stroke-width: 1.6; }
+    .main { font: 600 13.5px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; fill: #f8fafc; text-anchor: middle; }
+    .sub { font: 400 11px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; fill: #94a3b8; text-anchor: middle; }
+    .edgelabel { font: 600 11px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+    .tag { font: 700 11px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; letter-spacing: 2.2px; fill: #38bdf8; }
+    .caption { font: 400 11.5px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif; fill: #94a3b8; text-anchor: middle; }
+  </style>
+  <defs>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f59e0b"/>
+      <stop offset=".45" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#5865F2"/>
+    </linearGradient>
+    <marker id="headCyan" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="headEmerald" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#34d399"/>
+    </marker>
+    <marker id="headAmber" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#fbbf24"/>
+    </marker>
+    <marker id="headBlurple" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#818cf8"/>
+    </marker>
+  </defs>
+
+  <!-- Card Canvas -->
+  <rect x="4" y="4" width="872" height="462" rx="16" fill="#080c16" stroke="url(#edge)" stroke-width="1.6"/>
+
+  <!-- Brand Header -->
+  <rect x="34" y="24" width="32" height="32" rx="8" fill="#131b2e" stroke="url(#edge)" stroke-width="1.4"/>
+  <text x="50" y="46" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="15" font-weight="900" fill="#f59e0b" text-anchor="middle">33</text>
+  <text x="78" y="47" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="19" font-weight="800" letter-spacing="1.5" fill="url(#edge)">EXPEDITION&#160;33</text>
+  <text class="tag" x="254" y="45">&#183; TELEMETRY &amp; PRESENCE PIPELINE</text>
+
+  <!-- Row 1: Hot Telemetry Path (Active Bridge) -->
+  <rect class="node" x="36" y="84" width="176" height="58" rx="11" stroke="#38bdf8"/>
+  <text class="main" x="124" y="108">&#127918; UE4SS Lua Mod</text>
+  <text class="sub" x="124" y="126">in-game telemetry hook</text>
+
+  <rect class="node" x="256" y="84" width="180" height="58" rx="11" stroke="#38bdf8"/>
+  <text class="main" x="346" y="108">&#128196; IPC Status File</text>
+  <text class="sub" x="346" y="126">%TEMP%\expedition33_status.json</text>
+
+  <rect class="node" x="480" y="84" width="180" height="58" rx="11" stroke="#34d399"/>
+  <text class="main" x="570" y="108">&#9889; GameDetector Hub</text>
+  <text class="sub" x="570" y="126">5.0s SLA &#183; game_data SSOT</text>
+
+  <rect class="node" x="704" y="84" width="140" height="58" rx="11" stroke="#818cf8"/>
+  <text class="main" x="774" y="108">&#128172; Discord Presence</text>
+  <text class="sub" x="774" y="126">combat, zone &amp; timer</text>
+
+  <!-- Row 1: Unobstructed Animated Connectors -->
+  <path class="flow" d="M212,113 L250,113" stroke="#38bdf8" marker-end="url(#headCyan)"/>
+  <path class="flow" d="M436,113 L474,113" stroke="#38bdf8" marker-end="url(#headCyan)"/>
+  <path class="flow" d="M660,113 L698,113" stroke="#34d399" marker-end="url(#headEmerald)"/>
+
+  <!-- Branch: Fallback on Stale / Missing Bridge -->
+  <path class="flow" d="M550,142 C530,225 280,220 234,294" stroke="#fbbf24" marker-end="url(#headAmber)"/>
+
+  <!-- Pill Badge for Fallback Condition (Clean Spacious Floating Badge) -->
+  <rect x="296" y="206" width="188" height="22" rx="11" fill="#0e1322" stroke="#fbbf24" stroke-width="1.2"/>
+  <text class="edgelabel" x="390" y="221" fill="#fbbf24" text-anchor="middle">stale (&gt;5s) or mod inactive</text>
+
+  <!-- Row 2: Emergency Savegame Fallback Path -->
+  <rect class="node" x="144" y="300" width="180" height="58" rx="11" stroke="#fbbf24"/>
+  <text class="main" x="234" y="324">&#128190; UE5 Disk Save</text>
+  <text class="sub" x="234" y="342">Saved\SaveGames\*.sav</text>
+
+  <rect class="node" x="368" y="300" width="196" height="58" rx="11" stroke="#fbbf24"/>
+  <text class="main" x="466" y="324">&#128269; SaveFileReader</text>
+  <text class="sub" x="466" y="342">mmap &#183; LastUsedSavePoint</text>
+
+  <rect class="node" x="608" y="300" width="236" height="58" rx="11" stroke="#818cf8"/>
+  <text class="main" x="726" y="324">&#128737;&#65039; Presentation Shield</text>
+  <text class="sub" x="726" y="342">anti-spoiler &#183; 128-byte clamp</text>
+
+  <!-- Row 2: Unobstructed Animated Connectors -->
+  <path class="flow" d="M324,329 L362,329" stroke="#fbbf24" marker-end="url(#headAmber)"/>
+  <path class="flow" d="M564,329 L602,329" stroke="#fbbf24" marker-end="url(#headAmber)"/>
+
+  <!-- Return Flow: Fallback Restores Presence -->
+  <path class="flow" d="M774,300 C774,235 774,205 774,148" stroke="#818cf8" marker-end="url(#headBlurple)"/>
+
+  <!-- Pill Badge for Return Flow -->
+  <rect x="696" y="206" width="156" height="22" rx="11" fill="#0e1322" stroke="#818cf8" stroke-width="1.2"/>
+  <text class="edgelabel" x="774" y="221" fill="#818cf8" text-anchor="middle">fallback synced &#183; live</text>
+
+  <!-- Bottom Architecture Caption -->
+  <text class="caption" x="440" y="432">Zero game process injection &#183; 5.0s SLA on hot telemetry &#183; Atomic mmap fallback &#183; Native Discord IPC named pipe</text>
+</svg>
