@@ -17,6 +17,7 @@ from expedition33_rpc.detection.normalization import (
     is_continent_zone,
     is_menu_zone,
     normalize_language_code,
+    resolve_menu_substate,
 )
 
 DISCORD_MAX_FIELD_LENGTH = 128
@@ -78,9 +79,15 @@ def format_presence(game_state: GameState, anti_spoiler: bool = False) -> tuple[
     canon = normalize_language_code(game_state.game_language)
     strings = get_presentation_strings(canon)
 
+    if game_state.is_starting:
+        details = strings.get("starting", "Starting...")
+        state = strings.get("loading", "Loading...")
+        return truncate_presence_field(details), truncate_presence_field(state)
+
     if is_menu_zone(game_state):
+        substate = resolve_menu_substate(game_state)
         details = strings["in_menu"]
-        state = strings["title_screen"]
+        state = strings.get(substate, strings["title_screen"])
         return truncate_presence_field(details), truncate_presence_field(state)
 
     if game_state.in_combat:
@@ -116,7 +123,17 @@ def format_tray_title(game_state: GameState, anti_spoiler: bool = False) -> str:
 
     canon = normalize_language_code(game_state.game_language)
     strings = get_presentation_strings(canon)
+
+    if game_state.is_starting:
+        return f"Expedition 33: {strings.get('starting', 'Starting...')}"
+
     if is_menu_zone(game_state):
+        substate = resolve_menu_substate(game_state)
+        if substate == "main_menu":
+            return f"Expedition 33: {strings['in_menu']}"
+        sub_text = strings.get(substate, "")
+        if sub_text:
+            return f"Expedition 33: {strings['in_menu']} ({sub_text})"
         return f"Expedition 33: {strings['in_menu']}"
 
     if anti_spoiler:
@@ -136,9 +153,11 @@ def format_tray_zone_status(game_state: GameState, anti_spoiler: bool = False) -
     """Formats the Location line for the system tray menu."""
     if not game_state.is_running:
         return "Location: --"
+    canon = normalize_language_code(game_state.game_language)
+    strings = get_presentation_strings(canon)
+    if game_state.is_starting:
+        return f"Location: {strings.get('starting', 'Starting...')}"
     if is_menu_zone(game_state):
-        canon = normalize_language_code(game_state.game_language)
-        strings = get_presentation_strings(canon)
         return f"Location: {strings['in_menu']}"
     if anti_spoiler:
         return "Location: [Hidden - Anti-Spoiler]"
@@ -150,15 +169,14 @@ def format_tray_combat_status(game_state: GameState, anti_spoiler: bool = False)
     """Formats the Status / Combat line for the system tray menu."""
     if not game_state.is_running:
         return "Status: --"
+    canon = normalize_language_code(game_state.game_language)
+    strings = get_presentation_strings(canon)
+    if game_state.is_starting:
+        return f"Status: {strings.get('loading', 'Loading...')}"
     if is_menu_zone(game_state):
-        canon = normalize_language_code(game_state.game_language)
-        if canon == "it":
-            return "Status: Nel menu principale"
-        elif canon == "en-US":
-            return "Status: Main Menu"
-        else:
-            strings = get_presentation_strings(canon)
-            return f"Status: {strings['in_menu']}"
+        substate = resolve_menu_substate(game_state)
+        sub_text = strings.get(substate, strings["main_menu"])
+        return f"Status: {sub_text}"
     if game_state.in_combat:
         if not anti_spoiler and game_state.enemy_name:
             return f"Combat: Fighting {game_state.enemy_name}"

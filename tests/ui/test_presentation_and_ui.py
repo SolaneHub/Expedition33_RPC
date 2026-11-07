@@ -78,10 +78,13 @@ def test_format_tray_title() -> None:
     )
 
     menu_en = GameState.create(is_running=True, raw_zone="Level_MainMenu", game_language="en")
-    assert format_tray_title(menu_en) == "Expedition 33: In Main Menu"
+    assert format_tray_title(menu_en) == "Expedition 33: In Main Menu (Title Screen)"
 
     menu_it = GameState.create(is_running=True, raw_zone="Level_MainMenu", game_language="it")
-    assert format_tray_title(menu_it) == "Expedition 33: Nel menu principale"
+    assert format_tray_title(menu_it) == "Expedition 33: Nel menu principale (Schermata dei titoli)"
+
+    main_menu_en = GameState.create(is_running=True, raw_zone="WBP_MM_MainMenu", game_language="en")
+    assert format_tray_title(main_menu_en) == "Expedition 33: In Main Menu"
 
     spoiler_combat = GameState.create(is_running=True, in_combat=True, zone_name="Secret Area")
     assert (
@@ -119,12 +122,22 @@ def test_format_tray_zone_and_combat_status() -> None:
     menu = GameState.create(is_running=True, raw_zone="Level_MainMenu", game_language="en")
     assert format_tray_zone_status(menu) == "Location: In Main Menu"
     assert format_tray_zone_status(menu, anti_spoiler=True) == "Location: In Main Menu"
-    assert format_tray_combat_status(menu) == "Status: Main Menu"
-    assert format_tray_combat_status(menu, anti_spoiler=True) == "Status: Main Menu"
+    assert format_tray_combat_status(menu) == "Status: Title Screen"
+    assert format_tray_combat_status(menu, anti_spoiler=True) == "Status: Title Screen"
 
     menu_it = GameState.create(is_running=True, raw_zone="Level_MainMenu", game_language="it")
     assert format_tray_zone_status(menu_it, anti_spoiler=True) == "Location: Nel menu principale"
-    assert format_tray_combat_status(menu_it, anti_spoiler=True) == "Status: Nel menu principale"
+    assert format_tray_combat_status(menu_it, anti_spoiler=True) == "Status: Schermata dei titoli"
+
+    menu_main = GameState.create(is_running=True, raw_zone="WBP_MM_MainMenu", game_language="en")
+    assert format_tray_combat_status(menu_main) == "Status: Main Menu"
+
+    menu_main_it = GameState.create(is_running=True, raw_zone="WBP_MM_MainMenu", game_language="it")
+    assert format_tray_combat_status(menu_main_it) == "Status: Menu principale"
+
+    starting = GameState.create(is_running=True, is_starting=True, game_language="it")
+    assert format_tray_zone_status(starting) == "Location: Avvio in corso..."
+    assert format_tray_combat_status(starting) == "Status: Caricamento..."
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +286,96 @@ def test_format_presence_across_languages() -> None:
         game_language="zh-Hans",
     )
     assert format_presence(state_zh_floor) == ("探索中", "无尽之塔 (第7层)")
+
+
+def test_menu_lifecycle_substates_presentation_en_and_it() -> None:
+    """Verifies that each distinct menu substate format matches Discord and Tray expectations."""
+    # 1. Starting phase (process running, telemetry pending)
+    start_en = GameState.create(is_running=True, is_starting=True, game_language="en")
+    assert format_presence(start_en) == ("Starting...", "Loading...")
+    assert format_tray_title(start_en) == "Expedition 33: Starting..."
+    assert format_tray_zone_status(start_en) == "Location: Starting..."
+    assert format_tray_combat_status(start_en) == "Status: Loading..."
+
+    start_it = GameState.create(is_running=True, is_starting=True, game_language="it")
+    assert format_presence(start_it) == ("Avvio in corso...", "Caricamento...")
+    assert format_tray_title(start_it) == "Expedition 33: Avvio in corso..."
+    assert format_tray_zone_status(start_it) == "Location: Avvio in corso..."
+    assert format_tray_combat_status(start_it) == "Status: Caricamento..."
+
+    # 2. Bootstrap & Splash phase
+    boot_en = GameState.create(is_running=True, raw_zone="Map_GameBootstrap", game_language="en")
+    assert format_presence(boot_en) == ("In Main Menu", "Initial Screen")
+    assert format_tray_title(boot_en) == "Expedition 33: In Main Menu (Initial Screen)"
+    assert format_tray_zone_status(boot_en) == "Location: In Main Menu"
+    assert format_tray_combat_status(boot_en) == "Status: Initial Screen"
+
+    boot_it = GameState.create(is_running=True, raw_zone="Map_GameBootstrap", game_language="it")
+    assert format_presence(boot_it) == ("Nel menu principale", "Schermata iniziale")
+    assert format_tray_title(boot_it) == "Expedition 33: Nel menu principale (Schermata iniziale)"
+    assert format_tray_zone_status(boot_it) == "Location: Nel menu principale"
+    assert format_tray_combat_status(boot_it) == "Status: Schermata iniziale"
+
+    # 3. Title Screen (Press any key)
+    title_en = GameState.create(is_running=True, raw_zone="WBP_MM_TitleScreen", game_language="en")
+    assert format_presence(title_en) == ("In Main Menu", "Title Screen")
+    assert format_tray_title(title_en) == "Expedition 33: In Main Menu (Title Screen)"
+    assert format_tray_combat_status(title_en) == "Status: Title Screen"
+
+    title_it = GameState.create(is_running=True, raw_zone="WBP_MM_TitleScreen", game_language="it")
+    assert format_presence(title_it) == ("Nel menu principale", "Schermata dei titoli")
+    assert (
+        format_tray_title(title_it) == "Expedition 33: Nel menu principale (Schermata dei titoli)"
+    )
+    assert format_tray_combat_status(title_it) == "Status: Schermata dei titoli"
+
+    # 4. Main Menu (Options: Continue, New Game, Load, Settings)
+    main_en = GameState.create(is_running=True, raw_zone="WBP_MM_MainMenu", game_language="en")
+    assert format_presence(main_en) == ("In Main Menu", "Main Menu")
+    assert format_tray_title(main_en) == "Expedition 33: In Main Menu"
+    assert format_tray_combat_status(main_en) == "Status: Main Menu"
+
+    main_it = GameState.create(is_running=True, raw_zone="WBP_MM_MainMenu", game_language="it")
+    assert format_presence(main_it) == ("Nel menu principale", "Menu principale")
+    assert format_tray_title(main_it) == "Expedition 33: Nel menu principale"
+    assert format_tray_combat_status(main_it) == "Status: Menu principale"
+
+    # 5a. Loading Save / Save Slots
+    save_en = GameState.create(is_running=True, raw_zone="WBP_MM_LoadScreen", game_language="en")
+    assert format_presence(save_en) == ("In Main Menu", "Loading Save")
+    assert format_tray_title(save_en) == "Expedition 33: In Main Menu (Loading Save)"
+    assert format_tray_combat_status(save_en) == "Status: Loading Save"
+
+    save_it = GameState.create(is_running=True, raw_zone="WBP_MM_LoadScreen", game_language="it")
+    assert format_presence(save_it) == ("Nel menu principale", "Caricamento salvataggio")
+    assert (
+        format_tray_title(save_it) == "Expedition 33: Nel menu principale (Caricamento salvataggio)"
+    )
+    assert format_tray_combat_status(save_it) == "Status: Caricamento salvataggio"
+
+    # 5b. Settings / Options
+    settings_en = GameState.create(is_running=True, raw_zone="WBP_MM_Settings", game_language="en")
+    assert format_presence(settings_en) == ("In Main Menu", "In Settings")
+    assert format_tray_title(settings_en) == "Expedition 33: In Main Menu (In Settings)"
+    assert format_tray_combat_status(settings_en) == "Status: In Settings"
+
+    settings_it = GameState.create(is_running=True, raw_zone="WBP_MM_Settings", game_language="it")
+    assert format_presence(settings_it) == ("Nel menu principale", "Nelle impostazioni")
+    assert (
+        format_tray_title(settings_it) == "Expedition 33: Nel menu principale (Nelle impostazioni)"
+    )
+    assert format_tray_combat_status(settings_it) == "Status: Nelle impostazioni"
+
+    # 5c. New Game
+    newgame_en = GameState.create(is_running=True, raw_zone="WBP_MM_NewGame", game_language="en")
+    assert format_presence(newgame_en) == ("In Main Menu", "New Game")
+    assert format_tray_title(newgame_en) == "Expedition 33: In Main Menu (New Game)"
+    assert format_tray_combat_status(newgame_en) == "Status: New Game"
+
+    newgame_it = GameState.create(is_running=True, raw_zone="WBP_MM_NewGame", game_language="it")
+    assert format_presence(newgame_it) == ("Nel menu principale", "Nuova partita")
+    assert format_tray_title(newgame_it) == "Expedition 33: Nel menu principale (Nuova partita)"
+    assert format_tray_combat_status(newgame_it) == "Status: Nuova partita"
 
 
 # ---------------------------------------------------------------------------

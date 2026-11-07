@@ -70,6 +70,8 @@ class ExpeditionTrayApp:
                 state.is_running,
                 state.process_pid,
                 state.zone_name,
+                state.raw_zone,
+                state.is_starting,
                 state.in_combat,
                 state.enemy_name,
                 state.tower_floor,
