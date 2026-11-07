@@ -77,8 +77,8 @@
 
   <!-- Row 2: Invariants & Fault Recovery -->
   <rect class="node" x="470" y="300" width="200" height="58" rx="11" stroke="#fbbf24"/>
-  <text class="main" x="570" y="324">&#128737;&#65039; Fallback Exploration</text>
-  <text class="sub" x="570" y="342">UE5 .sav mmap &#183; clean state</text>
+  <text class="main" x="570" y="324">&#128737;&#65039; Save Sync &amp; Fallback</text>
+  <text class="sub" x="570" y="342">O(1) mtime sync &#183; safe fallback</text>
 
   <!-- Flow: Fallback Restores to Active Discord Pipe -->
   <path class="flow" d="M670,329 C720,329 744,250 744,148" stroke="#818cf8" marker-end="url(#headBlurpleSM)"/>
@@ -96,5 +96,5 @@
   <path class="flow" d="M820,300 C835,230 835,210 820,148" stroke="#f43f5e" marker-end="url(#headRoseSM)"/>
 
   <!-- Bottom Architecture Caption -->
-  <text class="caption" x="440" y="432">O(1) PID liveness tracking &#183; 5.0s TTL freshness SLA &#183; Exponential backoff on pipe fault &#183; Zero ghost presences</text>
+  <text class="caption" x="440" y="432">O(1) PID liveness tracking &#183; 5.0s TTL freshness SLA &#183; O(1) checkpoint mtime sync &#183; Zero ghost presences</text>
 </svg>

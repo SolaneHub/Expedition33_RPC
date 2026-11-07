@@ -79,8 +79,8 @@ PIPELINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
   <path class="flow" d="M550,142 C530,225 280,220 234,294" stroke="#fbbf24" marker-end="url(#headAmber)"/>
 
   <!-- Pill Badge for Fallback Condition (Clean Spacious Floating Badge) -->
-  <rect x="296" y="206" width="188" height="22" rx="11" fill="#0e1322" stroke="#fbbf24" stroke-width="1.2"/>
-  <text class="edgelabel" x="390" y="221" fill="#fbbf24" text-anchor="middle">stale (&gt;5s) or mod inactive</text>
+  <rect x="286" y="206" width="208" height="22" rx="11" fill="#0e1322" stroke="#fbbf24" stroke-width="1.2"/>
+  <text class="edgelabel" x="390" y="221" fill="#fbbf24" text-anchor="middle">checkpoint sync &#183; fallback (&gt;5s)</text>
 
   <!-- Row 2: Emergency Savegame Fallback Path -->
   <rect class="node" x="144" y="300" width="180" height="58" rx="11" stroke="#fbbf24"/>
@@ -89,7 +89,7 @@ PIPELINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
 
   <rect class="node" x="368" y="300" width="196" height="58" rx="11" stroke="#fbbf24"/>
   <text class="main" x="466" y="324">&#128269; SaveFileReader</text>
-  <text class="sub" x="466" y="342">mmap &#183; LastUsedSavePoint</text>
+  <text class="sub" x="466" y="342">O(1) mtime &#183; checkpoint sync</text>
 
   <rect class="node" x="608" y="300" width="236" height="58" rx="11" stroke="#818cf8"/>
   <text class="main" x="726" y="324">&#128737;&#65039; Presentation Shield</text>
@@ -107,7 +107,7 @@ PIPELINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
   <text class="edgelabel" x="774" y="221" fill="#818cf8" text-anchor="middle">fallback synced &#183; live</text>
 
   <!-- Bottom Architecture Caption -->
-  <text class="caption" x="440" y="432">Zero game process injection &#183; 5.0s SLA on hot telemetry &#183; Atomic mmap fallback &#183; Native Discord IPC named pipe</text>
+  <text class="caption" x="440" y="432">Zero game process injection &#183; 5.0s SLA on hot telemetry &#183; O(1) mtime checkpoint sync &#183; Native Discord IPC named pipe</text>
 </svg>
 """
 
@@ -289,8 +289,8 @@ STATE_MACHINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox=
 
   <!-- Row 2: Invariants & Fault Recovery -->
   <rect class="node" x="470" y="300" width="200" height="58" rx="11" stroke="#fbbf24"/>
-  <text class="main" x="570" y="324">&#128737;&#65039; Fallback Exploration</text>
-  <text class="sub" x="570" y="342">UE5 .sav mmap &#183; clean state</text>
+  <text class="main" x="570" y="324">&#128737;&#65039; Save Sync &amp; Fallback</text>
+  <text class="sub" x="570" y="342">O(1) mtime sync &#183; safe fallback</text>
 
   <!-- Flow: Fallback Restores to Active Discord Pipe -->
   <path class="flow" d="M670,329 C720,329 744,250 744,148" stroke="#818cf8" marker-end="url(#headBlurpleSM)"/>
@@ -308,7 +308,7 @@ STATE_MACHINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox=
   <path class="flow" d="M820,300 C835,230 835,210 820,148" stroke="#f43f5e" marker-end="url(#headRoseSM)"/>
 
   <!-- Bottom Architecture Caption -->
-  <text class="caption" x="440" y="432">O(1) PID liveness tracking &#183; 5.0s TTL freshness SLA &#183; Exponential backoff on pipe fault &#183; Zero ghost presences</text>
+  <text class="caption" x="440" y="432">O(1) PID liveness tracking &#183; 5.0s TTL freshness SLA &#183; O(1) checkpoint mtime sync &#183; Zero ghost presences</text>
 </svg>
 """
 

@@ -43,7 +43,7 @@ src/expedition33_rpc/
 │   ├── detector.py           # GameDetector, BridgeStateProvider & immutable GameState
 │   ├── game_data.py          # SSOT catalog accessors, regexes & Endless Tower matchers
 │   ├── normalization.py      # Pure normalization routines for levels, checkpoints, and bosses
-│   ├── save_reader.py        # Emergency fallback parser for binary UE5 .sav files via mmap
+│   ├── save_reader.py        # Checkpoint resolver & fallback parser for binary UE5 .sav files via mmap
 │   └── timer_tracker.py      # ZoneTimerTracker state machine for persistent Discord timestamps
 │
 ├── integrations/             # External boundaries and daemon installers
@@ -90,6 +90,13 @@ The application runtime maintains resilient execution across host process faults
    - When telemetry is stale or missing, the state machine drops active combat/boss status to prevent ghost presences and falls back to zone exploration or `.sav` checkpoint inspection.
 4. **Frame Dirty-Checking**:
    - Presence payloads are hashed/compared against the previous broadcast frame. Identical states are not re-sent, preventing pipe saturations and Discord rate-limit throttling.
+5. **Startup & Telemetry Liveness (`has_received_telemetry`)**:
+   - Upon initial process detection before UE4SS writes the first frame, the state engine sets `is_starting = True` ("Starting... / Loading...").
+   - Once the first valid telemetry payload is ingested, `has_received_telemetry` locks `True` for the lifetime of that PID.
+   - Any transient telemetry stall or file contention falls back to zone exploration of the last known zone (`last_raw_zone`) and never regresses to the starting/loading screen state.
+6. **Dynamic Checkpoint Synchronization**:
+   - When telemetry contains an empty checkpoint string, `SaveFileReader` inspects the active player save profile.
+   - Fast-travel and save-point rests are detected in sub-millisecond time via $O(1)$ `st.st_mtime` file caching on `EXPEDITION_*.sav`, dynamically updating checkpoint labels across both intra-zone and inter-zone travel without polling overhead.
 
 ---
 
@@ -113,11 +120,11 @@ Written atomically by the client-side UE4SS Lua mod in UTF-8:
   "tower_trial": [11, 3]
 }
 ```
-- `timestamp`: Float epoch time; checked against 5.0s TTL.
+- `timestamp`: Float epoch time; checked against 5.0s TTL. Emitted every second as an active heartbeat during combat.
 - `raw_zone` / `zone`: UE5 internal level identifier.
 - `in_combat`: Boolean state toggle.
 - `enemy_name` / `enemies`: Encounter targets.
-- `checkpoint`: Spawn tag mapped in `game_data.json`.
+- `checkpoint`: Spawn tag mapped in `game_data.json` (delegated to `SaveFileReader` when empty).
 
 ### 4.2. Discord Native IPC Binary Frame (`<II`)
 Discord Named Pipe (`\\.\pipe\discord-ipc-0`..`9` on Windows, UNIX socket on POSIX) packet wire format:

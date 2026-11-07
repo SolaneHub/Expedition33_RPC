@@ -18,6 +18,9 @@ Always verify changes using [`uv`](https://github.com/astral-sh/uv). Never push 
    - *Idle State* (game not detected): 5.0s sleep interval, query only process names/PIDs via `psutil`.
    - *Active State* (game running): 2.0s polling interval with O(1) PID liveness checks on `cached_pid`.
    - *Telemetry Ingestion*: Non-blocking Win32 `CreateFileW` with `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE` (flags `0x7`) taking < 1 ms.
+   - *Telemetry Heartbeat*: The Lua mod continuously emits heartbeat frames during combat to ensure the 5.0s TTL freshness SLA is satisfied across prolonged encounters.
+   - *Checkpoint & Save Resolution*: When bridge checkpoint data is empty, query `SaveFileReader` with O(1) `st_mtime` file caching. Never disable save reader fallback based on active telemetry alone without explicit bridge checkpoint tokens.
+   - *Startup & Ingestion Lifecycle*: Track process telemetry arrival via `has_received_telemetry`. The `is_starting` state is strictly reserved for initial launch before the first frame; never regress to `is_starting` during transient stalls.
    - *Bridge Installation*: Background daemon thread with strict cooldown and retry limits.
    - *Discord IPC*: Dirty-checking on outbound frames; never send identical presence payloads.
 3. **Dry-Run & Integration-First**: Test observable system behavior and interface contracts, not brittle private methods. Use `FakeProcessScanner`, `FakeBridgeProvider`, and `DiscordPipeSimulator` from `tests/harness/` for deterministic testing.

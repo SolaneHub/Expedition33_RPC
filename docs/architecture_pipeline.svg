@@ -65,8 +65,8 @@
   <path class="flow" d="M550,142 C530,225 280,220 234,294" stroke="#fbbf24" marker-end="url(#headAmber)"/>
 
   <!-- Pill Badge for Fallback Condition (Clean Spacious Floating Badge) -->
-  <rect x="296" y="206" width="188" height="22" rx="11" fill="#0e1322" stroke="#fbbf24" stroke-width="1.2"/>
-  <text class="edgelabel" x="390" y="221" fill="#fbbf24" text-anchor="middle">stale (&gt;5s) or mod inactive</text>
+  <rect x="286" y="206" width="208" height="22" rx="11" fill="#0e1322" stroke="#fbbf24" stroke-width="1.2"/>
+  <text class="edgelabel" x="390" y="221" fill="#fbbf24" text-anchor="middle">checkpoint sync &#183; fallback (&gt;5s)</text>
 
   <!-- Row 2: Emergency Savegame Fallback Path -->
   <rect class="node" x="144" y="300" width="180" height="58" rx="11" stroke="#fbbf24"/>
@@ -75,7 +75,7 @@
 
   <rect class="node" x="368" y="300" width="196" height="58" rx="11" stroke="#fbbf24"/>
   <text class="main" x="466" y="324">&#128269; SaveFileReader</text>
-  <text class="sub" x="466" y="342">mmap &#183; LastUsedSavePoint</text>
+  <text class="sub" x="466" y="342">O(1) mtime &#183; checkpoint sync</text>
 
   <rect class="node" x="608" y="300" width="236" height="58" rx="11" stroke="#818cf8"/>
   <text class="main" x="726" y="324">&#128737;&#65039; Presentation Shield</text>
@@ -93,5 +93,5 @@
   <text class="edgelabel" x="774" y="221" fill="#818cf8" text-anchor="middle">fallback synced &#183; live</text>
 
   <!-- Bottom Architecture Caption -->
-  <text class="caption" x="440" y="432">Zero game process injection &#183; 5.0s SLA on hot telemetry &#183; Atomic mmap fallback &#183; Native Discord IPC named pipe</text>
+  <text class="caption" x="440" y="432">Zero game process injection &#183; 5.0s SLA on hot telemetry &#183; O(1) mtime checkpoint sync &#183; Native Discord IPC named pipe</text>
 </svg>
