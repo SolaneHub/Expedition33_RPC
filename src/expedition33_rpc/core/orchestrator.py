@@ -367,14 +367,19 @@ class AppOrchestrator:
         """Stops the orchestrator and disconnects RPC."""
         self.running = False
         self._stop_event.set()
-        if self.worker_thread is not None and self.worker_thread.is_alive():
-            if threading.current_thread() != self.worker_thread:
-                self.worker_thread.join(timeout=3.0)
+        current = threading.current_thread()
+        deadline = time.monotonic() + 3.0
+
+        if self.worker_thread is not None:
+            if self.worker_thread is not current:
+                self.worker_thread.join(timeout=max(0.0, deadline - time.monotonic()))
             self.worker_thread = None
-        if self._bridge_install_thread is not None and self._bridge_install_thread.is_alive():
-            if threading.current_thread() != self._bridge_install_thread:
-                self._bridge_install_thread.join(timeout=3.0)
+
+        if self._bridge_install_thread is not None:
+            if self._bridge_install_thread is not current:
+                self._bridge_install_thread.join(timeout=max(0.0, deadline - time.monotonic()))
             self._bridge_install_thread = None
+
         self.rpc_manager.disconnect()
 
     def toggle_anti_spoiler(self) -> bool:
