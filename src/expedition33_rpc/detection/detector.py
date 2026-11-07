@@ -237,7 +237,7 @@ class BridgeStateProvider:
                             return data
                     elif attempt < 5:
                         time.sleep(0.001 * (attempt + 1))
-                except (PermissionError, json.JSONDecodeError, OSError):
+                except (PermissionError, json.JSONDecodeError, UnicodeDecodeError, OSError):
                     if attempt < 5:
                         time.sleep(0.001 * (attempt + 1))
                     continue
@@ -569,12 +569,14 @@ class GameDetector:
                 raw_checkpoint = ""
                 self.last_raw_checkpoint = ""
 
-            # Fallback to save reader if bridge has empty checkpoint for current zone
-            if not raw_checkpoint and raw_zone and self.save_reader is not None:
-                resolved_cp = self.save_reader.resolve_checkpoint_for_zone(raw_zone)
-                if resolved_cp:
-                    raw_checkpoint = resolved_cp
-                    self.last_raw_checkpoint = resolved_cp
+            # Fallback to save reader strictly when bridge is inactive or stale (data is None)
+            if data is None and not raw_checkpoint and self.save_reader is not None:
+                zone_to_check = raw_zone or self.last_raw_zone
+                if zone_to_check:
+                    resolved_cp = self.save_reader.resolve_checkpoint_for_zone(zone_to_check)
+                    if resolved_cp:
+                        raw_checkpoint = resolved_cp
+                        self.last_raw_checkpoint = resolved_cp
 
         self.last_raw_zone = raw_zone
 

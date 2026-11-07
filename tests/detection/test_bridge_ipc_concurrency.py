@@ -23,7 +23,7 @@ def test_bridge_ipc_concurrent_writes_and_reads(tmp_path: Path) -> None:
         "timestamp": time.time(),
         "zone": "Level_Main_OldLumiere",
         "in_combat": True,
-        "enemy_name": "Duollistes",
+        "enemy_name": "Duollistes — Lumière & Renoir 🎮",
         "floor": None,
         "checkpoint": "Entrance",
     }
@@ -45,8 +45,11 @@ def test_bridge_ipc_concurrent_writes_and_reads(tmp_path: Path) -> None:
                 payload["timestamp"] = time.time()
                 # 1. Truncate/write partial data to simulate concurrent atomic collisions
                 try:
-                    with open(status_file, "w", encoding="utf-8") as f:
-                        f.write(json.dumps(payload)[:15])  # Malformed / truncated
+                    raw_bytes = json.dumps(payload).encode("utf-8")
+                    # Slice at byte level to potentially split multibyte UTF-8 codepoints
+                    split_idx = min(len(raw_bytes) - 5, 25)
+                    with open(status_file, "wb") as f:
+                        f.write(raw_bytes[:split_idx])  # Malformed / truncated bytes
                 except OSError:
                     pass
 

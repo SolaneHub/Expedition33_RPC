@@ -225,6 +225,7 @@ def read_file_shared_text(path: str | Path) -> str:
     """
     path_str = str(path)
     if sys.platform == "win32" and _kernel32 is not None and _msvcrt is not None:
+        raw: bytes | None = None
         try:
             handle = _kernel32.CreateFileW(
                 path_str,
@@ -244,15 +245,31 @@ def read_file_shared_text(path: str | Path) -> str:
                 _kernel32.CloseHandle(handle)
                 raise
 
-            # with open handles closefd=True on exit or upon exception
-            with open(fd, encoding="utf-8", closefd=True) as f:
-                return f.read()
+            try:
+                chunk = os.read(fd, 65536)
+                if len(chunk) < 65536:
+                    raw = chunk
+                else:
+                    chunks = [chunk]
+                    while True:
+                        more = os.read(fd, 65536)
+                        if not more:
+                            break
+                        chunks.append(more)
+                        if len(more) < 65536:
+                            break
+                    raw = b"".join(chunks)
+            finally:
+                os.close(fd)
         except Exception:
             # Fall back to standard read if custom Win32 handle creation fails
             pass
 
-    with open(path_str, encoding="utf-8") as f:
-        return f.read()
+        if raw is not None:
+            return raw.decode("utf-8")
+
+    with open(path_str, "rb") as f:
+        return f.read().decode("utf-8")
 
 
 def peek_named_pipe_ready(pipe_or_fd: Any, timeout: float = 0.0) -> bool:

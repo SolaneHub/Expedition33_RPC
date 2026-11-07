@@ -499,6 +499,34 @@ def test_read_file_shared_text_basic_and_error(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+def test_read_file_shared_text_large_file_and_unicode(tmp_path: Path) -> None:
+    # 1. Empty file
+    empty_p = tmp_path / "empty.txt"
+    empty_p.write_text("", encoding="utf-8")
+    assert _read_file_shared_text(str(empty_p)) == ""
+
+    # 2. Large file exceeding 64KB chunk size with non-ASCII UTF-8 characters
+    large_p = tmp_path / "large_unicode.txt"
+    unicode_snippet = "Expédition 33 — Lumière & Renoir: caffè, naïve, 🎮, 日本語\n"
+    target_content = unicode_snippet * 1500  # ~90KB
+    large_p.write_text(target_content, encoding="utf-8", newline="\n")
+    assert _read_file_shared_text(str(large_p)) == target_content
+
+    # 3. Multibyte UTF-8 sequence straddling precisely across the 65536-byte chunk boundary
+    boundary_p = tmp_path / "boundary_unicode.txt"
+    # 65534 ASCII bytes + 4-byte UTF-8 emoji (🎮: b'\xf0\x9f\x8e\xae') + trailing text
+    boundary_bytes = b"A" * 65534 + "🎮_boundary_ok\n".encode()
+    boundary_p.write_bytes(boundary_bytes)
+    assert _read_file_shared_text(str(boundary_p)) == boundary_bytes.decode("utf-8")
+
+    # 4. Corrupted bytes raise UnicodeDecodeError directly without redundant re-reads
+    corrupt_p = tmp_path / "corrupt_utf8.bin"
+    corrupt_p.write_bytes(b"\x80\x81\x82\xff")
+    with pytest.raises(UnicodeDecodeError):
+        _read_file_shared_text(str(corrupt_p))
+
+
+@pytest.mark.integration
 def test_read_file_shared_text_windows_deletion_resilience(tmp_path: Path) -> None:
     # 1. Standard open on Windows blocks deletion while open (reproducing WinError 32)
     p = tmp_path / "locked.json"
@@ -727,6 +755,28 @@ def test_detector_fallback_to_save_reader_when_provided() -> None:
     mock_save_reader.resolve_checkpoint_for_zone.return_value = "SpawnPoint_VersosDraft"
 
     bridge_provider = MagicMock(spec=BridgeStateProvider)
+    bridge_provider.read_game_data.return_value = None
+
+    detector = GameDetector(
+        bridge_provider=bridge_provider,
+        process_scanner=lambda: [mock_proc],
+        save_reader=mock_save_reader,
+    )
+    detector.last_raw_zone = "Level_Side_VersosDraft"
+
+    state = detector.get_game_state(now=1000.0)
+    assert state.is_running is True
+    assert state.raw_checkpoint == "SpawnPoint_VersosDraft"
+    mock_save_reader.resolve_checkpoint_for_zone.assert_called_once_with("Level_Side_VersosDraft")
+
+
+@pytest.mark.unit
+def test_detector_save_reader_strictly_dormant_when_bridge_fresh() -> None:
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    mock_save_reader = MagicMock(spec=SaveReaderProtocol)
+    mock_save_reader.resolve_checkpoint_for_zone.return_value = "SpawnPoint_VersosDraft"
+
+    bridge_provider = MagicMock(spec=BridgeStateProvider)
     bridge_provider.read_game_data.return_value = {
         "raw_zone": "Level_Side_VersosDraft",
         "in_combat": False,
@@ -743,8 +793,8 @@ def test_detector_fallback_to_save_reader_when_provided() -> None:
 
     state = detector.get_game_state(now=1000.0)
     assert state.is_running is True
-    assert state.raw_checkpoint == "SpawnPoint_VersosDraft"
-    mock_save_reader.resolve_checkpoint_for_zone.assert_called_once_with("Level_Side_VersosDraft")
+    assert state.raw_checkpoint == ""
+    mock_save_reader.resolve_checkpoint_for_zone.assert_not_called()
 
 
 @pytest.mark.unit
