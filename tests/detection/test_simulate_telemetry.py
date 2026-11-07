@@ -321,15 +321,12 @@ def test_simulate_telemetry_play_scenario_invalid(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_bridge_provider_resilience_to_corrupt_and_truncated_ipc(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_bridge_provider_resilience_to_corrupt_and_truncated_ipc(tmp_path: Path) -> None:
     """Verifies that BridgeStateProvider silently and transparently absorbs corrupt,
 
     truncated, and 0-byte IPC JSON frames via its internal grace period without crashing
     or propagating unhandled exceptions to the orchestrator.
     """
-    monkeypatch.setenv("TEMP", str(tmp_path))
     status_file = tmp_path / "expedition33_status.json"
 
     # 1. Establish initial valid telemetry state
@@ -351,8 +348,9 @@ def test_bridge_provider_resilience_to_corrupt_and_truncated_ipc(
     payload["timestamp"] = now
     status_file.write_text(json.dumps(payload), encoding="utf-8")
 
-    provider = BridgeStateProvider(grace_period=2.5, time_provider=mock_time)
-    # Verify default path correctly resolved %TEMP%\expedition33_status.json
+    provider = BridgeStateProvider(
+        paths=[str(status_file)], grace_period=2.5, time_provider=mock_time
+    )
     assert str(status_file) in provider.paths
 
     initial_data = provider.read_game_data()
@@ -449,14 +447,11 @@ def test_bridge_provider_resilience_to_corrupt_and_truncated_ipc(
 
 
 @pytest.mark.unit
-def test_bridge_provider_concurrent_corrupt_ipc_stress(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_bridge_provider_concurrent_corrupt_ipc_stress(tmp_path: Path) -> None:
     """Verifies high-frequency concurrent writing of truncated and 0-byte frames
 
     does not throw uncaught exceptions to the orchestrator.
     """
-    monkeypatch.setenv("TEMP", str(tmp_path))
     status_file = tmp_path / "expedition33_status.json"
 
     write_telemetry(
@@ -466,7 +461,7 @@ def test_bridge_provider_concurrent_corrupt_ipc_stress(
         enemy_name="Duollistes",
     )
 
-    provider = BridgeStateProvider(grace_period=1.0)
+    provider = BridgeStateProvider(paths=[str(status_file)], grace_period=1.0)
     mock_rpc = MagicMock()
     detector = GameDetector(bridge_provider=provider)
     orchestrator = AppOrchestrator(
