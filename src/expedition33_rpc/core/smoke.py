@@ -8,8 +8,6 @@ import sys
 
 def run_smoke_test() -> None:
     """Executes a smoke test validating essential imports, assets, and core initialization."""
-    import tkinter
-
     import PIL
     import pystray
 
@@ -38,7 +36,6 @@ def run_smoke_test() -> None:
 
     _ = pystray.__name__
     _ = PIL.__name__
-    _ = tkinter.__name__
     tray_app = ExpeditionTrayApp(orchestrator=orchestrator)
     _icon = tray_app.get_icon_image()
     if _icon is None:

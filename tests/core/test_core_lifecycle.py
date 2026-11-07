@@ -474,6 +474,39 @@ def test_main_smoke_test_invocation() -> None:
         assert exc_info.value.code == 0
 
 
+@pytest.mark.unit
+def test_smoke_test_runs_without_tkinter() -> None:
+    """Verifies that run_smoke_test succeeds even if tkinter is uninstalled/unavailable."""
+    from expedition33_rpc.core.smoke import run_smoke_test
+
+    with patch.dict(sys.modules, {"tkinter": None, "_tkinter": None}):
+        with pytest.raises(SystemExit) as exc_info:
+            run_smoke_test()
+        assert exc_info.value.code == 0
+
+
+@pytest.mark.unit
+def test_smoke_test_missing_assets_exits_one() -> None:
+    """Verifies that run_smoke_test exits with code 1 if critical assets are missing."""
+    from expedition33_rpc.core.smoke import run_smoke_test
+
+    with patch("os.path.isfile", return_value=False):
+        with pytest.raises(SystemExit) as exc_info:
+            run_smoke_test()
+        assert exc_info.value.code == 1
+
+
+@pytest.mark.unit
+def test_smoke_test_missing_icon_exits_one() -> None:
+    """Verifies that run_smoke_test exits with code 1 if tray icon cannot be decoded."""
+    from expedition33_rpc.core.smoke import run_smoke_test
+
+    with patch("expedition33_rpc.ui.tray_app.ExpeditionTrayApp.get_icon_image", return_value=None):
+        with pytest.raises(SystemExit) as exc_info:
+            run_smoke_test()
+        assert exc_info.value.code == 1
+
+
 @pytest.mark.integration
 def test_main_runs_and_releases_lock() -> None:
     """Verifies that normal main() execution releases the single instance lock upon exit."""
