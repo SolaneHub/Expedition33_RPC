@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from pathlib import Path
 from unittest.mock import patch
 
@@ -146,3 +148,87 @@ def test_settings_service_concurrent_updates(tmp_path: Path) -> None:
     data = json.loads(custom_path.read_text(encoding="utf-8"))
     for i in range(20):
         assert data[f"key_{i}"] == i
+
+
+@pytest.mark.unit
+def test_settings_service_in_memory_caching_and_atomic_update(tmp_path: Path) -> None:
+    custom_json = tmp_path / "cached_settings.json"
+    service = SettingsService(custom_path=custom_json)
+
+    # Initial query returns default without requiring a file on disk
+    assert not custom_json.exists()
+    assert service.is_anti_spoiler_enabled() is False
+
+    # Atomic write updates in-memory cache and writes to file
+    success = service.set_anti_spoiler_enabled(True)
+    assert success is True
+    assert service.is_anti_spoiler_enabled() is True
+    assert custom_json.is_file()
+
+    # Black-box cache verification: query succeeds from in-memory cache even if disk file is removed
+    custom_json.unlink()
+    assert not custom_json.exists()
+    assert service.is_anti_spoiler_enabled() is True
+
+    # Toggle updates in-memory cache and persists back to disk
+    new_val = service.toggle_anti_spoiler()
+    assert new_val is False
+    assert service.is_anti_spoiler_enabled() is False
+    assert custom_json.is_file()
+
+    # Verify persistence by reading from a fresh service instance
+    fresh_service = SettingsService(custom_path=custom_json)
+    assert fresh_service.is_anti_spoiler_enabled() is False
+
+
+@pytest.mark.unit
+def test_settings_service_nested_directory_creation_and_recovery(tmp_path: Path) -> None:
+    """Verifies that SettingsService creates nested parent directories and recovers if deleted."""
+    nested_json = tmp_path / "deep" / "nested" / "dir" / "settings.json"
+    assert not nested_json.parent.exists()
+
+    service = SettingsService(custom_path=nested_json)
+    assert nested_json.parent.is_dir()
+    assert not nested_json.exists()
+
+    assert service.set_anti_spoiler_enabled(True) is True
+    assert nested_json.is_file()
+    assert service.is_anti_spoiler_enabled() is True
+
+    # Simulate external deletion of parent directory
+    shutil.rmtree(tmp_path / "deep")
+    assert not nested_json.parent.exists()
+
+    # EAFP recovery should recreate parent directory and persist setting cleanly
+    assert service.set_anti_spoiler_enabled(False) is True
+    assert nested_json.is_file()
+    assert service.is_anti_spoiler_enabled() is False
+
+    data = json.loads(nested_json.read_text(encoding="utf-8"))
+    assert data["anti_spoiler"] is False
+
+
+@pytest.mark.unit
+def test_settings_service_detects_external_file_modifications(tmp_path: Path) -> None:
+    """Verifies that external modifications to settings.json are detected and merged."""
+    custom_json = tmp_path / "external_settings.json"
+    service = SettingsService(custom_path=custom_json)
+    service.set_anti_spoiler_enabled(False)
+
+    # External program updates settings.json with extra fields
+    custom_json.write_text(
+        json.dumps({"theme": "solarized", "anti_spoiler": False, "volume": 80}),
+        encoding="utf-8",
+    )
+    # Ensure mtime is strictly different
+    new_mtime = custom_json.stat().st_mtime + 2.0
+    os.utime(custom_json, (new_mtime, new_mtime))
+
+    # Toggling anti-spoiler preserves the externally added fields
+    assert service.toggle_anti_spoiler() is True
+    assert service.is_anti_spoiler_enabled() is True
+
+    data = json.loads(custom_json.read_text(encoding="utf-8"))
+    assert data["anti_spoiler"] is True
+    assert data["theme"] == "solarized"
+    assert data["volume"] == 80

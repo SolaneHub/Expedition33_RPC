@@ -455,3 +455,81 @@ def test_update_presence_detects_small_image_or_text_change() -> None:
     assets2 = frames2[0][1]["args"]["activity"]["assets"]
     assert assets2.get("small_image") is None or assets2.get("small_image") == ""
     assert assets2.get("small_text") is None or assets2.get("small_text") == ""
+
+
+@pytest.mark.unit
+def test_discord_rpc_manager_exponential_backoff_and_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifies that DiscordRPCManager implements exponential backoff on repeated failures and resets on success."""
+    simulated_now = 100.0
+    monkeypatch.setattr(time, "monotonic", lambda: simulated_now)
+
+    class FailingClient(DiscordIPCClient):
+        def connect(self, attempts: int | None = None) -> bool:
+            del attempts
+            return False
+
+    client = FailingClient(client_id="backoff_test")
+    manager = DiscordRPCManager(client=client)
+    assert manager._retry_failures == 0
+
+    # 1. First attempt: proceeds immediately because last_retry_time == 0.0
+    assert manager.connect() is False
+    assert manager.last_retry_time == 100.0
+    assert manager._retry_failures == 1
+
+    # 2. Second attempt immediately afterwards: throttled by 5.0s (failures=1 => 5 * 2^0 = 5.0s, no jitter)
+    simulated_now = 102.0
+    assert manager.connect() is False
+    assert manager._retry_failures == 1  # Throttled, did not execute connect()
+
+    # Advance clock to 105.0s (5.0s elapsed)
+    simulated_now = 105.0
+    assert manager.connect() is False
+    assert manager._retry_failures == 2
+    assert manager.last_retry_time == 105.0
+
+    # 3. Third attempt: interval is 5 * 2^1 = 10.0s (+ jitter [0, 0.5])
+    simulated_now = 110.0
+    assert manager.connect() is False  # Throttled because < 10.0s elapsed
+    assert manager._retry_failures == 2
+
+    simulated_now = 116.0  # > 10.5s elapsed
+    assert manager.connect() is False
+    assert manager._retry_failures == 3
+    assert manager.last_retry_time == 116.0
+
+    # 4. Success resets failures
+    mock_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    success_client = DiscordIPCClient(client_id="success", transport=mock_pipe)
+    manager._client = success_client
+    manager._rpc = success_client
+    simulated_now = 150.0
+    assert manager.connect() is True
+    assert manager._retry_failures == 0
+
+    # 5. Disconnect resets failures
+    manager._retry_failures = 5
+    manager.disconnect()
+    assert manager._retry_failures == 0
+
+
+@pytest.mark.unit
+def test_rpc_manager_truncates_multibyte_utf8_fields_to_128_bytes() -> None:
+    """Verifies that update_presence truncates multibyte UTF-8 fields exceeding 128 bytes safely."""
+    mock_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="truncate_test", transport=mock_pipe)
+    manager = DiscordRPCManager(client=client)
+    assert manager.connect() is True
+    mock_pipe.drain_all_frames()
+
+    payload = PresencePayload(
+        details="É" * 100,  # 200 bytes UTF-8, 100 characters
+        state="🎮" * 50,  # 200 bytes UTF-8, 50 characters
+        start_timestamp=1700000000,
+    )
+    assert manager.update_presence(payload, pid=1234) is True
+    frames = mock_pipe.drain_all_frames()
+    assert len(frames) == 1
+    act = frames[0][1]["args"]["activity"]
+    assert len(act["details"].encode("utf-8")) <= 128
+    assert len(act["state"].encode("utf-8")) <= 128

@@ -331,11 +331,13 @@ def test_bridge_provider_rejects_non_numeric_timestamp(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_game_state_frozen_immutability() -> None:
     state = GameState.create(is_running=True, zone_name="Old Lumiere")
+    attr_zone = "zone_name"
     with pytest.raises(FrozenInstanceError):
-        state.zone_name = "New Lumiere"  # type: ignore
+        setattr(state, attr_zone, "New Lumiere")
 
+    attr_combat = "in_combat"
     with pytest.raises(FrozenInstanceError):
-        state.in_combat = True  # type: ignore
+        setattr(state, attr_combat, True)
 
 
 @pytest.mark.unit
@@ -659,6 +661,27 @@ def test_game_detector_get_game_language_fallback_when_missing(tmp_path: Path) -
     detector = GameDetector(game_user_settings_path=missing)
     # When file does not exist, fallback returns cached default ("en")
     assert detector.get_game_language() == "en"
+
+
+@pytest.mark.unit
+def test_game_detector_get_game_language_with_now_propagation(tmp_path: Path) -> None:
+    """Verifies that now parameter propagates deterministically to get_game_language."""
+    ini = tmp_path / "GameUserSettings.ini"
+    ini.write_text("[Internationalization]\nLanguage=it\n", encoding="utf-8")
+
+    time_calls = 0
+
+    def mock_time():
+        nonlocal time_calls
+        time_calls += 1
+        return 50.0
+
+    detector = GameDetector(game_user_settings_path=ini, time_provider=mock_time)
+    lang = detector.get_game_language(now=100.0)
+    assert lang == "it"
+    # time_provider should not be called because now was provided
+    assert time_calls == 0
+    assert detector._last_language_check_time == 100.0
 
 
 @pytest.mark.unit

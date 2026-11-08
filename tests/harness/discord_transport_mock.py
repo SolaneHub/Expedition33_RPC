@@ -24,7 +24,7 @@ from expedition33_rpc.integrations.discord_rpc import (
 )
 
 if sys.platform == "win32":
-    import _winapi  # type: ignore[import-not-found]
+    import _winapi
     import ctypes
 
 

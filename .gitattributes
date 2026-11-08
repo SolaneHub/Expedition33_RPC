@@ -8,7 +8,11 @@
 *.spec text eol=lf
 
 # Binary files
-*.png binary
-*.ico binary
-*.zip binary
-*.exe binary
+*.png binary linguist-vendored
+*.gif binary linguist-vendored
+*.ico binary linguist-vendored
+*.zip binary linguist-vendored
+*.dll binary linguist-vendored
+*.ttf binary linguist-vendored
+*.exe binary linguist-vendored
+src/expedition33_rpc/assets/game_data.json linguist-generated

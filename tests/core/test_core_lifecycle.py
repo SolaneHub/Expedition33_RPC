@@ -5,7 +5,6 @@ from __future__ import annotations
 import ctypes
 import json
 import os
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -28,72 +27,6 @@ from expedition33_rpc.core.settings import SettingsService
 # ---------------------------------------------------------------------------
 # Settings Persistence Tests
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.integration
-def test_json_file_persistence(tmp_path: Path) -> None:
-    custom_json = tmp_path / "test_settings.json"
-    service = SettingsService(custom_path=custom_json)
-
-    assert service.is_anti_spoiler_enabled() is False
-    service.set_anti_spoiler_enabled(True)
-    assert service.is_anti_spoiler_enabled() is True
-    assert custom_json.is_file()
-
-    # Read back raw JSON content
-    data = json.loads(custom_json.read_text(encoding="utf-8"))
-    assert data.get("anti_spoiler") is True
-
-    fresh_service = SettingsService(custom_path=custom_json)
-    assert fresh_service.is_anti_spoiler_enabled() is True
-
-
-@pytest.mark.unit
-def test_settings_preserves_existing_keys_on_update(tmp_path: Path) -> None:
-    custom_json = tmp_path / "custom_settings.json"
-    custom_json.write_text(
-        json.dumps({"theme": "dark", "locale": "it", "custom_option": 42}),
-        encoding="utf-8",
-    )
-    service = SettingsService(custom_path=custom_json)
-    service.set_anti_spoiler_enabled(True)
-
-    data = json.loads(custom_json.read_text(encoding="utf-8"))
-    assert data["anti_spoiler"] is True
-    assert data["theme"] == "dark"
-    assert data["locale"] == "it"
-    assert data["custom_option"] == 42
-
-
-@pytest.mark.unit
-def test_settings_service_in_memory_caching_and_atomic_update(tmp_path: Path) -> None:
-    custom_json = tmp_path / "cached_settings.json"
-    service = SettingsService(custom_path=custom_json)
-
-    # Initial query returns default without requiring a file on disk
-    assert not custom_json.exists()
-    assert service.is_anti_spoiler_enabled() is False
-
-    # Atomic write updates in-memory cache and writes to file
-    success = service.set_anti_spoiler_enabled(True)
-    assert success is True
-    assert service.is_anti_spoiler_enabled() is True
-    assert custom_json.is_file()
-
-    # Black-box cache verification: query succeeds from in-memory cache even if disk file is removed
-    custom_json.unlink()
-    assert not custom_json.exists()
-    assert service.is_anti_spoiler_enabled() is True
-
-    # Toggle updates in-memory cache and persists back to disk
-    new_val = service.toggle_anti_spoiler()
-    assert new_val is False
-    assert service.is_anti_spoiler_enabled() is False
-    assert custom_json.is_file()
-
-    # Verify persistence by reading from a fresh service instance
-    fresh_service = SettingsService(custom_path=custom_json)
-    assert fresh_service.is_anti_spoiler_enabled() is False
 
 
 @pytest.mark.unit
@@ -147,77 +80,6 @@ def test_settings_save_atomic_failure_preserves_ram_and_disk_consistency(tmp_pat
     snapshot = orchestrator.get_status_snapshot()
     assert snapshot["anti_spoiler"] is False
     assert not orchestrator.is_anti_spoiler_enabled()
-
-
-@pytest.mark.unit
-def test_settings_service_nested_directory_creation_and_recovery(tmp_path: Path) -> None:
-    """Verifies that SettingsService creates nested parent directories and recovers if deleted."""
-    nested_json = tmp_path / "deep" / "nested" / "dir" / "settings.json"
-    assert not nested_json.parent.exists()
-
-    service = SettingsService(custom_path=nested_json)
-    assert nested_json.parent.is_dir()
-    assert not nested_json.exists()
-
-    assert service.set_anti_spoiler_enabled(True) is True
-    assert nested_json.is_file()
-    assert service.is_anti_spoiler_enabled() is True
-
-    # Simulate external deletion of parent directory
-    shutil.rmtree(tmp_path / "deep")
-    assert not nested_json.parent.exists()
-
-    # EAFP recovery should recreate parent directory and persist setting cleanly
-    assert service.set_anti_spoiler_enabled(False) is True
-    assert nested_json.is_file()
-    assert service.is_anti_spoiler_enabled() is False
-
-    data = json.loads(nested_json.read_text(encoding="utf-8"))
-    assert data["anti_spoiler"] is False
-
-
-@pytest.mark.unit
-def test_settings_service_corrupt_json_safe_recovery(tmp_path: Path) -> None:
-    """Verifies that corrupted JSON files do not crash SettingsService and are cleanly recoverable."""
-    custom_json = tmp_path / "corrupt_settings.json"
-    custom_json.write_text("{ this is corrupt json !!!", encoding="utf-8")
-
-    service = SettingsService(custom_path=custom_json)
-    # Default value returned safely without exception
-    assert service.is_anti_spoiler_enabled() is False
-
-    # Overwriting with valid setting recovers file cleanly
-    assert service.set_anti_spoiler_enabled(True) is True
-    assert service.is_anti_spoiler_enabled() is True
-
-    data = json.loads(custom_json.read_text(encoding="utf-8"))
-    assert data["anti_spoiler"] is True
-
-
-@pytest.mark.unit
-def test_settings_service_detects_external_file_modifications(tmp_path: Path) -> None:
-    """Verifies that external modifications to settings.json are detected and merged."""
-    custom_json = tmp_path / "external_settings.json"
-    service = SettingsService(custom_path=custom_json)
-    service.set_anti_spoiler_enabled(False)
-
-    # External program updates settings.json with extra fields
-    custom_json.write_text(
-        json.dumps({"theme": "solarized", "anti_spoiler": False, "volume": 80}),
-        encoding="utf-8",
-    )
-    # Ensure mtime is strictly different
-    new_mtime = custom_json.stat().st_mtime + 2.0
-    os.utime(custom_json, (new_mtime, new_mtime))
-
-    # Toggling anti-spoiler preserves the externally added fields
-    assert service.toggle_anti_spoiler() is True
-    assert service.is_anti_spoiler_enabled() is True
-
-    data = json.loads(custom_json.read_text(encoding="utf-8"))
-    assert data["anti_spoiler"] is True
-    assert data["theme"] == "solarized"
-    assert data["volume"] == 80
 
 
 # ---------------------------------------------------------------------------

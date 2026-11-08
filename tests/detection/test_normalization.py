@@ -66,3 +66,36 @@ def test_normalization_basic_helpers() -> None:
     assert format_enemy_name("Duollistes T1") == "Duollistes (Tier 1)"
     assert format_zone_name("") == "Exploring"
     assert format_checkpoint_tag("UnknownCheckpoint") == "Unknown Checkpoint"
+
+
+@pytest.mark.unit
+def test_lazy_loading_game_data_zero_io_on_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifies that importing and accessing normalization does not eagerly load game_data.json until needed."""
+    from expedition33_rpc.detection import game_data, normalization
+
+    # Clear cached game_data in lru_cache if any
+    game_data.get_game_data.cache_clear()
+    normalization._get_main_menu_displays.cache_clear()
+    for attr in game_data._LAZY_ATTRIBUTES:
+        game_data.__dict__.pop(attr, None)
+
+    load_called = False
+    original_load = game_data._load_game_data
+
+    def tracking_load():
+        nonlocal load_called
+        load_called = True
+        return original_load()
+
+    monkeypatch.setattr(game_data, "_load_game_data", tracking_load)
+
+    # Calling pure helpers that don't need game_data.json
+    assert normalization.normalize_language_code("it") == "it"
+    assert normalization.strip_accents("Lumière") == "Lumiere"
+    assert load_called is False
+
+    # Calling is_main_menu with a translated display name triggers lazy loading
+    # e.g. "Hauptmenü" which is not a token and doesn't contain "menu" after strip_accents ("Hauptmenu" has "menu", but let's test a non-"menu" or check _get_main_menu_displays directly)
+    displays = normalization._get_main_menu_displays()
+    assert load_called is True
+    assert len(displays) > 0
