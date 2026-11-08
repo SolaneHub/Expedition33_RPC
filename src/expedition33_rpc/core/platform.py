@@ -95,18 +95,19 @@ def is_already_running(
             else os.environ.get("EXPEDITION33_MUTEX_NAME", "Local\\Expedition33_Discord_RPC_Mutex")
         )
         global _MUTEX_HANDLE
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.CreateMutexW(None, False, target_name)
-        last_error = kernel32.GetLastError()
+        if _kernel32 is None:
+            return False
+        handle = _kernel32.CreateMutexW(None, False, target_name)
+        last_error = ctypes.get_last_error()
         # ERROR_ALREADY_EXISTS = 183, ERROR_ACCESS_DENIED = 5
         if last_error in (183, 5):
             if handle:
                 with contextlib.suppress(Exception):
-                    kernel32.CloseHandle(handle)
+                    _kernel32.CloseHandle(handle)
             return True
         if _MUTEX_HANDLE is not None and handle != _MUTEX_HANDLE:
             with contextlib.suppress(Exception):
-                kernel32.CloseHandle(_MUTEX_HANDLE)
+                _kernel32.CloseHandle(_MUTEX_HANDLE)
         _MUTEX_HANDLE = handle
         return False
 
@@ -175,10 +176,9 @@ def release_single_instance_lock() -> None:
     """Releases any single-instance mutex or file lock held by this process."""
     global _MUTEX_HANDLE
     if _MUTEX_HANDLE is not None:
-        if sys.platform == "win32":
+        if sys.platform == "win32" and _kernel32 is not None:
             with contextlib.suppress(Exception):
-                kernel32 = ctypes.windll.kernel32
-                kernel32.CloseHandle(_MUTEX_HANDLE)
+                _kernel32.CloseHandle(_MUTEX_HANDLE)
         _MUTEX_HANDLE = None
     release_posix_file_lock()
 
@@ -202,8 +202,15 @@ if sys.platform == "win32":
         import msvcrt as _msvcrt_mod
         from ctypes import wintypes
 
+        _sec_attr = getattr(wintypes, "LPSECURITY_ATTRIBUTES", wintypes.LPVOID)
         _msvcrt = _msvcrt_mod
         _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        _kernel32.CreateMutexW.restype = wintypes.HANDLE
+        _kernel32.CreateMutexW.argtypes = [
+            _sec_attr,
+            wintypes.BOOL,
+            wintypes.LPCWSTR,
+        ]
         _kernel32.CreateFileW.restype = wintypes.HANDLE
         _kernel32.CreateFileW.argtypes = [
             wintypes.LPCWSTR,
@@ -216,6 +223,15 @@ if sys.platform == "win32":
         ]
         _kernel32.CloseHandle.restype = wintypes.BOOL
         _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        _kernel32.PeekNamedPipe.restype = wintypes.BOOL
+        _kernel32.PeekNamedPipe.argtypes = [
+            wintypes.HANDLE,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+            ctypes.POINTER(wintypes.DWORD),
+            ctypes.POINTER(wintypes.DWORD),
+        ]
     except Exception:
         _kernel32 = None
         _msvcrt = None
@@ -240,7 +256,10 @@ def read_file_shared_text(path: str | Path) -> str:
                 None,
             )
             if handle in (_INVALID_HANDLE_VALUE, None, 0, -1, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
-                err = ctypes.GetLastError()
+                err = ctypes.get_last_error()
+                # ERROR_FILE_NOT_FOUND = 2, ERROR_PATH_NOT_FOUND = 3
+                if err in (2, 3):
+                    raise FileNotFoundError(path_str)
                 raise OSError(None, ctypes.FormatError(err), path_str, err)
             try:
                 fd = _msvcrt.open_osfhandle(handle, os.O_RDONLY)
@@ -264,8 +283,10 @@ def read_file_shared_text(path: str | Path) -> str:
                     raw = b"".join(chunks)
             finally:
                 os.close(fd)
+        except FileNotFoundError:
+            raise
         except Exception:
-            # Fall back to standard read if custom Win32 handle creation fails
+            # Fall back to standard read if custom Win32 handle creation fails with unexpected errors
             pass
 
         if raw is not None:
@@ -311,15 +332,15 @@ def peek_named_pipe_ready(pipe_or_fd: Any, timeout: float = 0.0) -> bool:
     if handle is None or handle in (_INVALID_HANDLE_VALUE, -1, 0, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
         return True
 
-    peek_fn = getattr(getattr(ctypes, "windll", None), "kernel32", None)
-    if peek_fn is None or not hasattr(peek_fn, "PeekNamedPipe"):
+    peek_fn = getattr(_kernel32, "PeekNamedPipe", None)
+    if peek_fn is None:
         return True
 
     avail = ctypes.c_ulong(0)
     deadline = time.monotonic() + max(0.0, timeout)
 
     while True:
-        res = peek_fn.PeekNamedPipe(handle, None, 0, None, ctypes.byref(avail), None)
+        res = peek_fn(handle, None, 0, None, ctypes.byref(avail), None)
         if res == 0:
             raise ConnectionError("Named pipe broken or closed")
         if avail.value > 0:
