@@ -7,6 +7,7 @@ opcode validation, dirty-checking, string limits, and flapping resilience.
 from __future__ import annotations
 
 import json
+import os
 import struct
 import sys
 import threading
@@ -538,6 +539,349 @@ def test_area6_flapping_resilience_and_leak_freedom(tmp_path: Path) -> None:
     assert thread_count_end <= thread_count_start, (
         f"Thread leak detected: started with {thread_count_start}, ended with {thread_count_end}"
     )
+
+
+# ===========================================================================
+# Area 7: Rapid Ping/Pong, Opcode Close & Target PID Invariants
+# ===========================================================================
+
+
+def test_stress_rapid_multiple_op_pings_before_response() -> None:
+    """Simulates Discord bombarding the client with rapid multiple OP_PING frames before responding.
+
+    Verifies:
+    1. Client automatically responds with OP_PONG for every single OP_PING.
+    2. Payload/nonce is faithfully echoed back for each OP_PONG.
+    3. Client successfully reads through all pings until the final OP_FRAME response.
+    4. Client works identically during connect() handshake when pings precede READY.
+    """
+    mock_pipe = DiscordPipeSimulator()
+    mock_pipe.queue_response({"cmd": "DISPATCH", "evt": "READY", "data": {}})
+
+    client = DiscordIPCClient(client_id="ping_stress_client", transport=mock_pipe)
+    assert client.connect() is True
+    mock_pipe.drain_all_frames()
+
+    # 1. Queue 25 rapid OP_PING frames followed by an OP_FRAME SET_ACTIVITY response
+    num_pings = 25
+    for i in range(num_pings):
+        mock_pipe.queue_response(
+            {"nonce": f"ping_nonce_{i}", "seq": i, "meta": {"timestamp": 1700000000 + i}},
+            op=OP_PING,
+        )
+    mock_pipe.queue_response({"cmd": "SET_ACTIVITY", "data": {"status": "ok"}}, op=OP_FRAME)
+
+    # Calling set_activity triggers write, then _recv which loops through all 25 pings
+    success = client.set_activity(
+        pid=12345,
+        state="Battling Paintress",
+        details="Act III Climax",
+    )
+    assert success is True
+
+    # Validate all outbound frames written to the pipe
+    outbound = mock_pipe.drain_all_frames()
+    assert len(outbound) == 1 + num_pings  # 1 SET_ACTIVITY + 25 OP_PONG
+
+    # First frame is outbound SET_ACTIVITY
+    assert outbound[0][0] == OP_FRAME
+    assert outbound[0][1]["cmd"] == "SET_ACTIVITY"
+    assert outbound[0][1]["args"]["pid"] == 12345
+
+    # Remaining 25 frames must be OP_PONG in exact sequence with exact payload
+    for i in range(num_pings):
+        op, payload = outbound[1 + i]
+        assert op == OP_PONG
+        assert payload["nonce"] == f"ping_nonce_{i}"
+        assert payload["seq"] == i
+        assert payload["meta"]["timestamp"] == 1700000000 + i
+
+    # 2. Test 50 rapid OP_PING frames during connect() handshake before READY
+    mock_pipe_handshake = DiscordPipeSimulator()
+    for i in range(50):
+        mock_pipe_handshake.queue_response({"handshake_ping": i}, op=OP_PING)
+    mock_pipe_handshake.queue_response({"cmd": "DISPATCH", "evt": "READY", "data": {}})
+
+    client_hs = DiscordIPCClient(client_id="hs_client", transport=mock_pipe_handshake)
+    assert client_hs.connect() is True
+    assert client_hs.is_connected is True
+
+    hs_outbound = mock_pipe_handshake.drain_all_frames()
+    assert len(hs_outbound) == 51  # 1 OP_HANDSHAKE + 50 OP_PONG
+    for i in range(50):
+        op, payload = hs_outbound[1 + i]
+        assert op == OP_PONG
+        assert payload == {"handshake_ping": i}
+
+
+def test_stress_op_close_mid_session_lifecycle() -> None:
+    """Simulates Discord sending OP_CLOSE frames mid-session across all IPC operations.
+
+    Verifies:
+    1. Direct _recv() closes pipe and raises ConnectionError("Discord closed IPC connection").
+    2. set_activity() catches OP_CLOSE, marks client disconnected, and returns False.
+    3. clear_activity() catches OP_CLOSE, marks client disconnected, and returns False.
+    4. DiscordRPCManager.update_presence() updates is_connected=False when OP_CLOSE occurs.
+    5. Pipe write after OP_CLOSE cleanly fails without hanging.
+    6. Reconnect after OP_CLOSE functions properly.
+    """
+    mock_pipe = DiscordPipeSimulator()
+    mock_pipe.queue_response({"cmd": "DISPATCH", "evt": "READY", "data": {}})
+
+    client = DiscordIPCClient(client_id="close_client", transport=mock_pipe)
+    assert client.connect() is True
+    mock_pipe.drain_all_frames()
+
+    # 1. Direct _recv() receiving OP_CLOSE
+    mock_pipe.queue_response({"code": 4000, "message": "Server shutting down"}, op=OP_CLOSE)
+    with pytest.raises(ConnectionError, match="Discord closed IPC connection"):
+        client._recv()
+
+    assert client.is_connected is False
+    assert client._pipe is None
+    assert mock_pipe.is_closed is True
+
+    # 2. Reconnect and simulate OP_CLOSE during set_activity()
+    mock_pipe2 = DiscordPipeSimulator()
+    mock_pipe2.queue_response({"cmd": "DISPATCH", "evt": "READY", "data": {}})
+    client2 = DiscordIPCClient(client_id="close_client_2", transport=mock_pipe2)
+    assert client2.connect() is True
+    mock_pipe2.drain_all_frames()
+
+    mock_pipe2.queue_response({"code": 4006, "message": "Session invalidated"}, op=OP_CLOSE)
+    res = client2.set_activity(pid=444, details="Exploring")
+    assert res is False
+    assert client2.is_connected is False
+    assert mock_pipe2.is_closed is True
+
+    # 3. Simulate OP_CLOSE during clear_activity()
+    mock_pipe3 = DiscordPipeSimulator()
+    mock_pipe3.queue_response({"cmd": "DISPATCH", "evt": "READY", "data": {}})
+    client3 = DiscordIPCClient(client_id="close_client_3", transport=mock_pipe3)
+    assert client3.connect() is True
+    mock_pipe3.drain_all_frames()
+
+    mock_pipe3.queue_response({"code": 4007, "message": "Closed"}, op=OP_CLOSE)
+    res_clear = client3.clear_activity(pid=444)
+    assert res_clear is False
+    assert client3.is_connected is False
+    assert mock_pipe3.is_closed is True
+
+    # 4. Simulate DiscordRPCManager handling OP_CLOSE mid-session during update_presence()
+    mock_pipe4 = DiscordPipeSimulator()
+    mock_pipe4.queue_response({"cmd": "DISPATCH", "evt": "READY", "data": {}})
+    client4 = DiscordIPCClient(client_id="close_mgr_client", transport=mock_pipe4)
+    manager = DiscordRPCManager(client=client4)
+    assert manager.connect() is True
+    mock_pipe4.drain_all_frames()
+
+    # Discord closes connection upon presence update
+    mock_pipe4.queue_response({"code": 4000, "message": "Shutdown"}, op=OP_CLOSE)
+    payload = PresencePayload(details="Final Battle", state="In Combat")
+    res_update = manager.update_presence(payload, pid=9999)
+    assert res_update is False
+    assert manager.is_connected is False
+    assert client4.is_connected is False
+
+    # 5. Subsequent disconnect() should be safe and idempotent
+    manager.disconnect()
+    assert manager.is_connected is False
+    assert manager._rpc is None
+
+
+def test_stress_pid_passed_to_clear_activity() -> None:
+    """Verifies PID passed to clear_activity across all lifecycle states:
+
+    - No game PID was ever set -> fallback to os.getpid()
+    - Game PID was set in prior update_presence -> passed to clear_activity on disconnect
+    - Game PID is 0 or negative -> fallback to os.getpid()
+    - update_presence(None, pid=...) updates _last_target_pid
+    """
+    # 1. No game PID ever set -> disconnect passes os.getpid()
+    mock_pipe1 = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client1 = DiscordIPCClient(client_id="pid_test_1", transport=mock_pipe1)
+    manager1 = DiscordRPCManager(client=client1)
+    assert manager1.connect() is True
+    mock_pipe1.drain_all_frames()
+
+    assert manager1._last_target_pid is None
+    manager1.disconnect()
+
+    frames1 = mock_pipe1.drain_all_frames()
+    assert len(frames1) == 1
+    assert frames1[0][0] == OP_FRAME
+    assert frames1[0][1]["cmd"] == "SET_ACTIVITY"
+    assert frames1[0][1]["args"]["pid"] == os.getpid()
+    assert frames1[0][1]["args"]["activity"] is None
+
+    # 2. Game PID set via update_presence -> disconnect uses effective game PID
+    mock_pipe2 = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client2 = DiscordIPCClient(client_id="pid_test_2", transport=mock_pipe2)
+    manager2 = DiscordRPCManager(client=client2)
+    assert manager2.connect() is True
+    mock_pipe2.drain_all_frames()
+
+    payload = PresencePayload(details="Flying Manor", state="Exploring")
+    effective_game_pid = 88123
+    manager2.update_presence(payload, pid=effective_game_pid)
+    assert manager2._last_target_pid == effective_game_pid
+    mock_pipe2.drain_all_frames()
+
+    manager2.disconnect()
+    frames2 = mock_pipe2.drain_all_frames()
+    assert len(frames2) == 1
+    assert frames2[0][1]["args"]["pid"] == effective_game_pid
+    assert frames2[0][1]["args"]["activity"] is None
+
+    # 3. Game PID is 0 or negative -> fallback to os.getpid()
+    mock_pipe3 = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client3 = DiscordIPCClient(client_id="pid_test_3", transport=mock_pipe3)
+    manager3 = DiscordRPCManager(client=client3)
+    assert manager3.connect() is True
+    mock_pipe3.drain_all_frames()
+
+    manager3.update_presence(payload, pid=0)
+    assert manager3._last_target_pid == os.getpid()
+    mock_pipe3.drain_all_frames()
+
+    manager3.update_presence(payload, pid=-999, force=True)
+    assert manager3._last_target_pid == os.getpid()
+    mock_pipe3.drain_all_frames()
+
+    manager3.disconnect()
+    frames3 = mock_pipe3.drain_all_frames()
+    assert frames3[0][1]["args"]["pid"] == os.getpid()
+
+    # 4. update_presence(None, pid=77777) calls clear_activity and sets _last_target_pid
+    mock_pipe4 = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client4 = DiscordIPCClient(client_id="pid_test_4", transport=mock_pipe4)
+    manager4 = DiscordRPCManager(client=client4)
+    assert manager4.connect() is True
+    mock_pipe4.drain_all_frames()
+
+    manager4.update_presence(None, pid=77777)
+    assert manager4._last_target_pid == 77777
+    frames4 = mock_pipe4.drain_all_frames()
+    assert len(frames4) == 1
+    assert frames4[0][1]["args"]["pid"] == 77777
+    assert frames4[0][1]["args"]["activity"] is None
+
+
+def test_stress_dirty_checking_fingerprint_variations() -> None:
+    """Stress-tests dirty-checking fingerprint calculation with edge cases:
+
+    - large_text: None, empty string "", default title, and long string
+    - details/state: None vs empty string "" vs long multibyte strings (>128 bytes)
+    - Verifies that transitions between semantically equivalent values emit ZERO redundant frames.
+    """
+    mock_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="fingerprint_client", transport=mock_pipe)
+    manager = DiscordRPCManager(client=client)
+    assert manager.connect() is True
+    mock_pipe.drain_all_frames()
+
+    # Case 1: large_text=None normalizes to "Clair Obscur: Expedition 33"
+    p_none = PresencePayload(
+        details="Ancient Sanctuary",
+        state="Exploring",
+        start_timestamp=1700000000,
+        large_image="logo",
+        large_text=None,
+    )
+    assert manager.update_presence(p_none, pid=1234) is True
+    f1 = mock_pipe.drain_all_frames()
+    assert len(f1) == 1
+    assert f1[0][1]["args"]["activity"]["assets"]["large_text"] == "Clair Obscur: Expedition 33"
+
+    # Verify fingerprint contains normalized string, not "None"
+    assert manager.last_update_state is not None
+    assert "Clair Obscur: Expedition 33" in manager.last_update_state
+
+    # Transition to large_text="" (empty string) -> must NOT emit any new frame
+    p_empty = PresencePayload(
+        details="Ancient Sanctuary",
+        state="Exploring",
+        start_timestamp=1700000000,
+        large_image="logo",
+        large_text="",
+    )
+    assert manager.update_presence(p_empty, pid=1234) is True
+    assert len(mock_pipe.drain_all_frames()) == 0  # Suppressed!
+
+    # Transition to explicit large_text="Clair Obscur: Expedition 33" -> must NOT emit any new frame
+    p_explicit = PresencePayload(
+        details="Ancient Sanctuary",
+        state="Exploring",
+        start_timestamp=1700000000,
+        large_image="logo",
+        large_text="Clair Obscur: Expedition 33",
+    )
+    assert manager.update_presence(p_explicit, pid=1234) is True
+    assert len(mock_pipe.drain_all_frames()) == 0  # Suppressed!
+
+    # Case 2: details / state with None vs empty string ""
+    manager.invalidate()
+    mock_pipe.drain_all_frames()
+
+    p_det_none = PresencePayload(
+        details=None,
+        state=None,
+        start_timestamp=1700000000,
+    )
+    assert manager.update_presence(p_det_none, pid=1234) is True
+    assert len(mock_pipe.drain_all_frames()) == 1
+
+    p_det_empty = PresencePayload(
+        details="",
+        state="",
+        start_timestamp=1700000000,
+    )
+    assert manager.update_presence(p_det_empty, pid=1234) is True
+    assert len(mock_pipe.drain_all_frames()) == 0  # Suppressed because both evaluate to None
+
+    # Case 3: Long multibyte text truncation and dirty checking
+    # When text is truncated to 128 bytes, modifying characters beyond the 128-byte boundary
+    # produces identical wire payloads and identical fingerprints.
+    manager.invalidate()
+    mock_pipe.drain_all_frames()
+
+    long_prefix = "A" * 128
+    p_long_1 = PresencePayload(
+        details=long_prefix + "EXTRA_DATA_1111",
+        state="In Combat",
+        start_timestamp=1700000000,
+    )
+    assert manager.update_presence(p_long_1, pid=1234) is True
+    f_long1 = mock_pipe.drain_all_frames()
+    assert len(f_long1) == 1
+    assert len(f_long1[0][1]["args"]["activity"]["details"].encode("utf-8")) == 128
+
+    # Changing only bytes beyond 128 should produce identical truncated text and be suppressed
+    p_long_2 = PresencePayload(
+        details=long_prefix + "EXTRA_DATA_2222",
+        state="In Combat",
+        start_timestamp=1700000000,
+    )
+    assert manager.update_presence(p_long_2, pid=1234) is True
+    assert len(mock_pipe.drain_all_frames()) == 0  # Suppressed!
+
+    # Case 4: Long large_text (e.g. 300 chars)
+    manager.invalidate()
+    mock_pipe.drain_all_frames()
+
+    long_title = "Expedition 33 " * 20
+    p_long_title = PresencePayload(
+        details="Sanctuary",
+        state="Exploring",
+        start_timestamp=1700000000,
+        large_text=long_title,
+    )
+    assert manager.update_presence(p_long_title, pid=1234) is True
+    assert len(mock_pipe.drain_all_frames()) == 1
+
+    # Sending same long title is suppressed
+    assert manager.update_presence(p_long_title, pid=1234) is True
+    assert len(mock_pipe.drain_all_frames()) == 0  # Suppressed!
 
 
 # ===========================================================================

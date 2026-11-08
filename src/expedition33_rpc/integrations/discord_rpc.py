@@ -59,6 +59,8 @@ class DiscordFrameCodec:
                 f"Truncated frame payload: expected {length} bytes, got {len(data) - cls.HEADER_SIZE}"
             )
         body = data[cls.HEADER_SIZE : cls.HEADER_SIZE + length]
+        if not body:
+            return op, {}
         return op, json.loads(body.decode("utf-8"))
 
     @classmethod
@@ -142,10 +144,21 @@ class DiscordIPCClient:
 
     def _recv(self) -> tuple[int, dict[str, Any]]:
         with self._lock:
-            header = self._read_exact(DiscordFrameCodec.HEADER_SIZE)
-            _op, length = DiscordFrameCodec.decode_header(header)
-            body = self._read_exact(length)
-            return DiscordFrameCodec.decode(header + body)
+            while True:
+                header = self._read_exact(DiscordFrameCodec.HEADER_SIZE)
+                _op, length = DiscordFrameCodec.decode_header(header)
+                body = self._read_exact(length)
+                op, payload = DiscordFrameCodec.decode(header + body)
+
+                if op == OP_PING:
+                    self._send(OP_PONG, payload)
+                    continue
+
+                if op == OP_CLOSE:
+                    self.close()
+                    raise ConnectionError("Discord closed IPC connection")
+
+                return op, payload
 
     def connect(self, attempts: int | None = None) -> bool:
         """Attempts connection and protocol handshake with Discord IPC."""
@@ -307,6 +320,7 @@ class DiscordRPCManager:
         self._retry_failures: int = 0
         self.base_retry_interval: float = 5.0
         self.is_stopping: Callable[[], bool] | None = is_stopping
+        self._last_target_pid: int | None = None
 
     @property
     def rpc(self) -> DiscordIPCClient | None:
@@ -362,7 +376,7 @@ class DiscordRPCManager:
         self._retry_failures = 0
         if self._rpc:
             with contextlib.suppress(Exception):
-                self._rpc.clear_activity(pid=os.getpid())
+                self._rpc.clear_activity(pid=self._last_target_pid or os.getpid())
                 self._rpc.close()
         self._rpc = None
 
@@ -402,6 +416,7 @@ class DiscordRPCManager:
                     success = self._rpc.clear_activity(pid=target_pid)
                     if success:
                         self.last_update_state = "idle"
+                        self._last_target_pid = target_pid
                         return True
                     else:
                         self.is_connected = False
@@ -422,10 +437,11 @@ class DiscordRPCManager:
         # State fingerprint to avoid redundant IPC writes
         fingerprint = (
             f"{details_text}|{state_text}|{start_timestamp}|{large_image}|"
-            f"{payload.large_text}|{payload.small_image}|{payload.small_text}|"
+            f"{large_text}|{payload.small_image}|{payload.small_text}|"
             f"{payload.party_id}|{payload.party_size}|{target_pid}"
         )
         if fingerprint == self.last_update_state:
+            self._last_target_pid = target_pid
             return True
 
         if self._rpc:
@@ -444,6 +460,7 @@ class DiscordRPCManager:
                 )
                 if success:
                     self.last_update_state = fingerprint
+                    self._last_target_pid = target_pid
                     logger.info("Status updated: %s - %s", details_text, state_text)
                     return True
                 else:
