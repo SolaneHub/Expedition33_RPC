@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
+import random
 import socket
 import struct
 import sys
@@ -19,7 +21,9 @@ from collections.abc import Callable
 from typing import Any, BinaryIO, Protocol
 
 from expedition33_rpc.core import platform
-from expedition33_rpc.core.presence import PresencePayload
+from expedition33_rpc.core.presence import PresencePayload, truncate_presence_field
+
+logger = logging.getLogger(__name__)
 
 EMBEDDED_CLIENT_ID = "1552405358503272468"
 
@@ -172,7 +176,7 @@ class DiscordIPCClient:
                     sock: socket.socket | None = None
                     try:
                         if sys.platform == "win32":
-                            pipe: IPCTransport | BinaryIO = open(path, "r+b", buffering=0)  # noqa: SIM115
+                            pipe: IPCTransport | BinaryIO = open(path, "r+b", buffering=0)
                         else:
                             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                             sock.settimeout(self.timeout)
@@ -300,6 +304,8 @@ class DiscordRPCManager:
         self._rpc: DiscordIPCClient | None = client
         self.last_update_state: str | None = None
         self.last_retry_time: float = 0.0
+        self._retry_failures: int = 0
+        self.base_retry_interval: float = 5.0
         self.is_stopping: Callable[[], bool] | None = is_stopping
 
     @property
@@ -322,9 +328,13 @@ class DiscordRPCManager:
         if self.is_connected:
             return True
 
-        now = time.time()
-        if now - self.last_retry_time < 5.0:
-            return False
+        now = time.monotonic()
+        if self.last_retry_time != 0.0:
+            delay = min(30.0, self.base_retry_interval * (2 ** max(0, self._retry_failures - 1)))
+            if self._retry_failures > 1:
+                delay += random.uniform(0.0, 0.5)
+            if now - self.last_retry_time < delay:
+                return False
         self.last_retry_time = now
 
         try:
@@ -335,16 +345,21 @@ class DiscordRPCManager:
             res = self._rpc.connect()
             connected = bool(getattr(self._rpc, "is_connected", True) if res is None else res)
             if connected:
-                print(f"[DiscordRPC] Connected to Discord IPC (Client ID: {self.client_id})")
-            elif self._client is None:
-                self._rpc = None
+                self._retry_failures = 0
+                logger.info("Connected to Discord IPC (Client ID: %s)", self.client_id)
+            else:
+                self._retry_failures += 1
+                if self._client is None:
+                    self._rpc = None
             return connected
         except Exception:
+            self._retry_failures += 1
             if self._client is None:
                 self._rpc = None
             return False
 
     def disconnect(self) -> None:
+        self._retry_failures = 0
         if self._rpc:
             with contextlib.suppress(Exception):
                 self._rpc.clear_activity(pid=os.getpid())
@@ -396,8 +411,8 @@ class DiscordRPCManager:
                     return False
             return True
 
-        details_text = payload.details[:128] if payload.details else None
-        state_text = payload.state[:128] if payload.state else None
+        details_text = truncate_presence_field(payload.details) if payload.details else None
+        state_text = truncate_presence_field(payload.state) if payload.state else None
         start_timestamp = (
             payload.start_timestamp if payload.start_timestamp is not None else int(time.time())
         )
@@ -429,13 +444,13 @@ class DiscordRPCManager:
                 )
                 if success:
                     self.last_update_state = fingerprint
-                    print(f"[DiscordRPC] Status updated: {details_text} - {state_text}")
+                    logger.info("Status updated: %s - %s", details_text, state_text)
                     return True
                 else:
                     self.is_connected = False
                     return False
             except Exception as e:
-                print(f"[DiscordRPC] RPC update error: {e}")
+                logger.error("RPC update error: %s", e)
                 self.is_connected = False
                 return False
         return False
