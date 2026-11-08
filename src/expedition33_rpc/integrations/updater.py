@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import threading
-import time
 import urllib.error
 import urllib.request
 import webbrowser
@@ -73,6 +72,8 @@ class AppUpdater:
         self.available_update: UpdateInfo | None = None
         self.error_message: str | None = None
         self._lock = threading.Lock()
+        self._cancel_event = threading.Event()
+        self._worker_thread: threading.Thread | None = None
 
     def _set_state(
         self,
@@ -148,24 +149,42 @@ class AppUpdater:
             self._set_state(UpdateState.ERROR, error_msg=msg)
             return None
 
+    def cancel(self) -> None:
+        """Signals waiting threads to cancel pending update checks."""
+        self._cancel_event.set()
+
     def check_in_background(
         self,
         delay_seconds: float = 0.0,
         on_complete: UpdateCallback | None = None,
     ) -> None:
         """Spawns a background thread to check for updates."""
+        with self._lock:
+            if self.state == UpdateState.CHECKING:
+                return
+            self.state = UpdateState.CHECKING
+            self._cancel_event.clear()
 
-        def _worker():
-            if delay_seconds > 0:
-                time.sleep(delay_seconds)
-            info = self.check_for_updates()
-            if on_complete:
-                try:
-                    on_complete(info)
-                except Exception as e:
-                    logger.error("on_complete callback error: %s", e)
+        def _worker() -> None:
+            try:
+                if delay_seconds > 0 and self._cancel_event.wait(delay_seconds):
+                    return
+                if self._cancel_event.is_set():
+                    return
+                info = self.check_for_updates()
+                if on_complete:
+                    try:
+                        on_complete(info)
+                    except Exception as e:
+                        logger.error("on_complete callback error: %s", e)
+            finally:
+                if self._cancel_event.is_set():
+                    with self._lock:
+                        if self.state == UpdateState.CHECKING:
+                            self.state = UpdateState.IDLE
 
-        t = threading.Thread(target=_worker, daemon=True)
+        t = threading.Thread(target=_worker, name="AppUpdaterWorkerThread", daemon=True)
+        self._worker_thread = t
         t.start()
 
     def open_release_page(self) -> bool:

@@ -113,8 +113,6 @@ class AppOrchestrator:
             self.rpc_manager = DiscordRPCManager(is_stopping=self._is_stopping)
 
         self._state_subscribers: list[Callable[[GameState, bool], None]] = []
-        if on_state_change is not None:
-            self._state_subscribers.append(on_state_change)
         self.on_state_change: Callable[[GameState, bool], None] | None = on_state_change
         self._update_available_subscribers: list[Callable[[UpdateInfo], None]] = []
         self.on_update_available: Callable[[UpdateInfo], None] | None = on_update_available
@@ -168,7 +166,10 @@ class AppOrchestrator:
             except Exception as e:
                 logger.error("Update subscriber error: %s", e)
 
-        if self.on_update_available is not None:
+        if (
+            self.on_update_available is not None
+            and self.on_update_available not in self._update_available_subscribers
+        ):
             try:
                 self.on_update_available(update_info)
             except Exception as e:

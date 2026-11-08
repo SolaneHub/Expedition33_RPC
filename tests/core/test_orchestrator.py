@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -1281,3 +1282,279 @@ def test_orchestrator_step_with_real_detector(tmp_path: Path) -> None:
     assert isinstance(state, GameState)
     assert state.is_running is False
     assert orchestrator.current_state == state
+
+
+@pytest.mark.unit
+def test_orchestrator_callbacks_slot_decoupling_prevents_stale_and_duplicate_invocation() -> None:
+    """Verifies that direct callbacks are isolated from subscribers, preventing stale or duplicate invocations."""
+    calls_a: list[GameState] = []
+    calls_b: list[GameState] = []
+
+    def callback_a(state: GameState, _spoiler: bool) -> None:
+        calls_a.append(state)
+
+    def callback_b(state: GameState, _spoiler: bool) -> None:
+        calls_b.append(state)
+
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_detector.get_game_state.return_value = GameState.create(is_running=False)
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+
+    # 1. Initialize with callback_a: direct slot must not leak into _state_subscribers
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        on_state_change=callback_a,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    assert orchestrator.on_state_change is callback_a
+    assert len(orchestrator._state_subscribers) == 0
+
+    orchestrator.step_update()
+    assert len(calls_a) == 1
+    assert len(calls_b) == 0
+
+    # 2. Reassigning on_state_change: callback_a is not stale-invoked
+    orchestrator.on_state_change = callback_b
+    orchestrator.step_update()
+    assert len(calls_a) == 1
+    assert len(calls_b) == 1
+
+    # 3. Clearing on_state_change: neither callback invoked
+    orchestrator.on_state_change = None
+    orchestrator.step_update()
+    assert len(calls_a) == 1
+    assert len(calls_b) == 1
+
+    # 4. Duplicate prevention for state subscribers when registered both ways
+    calls_sub: list[GameState] = []
+
+    def callback_sub(state: GameState, _spoiler: bool) -> None:
+        calls_sub.append(state)
+
+    orchestrator.subscribe_state_change(callback_sub)
+    orchestrator.on_state_change = callback_sub
+
+    orchestrator.step_update()
+    assert len(calls_sub) == 1
+
+    # 5. Duplicate prevention for update check subscribers when registered both ways
+    update_calls: list[UpdateInfo] = []
+
+    def update_listener(info: UpdateInfo) -> None:
+        update_calls.append(info)
+
+    orchestrator.subscribe_update_available(update_listener)
+    orchestrator.on_update_available = update_listener
+
+    sample_info = UpdateInfo(tag_name="v3.0.0", version_tuple=(3, 0, 0), html_url="")
+    orchestrator.on_update_check_complete(sample_info)
+    assert len(update_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Stress & Lifecycle Callback Decoupling Tests
+# ---------------------------------------------------------------------------
+
+
+def _create_test_orchestrator(
+    on_state_change: Callable[[GameState, bool], None] | None = None,
+    on_update_available: Callable[[UpdateInfo], None] | None = None,
+) -> tuple[AppOrchestrator, MagicMock]:
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_detector.get_game_state.return_value = GameState.create(
+        is_running=True, process_pid=1234, zone_name="Lumiere"
+    )
+    mock_rpc = MagicMock(spec=DiscordRPCManager)
+
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        on_state_change=on_state_change,
+        on_update_available=on_update_available,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+    return orchestrator, mock_detector
+
+
+@pytest.mark.unit
+def test_orchestrator_on_state_change_cleared_to_none_prevents_invocation() -> None:
+    """Verifies that setting orchestrator.on_state_change = None completely suppresses callback invocations."""
+    calls: list[GameState] = []
+
+    def callback(state: GameState, _spoiler: bool) -> None:
+        calls.append(state)
+
+    orchestrator, _ = _create_test_orchestrator(on_state_change=callback)
+
+    # Initial tick: callback invoked once
+    orchestrator.step_update()
+    assert len(calls) == 1
+
+    # Setting on_state_change to None
+    orchestrator.on_state_change = None
+
+    # Subsequent ticks: no invocation occurs
+    for _ in range(5):
+        orchestrator.step_update()
+    assert len(calls) == 1
+
+
+@pytest.mark.unit
+def test_orchestrator_on_state_change_repeated_reassignment() -> None:
+    """Reassigns on_state_change through multiple distinct callables.
+
+    Guarantees that stale callbacks are NEVER invoked, and only the active callback receives dispatches.
+    """
+    call_counts: dict[str, int] = {f"cb_{i}": 0 for i in range(10)}
+
+    def make_cb(name: str) -> Callable[[GameState, bool], None]:
+        def _cb(state: GameState, _spoiler: bool) -> None:
+            del state, _spoiler
+            call_counts[name] += 1
+
+        return _cb
+
+    orchestrator, _ = _create_test_orchestrator()
+
+    # Repeatedly assign and execute step_update
+    for i in range(10):
+        cb_name = f"cb_{i}"
+        orchestrator.on_state_change = make_cb(cb_name)
+
+        # Execute 2 ticks per callback
+        orchestrator.step_update()
+        orchestrator.step_update()
+
+        # Only the current callback should have incremented (by 2)
+        assert call_counts[cb_name] == 2
+        for other_name, count in call_counts.items():
+            if other_name != cb_name:
+                assert count == (2 if int(other_name.split("_")[1]) < i else 0)
+
+    # Re-assign back to cb_0
+    orchestrator.on_state_change = make_cb("cb_0")
+    orchestrator.step_update()
+    assert call_counts["cb_0"] == 3
+    # Others must not have changed
+    for i in range(1, 10):
+        assert call_counts[f"cb_{i}"] == 2
+
+
+@pytest.mark.unit
+def test_orchestrator_same_function_dual_registration_invoked_exactly_once() -> None:
+    """Verifies that registering the exact same function both via subscribe_state_change
+
+    and as on_state_change results in exactly ONE invocation per step_update().
+    Also verifies unsubscription dynamics and clearing.
+    """
+    call_history: list[int | None] = []
+
+    def shared_callback(state: GameState, _spoiler: bool) -> None:
+        call_history.append(state.process_pid)
+
+    orchestrator, _ = _create_test_orchestrator()
+
+    # Register in both slots
+    unsubscribe = orchestrator.subscribe_state_change(shared_callback)
+    orchestrator.on_state_change = shared_callback
+
+    assert orchestrator.on_state_change is shared_callback
+    assert shared_callback in orchestrator._state_subscribers
+
+    # Tick 1: Must be called exactly once despite being in both slots
+    orchestrator.step_update()
+    assert len(call_history) == 1
+
+    # Tick 2: Still called exactly once
+    orchestrator.step_update()
+    assert len(call_history) == 2
+
+    # Unsubscribe from subscriber list: callback remains in direct slot on_state_change
+    unsubscribe()
+    assert shared_callback not in orchestrator._state_subscribers
+    assert orchestrator.on_state_change is shared_callback
+
+    # Tick 3: Should STILL be called via on_state_change slot
+    orchestrator.step_update()
+    assert len(call_history) == 3
+
+    # Now clear direct slot: callback is completely disabled
+    orchestrator.on_state_change = None
+    orchestrator.step_update()
+    assert len(call_history) == 3
+
+
+@pytest.mark.unit
+def test_orchestrator_update_available_decoupling_and_dual_registration() -> None:
+    """Verifies slot decoupling, clearing, reassignment, and duplicate suppression
+
+    for update available listeners (on_update_available and subscribe_update_available).
+    """
+    calls: list[str] = []
+
+    def listener_a(info: UpdateInfo) -> None:
+        calls.append(f"A:{info.tag_name}")
+
+    def listener_b(info: UpdateInfo) -> None:
+        calls.append(f"B:{info.tag_name}")
+
+    orchestrator, _ = _create_test_orchestrator(on_update_available=listener_a)
+    sample_info = UpdateInfo(tag_name="v3.1.0", version_tuple=(3, 1, 0), html_url="")
+
+    # 1. Initial direct callback
+    orchestrator.on_update_check_complete(sample_info)
+    assert calls == ["A:v3.1.0"]
+
+    # 2. Reassignment to listener_b
+    orchestrator.on_update_available = listener_b
+    orchestrator.on_update_check_complete(sample_info)
+    assert calls == ["A:v3.1.0", "B:v3.1.0"]
+
+    # 3. Dual registration of listener_b
+    unsubscribe = orchestrator.subscribe_update_available(listener_b)
+    orchestrator.on_update_check_complete(sample_info)
+    # listener_b must only be called ONCE in this tick
+    assert calls == ["A:v3.1.0", "B:v3.1.0", "B:v3.1.0"]
+
+    # 4. Unsubscribe and clearing
+    unsubscribe()
+    orchestrator.on_update_available = None
+    orchestrator.on_update_check_complete(sample_info)
+    # No new calls
+    assert calls == ["A:v3.1.0", "B:v3.1.0", "B:v3.1.0"]
+
+
+@pytest.mark.unit
+def test_orchestrator_subscriber_exception_does_not_break_other_subscribers_or_direct_slot() -> (
+    None
+):
+    """Verifies that an unhandled exception in one subscriber does NOT prevent
+
+    other subscribers or on_state_change from being notified.
+    """
+    received: list[str] = []
+
+    def crashing_sub(state: GameState, _spoiler: bool) -> None:
+        del state, _spoiler
+        raise RuntimeError("Subscriber crashed intentionally")
+
+    def healthy_sub(state: GameState, _spoiler: bool) -> None:
+        del state, _spoiler
+        received.append("healthy_sub")
+
+    def direct_slot(state: GameState, _spoiler: bool) -> None:
+        del state, _spoiler
+        received.append("direct_slot")
+
+    orchestrator, _ = _create_test_orchestrator(on_state_change=direct_slot)
+    orchestrator.subscribe_state_change(crashing_sub)
+    orchestrator.subscribe_state_change(healthy_sub)
+
+    # Tick execution should catch crashing_sub exception and still call healthy_sub and direct_slot
+    state = orchestrator.step_update()
+    assert state is not None
+    assert received == ["healthy_sub", "direct_slot"]
