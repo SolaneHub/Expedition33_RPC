@@ -101,11 +101,13 @@ def strip_accents(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
 
 
-_MAIN_MENU_DISPLAYS: frozenset[str] = frozenset(
-    table["mainmenu"].lower().strip()
-    for table in game_data.ZONE_NAME_OVERRIDES_BY_LANG.values()
-    if "mainmenu" in table and isinstance(table["mainmenu"], str)
-)
+@functools.lru_cache(maxsize=1)
+def _get_main_menu_displays() -> frozenset[str]:
+    return frozenset(
+        table["mainmenu"].lower().strip()
+        for table in game_data.ZONE_NAME_OVERRIDES_BY_LANG.values()
+        if "mainmenu" in table and isinstance(table["mainmenu"], str)
+    )
 
 
 def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
@@ -121,7 +123,7 @@ def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
         return True
     if "bootstrap" in raw_lower:
         return True
-    return display_lower in _MAIN_MENU_DISPLAYS
+    return display_lower in _get_main_menu_displays()
 
 
 def resolve_menu_substate(

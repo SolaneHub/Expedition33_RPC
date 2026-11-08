@@ -6,6 +6,8 @@ import os
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    TARGET_PROCESS_NAMES: tuple[str, ...]
+    MAIN_MENU_TOKENS: frozenset[str]
     ZONE_NAME_OVERRIDES_BY_LANG: dict[str, dict[str, str]]
     CHECKPOINT_NAMES_BY_LANG: dict[str, dict[str, str]]
     TOWER_STAGES_BY_LANG: dict[str, dict[str, str]]
@@ -110,9 +112,6 @@ def get_main_menu_tokens() -> frozenset[str]:
     return frozenset(_DEFAULT_MAIN_MENU_TOKENS)
 
 
-TARGET_PROCESS_NAMES: tuple[str, ...] = get_target_process_names()
-MAIN_MENU_TOKENS: frozenset[str] = get_main_menu_tokens()
-
 ALL_SUPPORTED_LANGUAGES: tuple[str, ...] = (
     "ar",
     "cs",
@@ -150,6 +149,8 @@ def _build_endless_tower_trials(raw_trials: list[Any]) -> list[TrialDefinition]:
 
 _LAZY_ATTRIBUTES = frozenset(
     {
+        "TARGET_PROCESS_NAMES",
+        "MAIN_MENU_TOKENS",
         "ZONE_NAME_OVERRIDES_BY_LANG",
         "CHECKPOINT_NAMES_BY_LANG",
         "TOWER_STAGES_BY_LANG",
@@ -164,19 +165,28 @@ def __getattr__(name: str) -> Any:
     """Lazily loads heavy localized game data catalogs only upon access."""
     if name not in _LAZY_ATTRIBUTES:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    data = get_game_data()
     match name:
+        case "TARGET_PROCESS_NAMES":
+            val = get_target_process_names()
+        case "MAIN_MENU_TOKENS":
+            val = get_main_menu_tokens()
         case "ZONE_NAME_OVERRIDES_BY_LANG":
+            data = get_game_data()
             val = dict(data.get("zone_name_overrides_by_lang", {}))
         case "CHECKPOINT_NAMES_BY_LANG":
+            data = get_game_data()
             val = dict(data.get("checkpoint_names_by_lang", {}))
         case "TOWER_STAGES_BY_LANG":
+            data = get_game_data()
             val = dict(data.get("tower_stages_by_lang", {}))
         case "LOCALIZED_PRESENTATION":
+            data = get_game_data()
             val = dict(data.get("localized_presentation", {}))
         case "CONTEXTUAL_CHECKPOINTS":
+            data = get_game_data()
             val = list(data.get("contextual_checkpoints", []))
         case "ENDLESS_TOWER_TRIALS":
+            data = get_game_data()
             val = _build_endless_tower_trials(data.get("endless_tower_trials", []))
         case _:
             raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

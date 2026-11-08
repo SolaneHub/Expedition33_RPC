@@ -469,9 +469,14 @@ class GameDetector:
         self.game_win64_dir = None
         return None
 
-    def get_game_language(self, ini_path: Path | str | None = None, force: bool = False) -> str:
+    def get_game_language(
+        self,
+        ini_path: Path | str | None = None,
+        force: bool = False,
+        now: float | None = None,
+    ) -> str:
         """Extracts configured UI language from GameUserSettings.ini with mtime caching and interval throttling."""
-        current_time = self.time_provider()
+        current_time = self.time_provider() if now is None else now
         if not force and ini_path is None and (current_time - self._last_language_check_time < 5.0):
             return self._cached_language
 
@@ -528,7 +533,7 @@ class GameDetector:
             self.timer_tracker.reset()
             return GameState(is_running=False, game_language=self._cached_language)
 
-        lang = self.get_game_language()
+        lang = self.get_game_language(now=now)
 
         # Extract process creation time safely only for the matched process
         proc_create_time: float | None = None
