@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -201,3 +202,80 @@ def test_save_reader_corrupt_or_partial_binary_save(tmp_path: Path) -> None:
     lvl_cached, tag_cached = reader.read_checkpoint_from_save(str(profile_dir))
     assert lvl_cached == "CachedLevel"
     assert tag_cached == "CachedTag"
+
+
+@pytest.mark.unit
+def test_save_reader_mtime_caching_and_reset(tmp_path: Path) -> None:
+    profile_dir = tmp_path / "player_profile_1"
+    profile_dir.mkdir(parents=True)
+    sav_file = profile_dir / "EXPEDITION_0.sav"
+
+    payload = (
+        b"\x00" * 20
+        + b"LastUsedSavePoint\x00\x0f\x00\x00\x00StructProperty\x00\x02\x00\x00\x00"
+        + b"LevelAssetName\x00\r\x00\x00\x00NameProperty\x00\x00\x00\x00\x00Level_Cached\x00"
+        + b"SpawnPointTag\x00Level.SpawnPoint.Cached.Tag\x00"
+        + b"\x00" * 20
+    )
+    sav_file.write_bytes(payload)
+
+    reader = SaveFileReader(base_save_dir=tmp_path)
+
+    # 1. First lookup caches latest dir
+    latest_dir = reader.get_latest_save_dir()
+    assert latest_dir == str(profile_dir)
+    assert reader._latest_dir_cache is not None
+
+    # Patch iterdir to prove get_latest_save_dir does not scan directory when mtime is unchanged
+    def _fail_iterdir(_self: Path) -> Any:
+        raise AssertionError("iterdir called!")
+
+    def _fail_glob(_self: Path, _pattern: str) -> Any:
+        raise AssertionError("glob called!")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(Path, "iterdir", _fail_iterdir)
+        cached_dir = reader.get_latest_save_dir()
+        assert cached_dir == str(profile_dir)
+
+    # 2. First read_checkpoint_from_save caches sav_path for save_dir
+    lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
+    assert lvl == "Level_Cached"
+    assert tag == "Level.SpawnPoint.Cached.Tag"
+    assert str(profile_dir) in reader._dir_sav_cache
+
+    # Patch glob to prove read_checkpoint_from_save does not glob when dir mtime is unchanged
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(Path, "glob", _fail_glob)
+        lvl2, tag2 = reader.read_checkpoint_from_save(str(profile_dir))
+        assert lvl2 == "Level_Cached"
+        assert tag2 == "Level.SpawnPoint.Cached.Tag"
+
+    # 3. Simulate dir mtime update (e.g. new save file created in profile_dir)
+    sav_file2 = profile_dir / "EXPEDITION_1.sav"
+    payload2 = (
+        b"\x00" * 20
+        + b"LastUsedSavePoint\x00\x0f\x00\x00\x00StructProperty\x00\x02\x00\x00\x00"
+        + b"LevelAssetName\x00\r\x00\x00\x00NameProperty\x00\x00\x00\x00\x00Level_Updated\x00"
+        + b"SpawnPointTag\x00Level.SpawnPoint.Updated.Tag\x00"
+        + b"\x00" * 20
+    )
+    sav_file2.write_bytes(payload2)
+    # Ensure profile_dir mtime is updated
+    import os
+
+    os.utime(profile_dir, None)
+
+    lvl_updated, tag_updated = reader.read_checkpoint_from_save(str(profile_dir))
+    assert lvl_updated == "Level_Updated"
+    assert tag_updated == "Level.SpawnPoint.Updated.Tag"
+
+    # 4. Verify reset() clears all cache structures
+    assert len(reader._checkpoint_cache) > 0
+    assert reader._latest_dir_cache is not None
+    assert len(reader._dir_sav_cache) > 0
+
+    reader.reset()
+    assert len(reader._checkpoint_cache) == 0
+    assert reader._latest_dir_cache is None
+    assert len(reader._dir_sav_cache) == 0

@@ -79,20 +79,35 @@ class SaveFileReader:
             base_save_dir if base_save_dir is not None else resolve_user_data_path()
         )
         self._checkpoint_cache: dict[str, tuple[float, int, tuple[str | None, str | None]]] = {}
+        self._latest_dir_cache: tuple[float, str | None] | None = None
+        self._dir_sav_cache: dict[str, tuple[float, str | None]] = {}
 
     def reset(self) -> None:
-        """Clears the cached checkpoint metadata."""
+        """Clears all cached checkpoint metadata, directory mtimes, and paths."""
         self._checkpoint_cache.clear()
+        self._latest_dir_cache = None
+        self._dir_sav_cache.clear()
 
     def get_latest_save_dir(self) -> str | None:
         """Locates the latest active player profile save directory."""
         base_path = Path(self.base_save_dir)
+        try:
+            current_mtime = base_path.stat().st_mtime
+        except OSError:
+            return None
+
         if not base_path.is_dir():
             return None
+
+        if self._latest_dir_cache is not None and self._latest_dir_cache[0] == current_mtime:
+            return self._latest_dir_cache[1]
+
         try:
             subdirs = [p for p in base_path.iterdir() if p.is_dir() and p.name != "Backup"]
             if not subdirs:
-                return str(base_path)
+                resolved_dir = str(base_path)
+                self._latest_dir_cache = (current_mtime, resolved_dir)
+                return resolved_dir
 
             def _mtime(p: Path) -> float:
                 try:
@@ -101,25 +116,43 @@ class SaveFileReader:
                     return 0.0
 
             latest = max(subdirs, key=_mtime)
-            return str(latest)
+            resolved_dir = str(latest)
+            self._latest_dir_cache = (current_mtime, resolved_dir)
+            return resolved_dir
         except Exception:
             return None
 
     def read_checkpoint_from_save(self, save_dir: str) -> tuple[str | None, str | None]:
         """Extracts (level_name, spawn_point_tag) from the latest EXPEDITION_*.sav file."""
         try:
-            candidates = list(Path(save_dir).glob("EXPEDITION_*.sav"))
-            if not candidates:
+            save_dir_path = Path(save_dir)
+            try:
+                dir_mtime = save_dir_path.stat().st_mtime
+            except OSError:
                 return None, None
 
-            def _mtime(p: Path) -> float:
-                try:
-                    return p.stat().st_mtime
-                except OSError:
-                    return 0.0
+            cached_sav = self._dir_sav_cache.get(save_dir)
+            if cached_sav is not None and cached_sav[0] == dir_mtime:
+                sav_path = cached_sav[1]
+                if sav_path is None:
+                    return None, None
+                latest = Path(sav_path)
+            else:
+                candidates = list(save_dir_path.glob("EXPEDITION_*.sav"))
+                if not candidates:
+                    self._dir_sav_cache[save_dir] = (dir_mtime, None)
+                    return None, None
 
-            latest = max(candidates, key=_mtime)
-            sav_path = str(latest)
+                def _mtime(p: Path) -> float:
+                    try:
+                        return p.stat().st_mtime
+                    except OSError:
+                        return 0.0
+
+                latest = max(candidates, key=_mtime)
+                sav_path = str(latest)
+                self._dir_sav_cache[save_dir] = (dir_mtime, sav_path)
+
             try:
                 st = latest.stat()
             except OSError:
