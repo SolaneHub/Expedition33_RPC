@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import sys
 import threading
@@ -21,6 +22,7 @@ from PIL import Image
 from pystray import Menu, MenuItem
 
 from expedition33_rpc.core.orchestrator import AppOrchestrator
+from expedition33_rpc.core.platform import prompt_folder_selection
 from expedition33_rpc.core.resources import get_resource_path
 from expedition33_rpc.detection.detector import GameState
 from expedition33_rpc.integrations.updater import UpdateInfo
@@ -29,6 +31,8 @@ from expedition33_rpc.ui.presentation import (
     format_tray_title,
     format_tray_zone_status,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ExpeditionTrayApp:
@@ -101,7 +105,7 @@ class ExpeditionTrayApp:
             try:
                 return Image.open(icon_path).convert("RGBA")
             except Exception as e:
-                print(f"[TrayApp] Warning loading icon file: {e}")
+                logger.warning("[TrayApp] Warning loading icon file: %s", e)
 
         # Controlled fallback: 64x64 solid golden icon without binary blobs
         return Image.new("RGBA", (64, 64), color=(212, 175, 55, 255))
@@ -161,49 +165,7 @@ class ExpeditionTrayApp:
             self._safe_update_menu()
 
     def _prompt_folder_selection(self) -> str | None:
-        if sys.platform != "win32":
-            return None
-        try:
-            import ctypes
-            from ctypes import wintypes
-
-            class BROWSEINFO(ctypes.Structure):
-                _fields_ = [
-                    ("hwndOwner", wintypes.HWND),
-                    ("pidlRoot", wintypes.LPCVOID),
-                    ("pszDisplayName", wintypes.LPWSTR),
-                    ("lpszTitle", wintypes.LPCWSTR),
-                    ("ulFlags", wintypes.UINT),
-                    ("lpfn", wintypes.LPVOID),
-                    ("lParam", wintypes.LPARAM),
-                    ("iImage", ctypes.c_int),
-                ]
-
-            BIF_RETURNONLYFSDIRS = 0x0001
-            BIF_NEWDIALOGSTYLE = 0x0040
-            bi = BROWSEINFO()
-            bi.lpszTitle = "Seleziona la cartella di Clair Obscur: Expedition 33"
-            bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE
-
-            ole_inited = False
-            with contextlib.suppress(Exception):
-                hr = ctypes.windll.ole32.OleInitialize(None)
-                ole_inited = hr in (0, 1)
-
-            try:
-                pidl = ctypes.windll.shell32.SHBrowseForFolderW(ctypes.byref(bi))
-                if not pidl:
-                    return None
-                path_buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
-                ctypes.windll.shell32.SHGetPathFromIDListW(pidl, path_buf)
-                ctypes.windll.ole32.CoTaskMemFree(pidl)
-                return path_buf.value or None
-            finally:
-                if ole_inited:
-                    with contextlib.suppress(Exception):
-                        ctypes.windll.ole32.OleUninitialize()
-        except Exception:
-            return None
+        return prompt_folder_selection()
 
     def menu_startup_toggle(self, *_) -> str:
         if self.orchestrator.is_startup_enabled():

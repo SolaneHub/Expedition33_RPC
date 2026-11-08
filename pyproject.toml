@@ -74,6 +74,7 @@ select = [
 ignore = [
     "E501", # Line length (handled by formatter)
     "B008", # Do not perform function call in argument defaults
+    "SIM115", # Open file without context handler (persistent instance-level handles/pipes)
 ]
 
 [tool.ruff.lint.isort]
@@ -102,7 +103,7 @@ reportUnknownVariableType = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", ".github/scripts"]
 markers = [
     "unit: Fast in-memory unit tests",
     "integration: Integration tests exercising filesystem or IPC",

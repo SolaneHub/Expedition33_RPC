@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 from pathlib import Path
@@ -8,6 +9,8 @@ from expedition33_rpc.core.platform import (
     winreg_read_value,
     winreg_set_value,
 )
+
+logger = logging.getLogger(__name__)
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APP_NAME = "Expedition33_DiscordRPC"
@@ -69,7 +72,7 @@ def sync_startup_path() -> None:
         current_cmd = get_current_executable_command()
         if val.strip() != current_cmd.strip():
             set_startup_enabled(True)
-            print(f"[Startup] Synced startup path to: {current_cmd}")
+            logger.info("[Startup] Synced startup path to: %s", current_cmd)
 
 
 def toggle_startup() -> bool:

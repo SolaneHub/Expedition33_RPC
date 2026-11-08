@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
+import logging
 import os
 import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Windows Registry Abstraction
@@ -54,7 +57,7 @@ def winreg_set_value(
             reg.SetValueEx(key, value_name, 0, getattr(reg, "REG_SZ", 1), value)
             return True
     except Exception as e:
-        print(f"[Platform] winreg_set_value error: {e}")
+        logger.error("[Platform] winreg_set_value error: %s", e)
         return False
 
 
@@ -69,7 +72,7 @@ def winreg_delete_value(hkey: Any, subkey: str, value_name: str, winreg_module: 
                 reg.DeleteValue(key, value_name)
             return True
     except Exception as e:
-        print(f"[Platform] winreg_delete_value error: {e}")
+        logger.error("[Platform] winreg_delete_value error: %s", e)
         return False
 
 
@@ -142,7 +145,7 @@ def acquire_posix_file_lock(lock_path: Path | str | None = None) -> bool:
     f: Any = None
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        f = open(target_path, "a+")  # noqa: SIM115
+        f = open(target_path, "a+")
         fcntl_mod: Any = fcntl
         fcntl_mod.flock(f, fcntl_mod.LOCK_EX | fcntl_mod.LOCK_NB)
         _FLOCK_FILE = f
@@ -326,10 +329,66 @@ def peek_named_pipe_ready(pipe_or_fd: Any, timeout: float = 0.0) -> bool:
         time.sleep(0.01)
 
 
+# ---------------------------------------------------------------------------
+# Native Win32 Folder Dialog
+# ---------------------------------------------------------------------------
+def prompt_folder_selection(
+    title: str = "Select Clair Obscur: Expedition 33 Folder",
+) -> str | None:
+    """Displays a native Win32 folder selection dialog.
+
+    Returns the selected directory path, or None if cancelled or on non-Windows platforms.
+    """
+    if sys.platform != "win32":
+        return None
+
+    try:
+        from ctypes import wintypes
+
+        class BROWSEINFO(ctypes.Structure):
+            _fields_ = [
+                ("hwndOwner", wintypes.HWND),
+                ("pidlRoot", wintypes.LPCVOID),
+                ("pszDisplayName", wintypes.LPWSTR),
+                ("lpszTitle", wintypes.LPCWSTR),
+                ("ulFlags", wintypes.UINT),
+                ("lpfn", wintypes.LPVOID),
+                ("lParam", wintypes.LPARAM),
+                ("iImage", ctypes.c_int),
+            ]
+
+        bif_returnonlyfsdirs = 0x0001
+        bif_newdialogstyle = 0x0040
+        bi = BROWSEINFO()
+        bi.lpszTitle = title
+        bi.ulFlags = bif_returnonlyfsdirs | bif_newdialogstyle
+
+        ole_inited = False
+        with contextlib.suppress(Exception):
+            hr = ctypes.windll.ole32.OleInitialize(None)
+            ole_inited = hr in (0, 1)
+
+        try:
+            pidl = ctypes.windll.shell32.SHBrowseForFolderW(ctypes.byref(bi))
+            if not pidl:
+                return None
+            path_buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+            ctypes.windll.shell32.SHGetPathFromIDListW(pidl, path_buf)
+            ctypes.windll.ole32.CoTaskMemFree(pidl)
+            return path_buf.value or None
+        finally:
+            if ole_inited:
+                with contextlib.suppress(Exception):
+                    ctypes.windll.ole32.OleUninitialize()
+    except Exception:
+        return None
+
+
 __all__ = [
     "acquire_posix_file_lock",
     "is_already_running",
     "peek_named_pipe_ready",
+    "prompt_folder_selection",
     "read_file_shared_text",
     "release_posix_file_lock",
     "release_single_instance_lock",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 import urllib.error
@@ -13,6 +14,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from expedition33_rpc import __version__
+
+logger = logging.getLogger(__name__)
 
 GITHUB_REPO = "SolaneHub/Expedition33_RPC"
 API_LATEST_RELEASE_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -85,12 +88,12 @@ class AppUpdater:
             try:
                 self.on_state_change()
             except Exception as e:
-                print(f"[Updater] Callback error on state change: {e}")
+                logger.error("Callback error on state change: %s", e)
 
     def check_for_updates(self) -> UpdateInfo | None:
         """Queries GitHub Releases API for the latest release."""
         self._set_state(UpdateState.CHECKING)
-        print(f"[Updater] Checking for updates against {self.api_url}...")
+        logger.info("Checking for updates against %s...", self.api_url)
 
         try:
             req = urllib.request.Request(
@@ -104,8 +107,12 @@ class AppUpdater:
             remote_tuple = parse_version(tag_name)
             html_url = data.get("html_url", f"https://github.com/{GITHUB_REPO}/releases/latest")
 
-            print(
-                f"[Updater] Remote version: {tag_name} ({remote_tuple}) | Current: {self.current_version} ({self.current_version_tuple})"
+            logger.info(
+                "Remote version: %s (%s) | Current: %s (%s)",
+                tag_name,
+                remote_tuple,
+                self.current_version,
+                self.current_version_tuple,
             )
 
             if remote_tuple > self.current_version_tuple:
@@ -117,27 +124,27 @@ class AppUpdater:
                 with self._lock:
                     self.available_update = info
                 self._set_state(UpdateState.AVAILABLE)
-                print(f"[Updater] Update available: {tag_name}")
+                logger.info("Update available: %s", tag_name)
                 return info
             else:
                 self._set_state(UpdateState.UP_TO_DATE)
-                print("[Updater] Application is up to date.")
+                logger.info("Application is up to date.")
                 return None
 
         except urllib.error.HTTPError as e:
             msg = f"HTTP error {e.code}: {e.reason}"
-            print(f"[Updater] {msg}")
+            logger.error("HTTP error %s: %s", e.code, e.reason)
             self._set_state(UpdateState.ERROR, error_msg=msg)
             return None
         except urllib.error.URLError as e:
             msg = f"Network connection error: {e.reason}"
-            print(f"[Updater] {msg}")
+            logger.error("Network connection error: %s", e.reason)
             self._set_state(UpdateState.ERROR, error_msg=msg)
             return None
 
         except Exception as e:
             msg = f"Update check failed: {e}"
-            print(f"[Updater] {msg}")
+            logger.error("Update check failed: %s", e)
             self._set_state(UpdateState.ERROR, error_msg=msg)
             return None
 
@@ -156,7 +163,7 @@ class AppUpdater:
                 try:
                     on_complete(info)
                 except Exception as e:
-                    print(f"[Updater] on_complete callback error: {e}")
+                    logger.error("on_complete callback error: %s", e)
 
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
@@ -172,7 +179,7 @@ class AppUpdater:
         try:
             return webbrowser.open(url)
         except Exception as e:
-            print(f"[Updater] Error opening browser: {e}")
+            logger.error("Error opening browser: %s", e)
             return False
 
     def get_status_text(self) -> str:
