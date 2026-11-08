@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING, Any
 
-__version__ = "2.3.0"
+__version__ = "2.3.1"
 
 if TYPE_CHECKING:
     from expedition33_rpc.core.app import main

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.3.1] - 2026-11-08
+
+### Bug Fixes & Reliability
+- **Discord IPC UTF-8 Truncation (`core.presence`, `ui.presentation`)**:
+  - Enforced byte-safe UTF-8 truncation in `PresencePayload` layer to prevent frames from exceeding Discord IPC's 128-byte limit across multi-byte character languages.
+- **Monotonic Exponential Backoff (`integrations.discord_rpc`)**:
+  - Switched `DiscordRPCManager` reconnection retry timing from wall-clock time to `time.monotonic()` with exponential backoff, preventing connection flooding during Discord restart.
+
+### Performance & Architecture
+- **Lazy Loading of Game Catalog (`detection.game_data`, `detection.normalization`)**:
+  - Deferred loading of `game_data.json` by converting `_MAIN_MENU_DISPLAYS` to a cached lazy helper in `normalization.py`.
+  - Deferred `TARGET_PROCESS_NAMES` and `MAIN_MENU_TOKENS` catalog evaluation in `game_data.py` to maintain zero file I/O overhead on module import.
+- **Cross-Platform Primitives Encapsulation (`core.platform`, `ui.tray_app`)**:
+  - Encapsulated Win32 `SHBrowseForFolderW` ctypes implementation inside `core.platform.open_folder_dialog()`, eliminating raw `ctypes` usage in domain/UI layers.
+- **Structured Logging (`integrations.updater`, `core.startup`)**:
+  - Replaced remaining print statements with structured module-level loggers.
+
+### Testing & Code Quality
+- **Test Suite Hygiene & Deduplication (`tests/`)**:
+  - Deduplicated `SettingsService` tests between `test_core_lifecycle.py` and `test_settings.py`.
+  - Propagated deterministic timestamps to `GameDetector.get_game_language()` in unit tests.
+  - Removed obsolete `type: ignore` comments in test harness files and marked binary assets in `.gitattributes`.
+
 ## [v2.3.0] - 2026-11-07
 
 ### New Features
