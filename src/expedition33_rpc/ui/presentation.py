@@ -24,6 +24,8 @@ from expedition33_rpc.detection.normalization import (
     resolve_menu_substate,
 )
 
+WIN32_MAX_TRAY_TITLE_LENGTH: int = 127
+
 
 def get_presentation_strings(lang: str) -> dict[str, str]:
     """Retrieves presentation formatting strings for the specified language with fallback."""
@@ -106,37 +108,41 @@ def build_presence_payload(game_state: GameState, anti_spoiler: bool = False) ->
     )
 
 
-def format_tray_title(game_state: GameState, anti_spoiler: bool = False) -> str:
+def format_tray_title(game_state: GameState | None, anti_spoiler: bool = False) -> str:
     """Formats the system tray icon tooltip (pystray.Icon.title)."""
-    if not game_state.is_running:
-        return "Expedition 33 RPC (Waiting for game...)"
-
-    canon = normalize_language_code(game_state.game_language)
-    strings = get_presentation_strings(canon)
-
-    if game_state.is_starting:
-        return f"Expedition 33: {strings.get('starting', 'Starting...')}"
-
-    if is_menu_zone(game_state):
+    if game_state is None or not game_state.is_running:
+        title = "Expedition 33 RPC (Waiting for game...)"
+    elif game_state.is_starting:
+        canon = normalize_language_code(game_state.game_language)
+        strings = get_presentation_strings(canon)
+        title = f"Expedition 33: {strings.get('starting', 'Starting...')}"
+    elif is_menu_zone(game_state):
+        canon = normalize_language_code(game_state.game_language)
+        strings = get_presentation_strings(canon)
         substate = resolve_menu_substate(game_state)
         if substate == "main_menu":
-            return f"Expedition 33: {strings['in_menu']}"
-        sub_text = strings.get(substate, "")
-        if sub_text:
-            return f"Expedition 33: {strings['in_menu']} ({sub_text})"
-        return f"Expedition 33: {strings['in_menu']}"
-
-    if anti_spoiler:
+            title = f"Expedition 33: {strings['in_menu']}"
+        else:
+            sub_text = strings.get(substate, "")
+            if sub_text:
+                title = f"Expedition 33: {strings['in_menu']} ({sub_text})"
+            else:
+                title = f"Expedition 33: {strings['in_menu']}"
+    elif anti_spoiler:
         mode = "In Combat" if game_state.in_combat else "Exploring"
-        return f"Expedition 33: [Protected] ({mode})"
-
-    if game_state.in_combat and game_state.enemy_name:
-        mode = f"Fighting: {game_state.enemy_name}"
+        title = f"Expedition 33: [Protected] ({mode})"
     else:
-        mode = "In Combat" if game_state.in_combat else "Exploring"
+        if game_state.in_combat and game_state.enemy_name:
+            mode = f"Fighting: {game_state.enemy_name}"
+        else:
+            mode = "In Combat" if game_state.in_combat else "Exploring"
 
-    loc = format_location_name(game_state)
-    return f"Expedition 33: {loc} ({mode})"
+        loc = format_location_name(game_state)
+        title = f"Expedition 33: {loc} ({mode})"
+
+    if len(title) > WIN32_MAX_TRAY_TITLE_LENGTH:
+        return title[: WIN32_MAX_TRAY_TITLE_LENGTH - 3] + "..."
+    return title
 
 
 def format_tray_zone_status(game_state: GameState, anti_spoiler: bool = False) -> str:
@@ -176,6 +182,7 @@ def format_tray_combat_status(game_state: GameState, anti_spoiler: bool = False)
 
 __all__ = [
     "DISCORD_MAX_FIELD_LENGTH",
+    "WIN32_MAX_TRAY_TITLE_LENGTH",
     "get_presentation_strings",
     "truncate_presence_field",
     "format_presence",

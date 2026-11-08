@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -13,6 +14,7 @@ from expedition33_rpc.detection.detector import GameDetector, GameState
 from expedition33_rpc.integrations.updater import UpdateInfo
 from expedition33_rpc.ui.presentation import (
     DISCORD_MAX_FIELD_LENGTH,
+    WIN32_MAX_TRAY_TITLE_LENGTH,
     build_presence_payload,
     format_location_name,
     format_presence,
@@ -105,6 +107,64 @@ def test_format_tray_title() -> None:
 
     explore = GameState.create(is_running=True, in_combat=False, zone_name="Area")
     assert format_tray_title(explore) == "Expedition 33: Area (Exploring)"
+
+
+def test_format_tray_title_clamping_with_long_strings() -> None:
+    # 1. Extremely long enemy name (>200 chars)
+    huge_enemy = "ColossalEnemyBossName_" * 15  # 330 chars
+    state_long_enemy = GameState.create(
+        is_running=True, in_combat=True, enemy_name=huge_enemy, zone_name="Ancient Sanctuary"
+    )
+    title_enemy = format_tray_title(state_long_enemy)
+    assert len(title_enemy) <= WIN32_MAX_TRAY_TITLE_LENGTH
+    assert len(title_enemy) == 127
+    assert title_enemy.endswith("...")
+    expected_enemy_prefix = f"Expedition 33: Ancient Sanctuary (Fighting: {huge_enemy})"[:124]
+    assert title_enemy == f"{expected_enemy_prefix}..."
+
+    # 2. Extremely long zone name (>200 chars)
+    huge_zone = "ExtremelyLongForgottenAbyssalRuinsRegionName_" * 10  # 450 chars
+    state_long_zone = GameState.create(is_running=True, in_combat=False, zone_name=huge_zone)
+    title_zone = format_tray_title(state_long_zone)
+    assert len(title_zone) <= WIN32_MAX_TRAY_TITLE_LENGTH
+    assert len(title_zone) == 127
+    assert title_zone.endswith("...")
+    expected_zone_prefix = f"Expedition 33: {huge_zone} (Exploring)"[:124]
+    assert title_zone == f"{expected_zone_prefix}..."
+
+    # 3. Both zone and enemy extremely long (>200 chars each)
+    state_both = GameState.create(
+        is_running=True, in_combat=True, zone_name=huge_zone, enemy_name=huge_enemy
+    )
+    title_both = format_tray_title(state_both)
+    assert len(title_both) <= WIN32_MAX_TRAY_TITLE_LENGTH
+    assert len(title_both) == 127
+    assert title_both.endswith("...")
+
+
+def test_format_tray_title_exact_boundary_conditions() -> None:
+    # Exact 127 characters should not be truncated
+    # Prefix: "Expedition 33: " (15) + Suffix: " (Exploring)" (12) = 27 fixed chars
+    # Zone: 100 chars -> total 127 chars
+    zone_100 = "Z" * 100
+    state_127 = GameState.create(is_running=True, in_combat=False, zone_name=zone_100)
+    title_127 = format_tray_title(state_127)
+    assert len(title_127) == 127
+    assert not title_127.endswith("...")
+    assert title_127 == f"Expedition 33: {zone_100} (Exploring)"
+
+    # 128 characters (off-by-one boundary) must truncate to 124 chars + "..."
+    # Zone: 101 chars -> total 128 chars
+    zone_101 = "Z" * 101
+    state_128 = GameState.create(is_running=True, in_combat=False, zone_name=zone_101)
+    title_128 = format_tray_title(state_128)
+    assert len(title_128) == 127
+    assert title_128.endswith("...")
+    assert title_128 == f"Expedition 33: {zone_101} (Exploring)"[:124] + "..."
+
+
+def test_format_tray_title_none_state() -> None:
+    assert format_tray_title(None) == "Expedition 33 RPC (Waiting for game...)"
 
 
 def test_format_tray_zone_and_combat_status() -> None:
@@ -505,3 +565,253 @@ def test_tray_app_chains_injected_orchestrator_callbacks() -> None:
     orchestrator.on_update_check_complete(info)
     assert len(external_update_calls) == 1
     assert external_update_calls[0] == info
+
+
+def test_tray_app_on_orchestrator_state_change_suppresses_title_exception(
+    tray_test_app,
+) -> None:
+    app, _mock_detector, _mock_rpc, _ = tray_test_app
+
+    class FaultyIcon:
+        def __init__(self) -> None:
+            self.update_menu = MagicMock()
+
+        @property
+        def title(self) -> str:
+            return "Current Title"
+
+        @title.setter
+        def title(self, value: str) -> None:
+            del value
+            raise OSError("Win32 UI thread disconnected")
+
+    faulty_icon = FaultyIcon()
+    app.icon = faulty_icon
+
+    state = GameState.create(is_running=True, zone_name="Lumiere")
+    # Must not raise an exception even when setting self.icon.title raises OSError
+    app.on_orchestrator_state_change(state, anti_spoiler=False)
+    faulty_icon.update_menu.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Stress & Boundary Tests for Win32 Tooltip Clamping & Tray App Protection
+# ---------------------------------------------------------------------------
+
+
+class CustomTrayException(Exception):
+    """Custom exception simulating an unhandled tray UI subsystem error."""
+
+
+@pytest.mark.parametrize(
+    ("target_length", "should_truncate"),
+    [
+        (124, False),
+        (126, False),
+        (127, False),
+        (128, True),
+        (129, True),
+        (200, True),
+        (1000, True),
+    ],
+)
+def test_format_tray_title_exact_boundaries(target_length: int, should_truncate: bool) -> None:
+    """Tests exact target title lengths (124, 126, 127, 128, 129, 200, 1000).
+
+    Verifies output is NEVER > 127 characters and truncates to 124 chars + '...'.
+    """
+    fixed_overhead = 27
+    zone_length = target_length - fixed_overhead
+    assert zone_length > 0
+
+    zone_name = "X" * zone_length
+    state = GameState.create(is_running=True, in_combat=False, zone_name=zone_name)
+    result = format_tray_title(state)
+
+    # Invariant 1: Length is NEVER greater than 127
+    assert len(result) <= WIN32_MAX_TRAY_TITLE_LENGTH
+    assert len(result) <= 127
+
+    if should_truncate:
+        assert len(result) == 127
+        assert result.endswith("...")
+        untruncated_expected = f"Expedition 33: {zone_name} (Exploring)"
+        assert result == untruncated_expected[:124] + "..."
+    else:
+        assert len(result) == target_length
+        assert not result.endswith("...")
+        assert result == f"Expedition 33: {zone_name} (Exploring)"
+
+
+def test_format_tray_title_comprehensive_length_sweep() -> None:
+    """Sweeps un-truncated title lengths from 0 to 1500 to guarantee universal clamp invariant."""
+    fixed_overhead = 27
+    for total_len in range(fixed_overhead + 1, 1500):
+        zone_len = total_len - fixed_overhead
+        state = GameState.create(is_running=True, in_combat=False, zone_name="A" * zone_len)
+        result = format_tray_title(state)
+
+        assert len(result) <= 127
+        if total_len > 127:
+            assert len(result) == 127
+            assert result.endswith("...")
+        else:
+            assert len(result) == total_len
+
+
+@pytest.mark.parametrize(
+    "unicode_sample",
+    [
+        # Japanese Kanji & Kana
+        "ルミエール・漆黒の深淵・第9999階層",
+        # Chinese Simplified & Traditional
+        "遠征隊33：光之城與古老神殿的終極對決",
+        # Emojis & Pictographs (4-byte UTF-8, SMP)
+        "⚔️🛡️🔥🐲💥👑💀🏰🌟🚀✨",
+        # Right-to-Left (Hebrew)
+        "מבוך חשוך של לומייר - קרב בוס אפי",
+        # Right-to-Left (Arabic)
+        "رحلة استكشافية 33: قلعة الظلال المفقودة",
+        # Combining diacritics / Zalgo
+        "Z\u0332\u032a\u0324a\u0300\u0316\u0327l\u0321\u0328\u0334g\u0345\u0360o\u032f\u033d",
+        # Surrogate pairs / supplementary characters
+        "\U00010000\U0001f600\U0001f47e\U0001f984\U0001fa84",
+        # Zero-width joiner sequences (Family emoji)
+        "\U0001f468\u200d\U0001f469\u200d\U0001f467\u200d\U0001f466",
+        # Mixed whitespace, newlines, null bytes, tabs
+        "Zone\tWith\nNewlines\x00And\rNulls",
+    ],
+)
+def test_format_tray_title_unicode_stress(unicode_sample: str) -> None:
+    """Stress-tests multi-byte, SMP, RTL, and combining Unicode strings of various lengths."""
+    for multiplier in (1, 5, 20, 100):
+        stretched_zone = unicode_sample * multiplier
+        stretched_enemy = ("Boss_" + unicode_sample) * multiplier
+
+        # 1. Exploring state
+        state_exploring = GameState.create(
+            is_running=True, in_combat=False, zone_name=stretched_zone
+        )
+        title_exploring = format_tray_title(state_exploring)
+        assert len(title_exploring) <= 127
+        if len(stretched_zone) > 100:
+            assert len(title_exploring) == 127
+            assert title_exploring.endswith("...")
+
+        # 2. Combat state
+        state_combat = GameState.create(
+            is_running=True,
+            in_combat=True,
+            zone_name=stretched_zone,
+            enemy_name=stretched_enemy,
+        )
+        title_combat = format_tray_title(state_combat)
+        assert len(title_combat) <= 127
+        if len(stretched_zone) + len(stretched_enemy) > 100:
+            assert len(title_combat) == 127
+            assert title_combat.endswith("...")
+
+
+def test_format_tray_title_none_and_empty_edge_cases() -> None:
+    """Tests extreme edge cases: None state, empty strings, pure whitespace, stopped state."""
+    assert format_tray_title(None) == "Expedition 33 RPC (Waiting for game...)"
+    assert (
+        format_tray_title(GameState.create(is_running=False))
+        == "Expedition 33 RPC (Waiting for game...)"
+    )
+
+    empty_state = GameState.create(is_running=True, zone_name="", enemy_name="")
+    title_empty = format_tray_title(empty_state)
+    assert len(title_empty) <= 127
+    assert "Expedition 33:" in title_empty
+
+    whitespace_state = GameState.create(is_running=True, zone_name="   ", enemy_name="   ")
+    title_ws = format_tray_title(whitespace_state)
+    assert len(title_ws) <= 127
+
+
+@pytest.mark.parametrize(
+    "exception_to_raise",
+    [
+        OSError("Win32 UI thread disconnected / INVALID_HANDLE"),
+        RuntimeError("pystray icon thread has terminated"),
+        ValueError("Invalid title parameter"),
+        KeyError("Missing internal tray key"),
+        TypeError("Title must be a str"),
+        CustomTrayException("Simulated custom platform crash"),
+    ],
+)
+def test_tray_app_on_orchestrator_state_change_suppresses_various_exceptions(
+    tmp_path: Path, exception_to_raise: Exception
+) -> None:
+    """Verifies that with contextlib.suppress(Exception): in TrayApp protects
+
+    against diverse exception types (OSError, RuntimeError, custom exceptions)
+    without crashing the orchestrator loop or breaking menu updates.
+    """
+    settings_file = tmp_path / "settings.json"
+    settings_svc = SettingsService(custom_path=settings_file)
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_rpc = MagicMock()
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        auto_install_bridge=False,
+        sync_startup=False,
+        settings_service=settings_svc,
+    )
+
+    app = ExpeditionTrayApp(orchestrator=orchestrator)
+
+    class FaultyIcon:
+        def __init__(self) -> None:
+            self.update_menu = MagicMock()
+
+        @property
+        def title(self) -> str:
+            return "Old Title"
+
+        @title.setter
+        def title(self, value: str) -> None:
+            del value
+            raise exception_to_raise
+
+    faulty_icon = FaultyIcon()
+    app.icon = faulty_icon
+
+    state = GameState.create(
+        is_running=True,
+        process_pid=5555,
+        zone_name="Monolith Subterrane",
+        in_combat=True,
+        enemy_name="Titan",
+    )
+
+    # Must complete cleanly without propagating exception
+    with contextlib.nullcontext():
+        app.on_orchestrator_state_change(state, anti_spoiler=False)
+
+    # Menu update must still succeed
+    faulty_icon.update_menu.assert_called_once()
+
+
+def test_tray_app_handles_none_icon_gracefully(tmp_path: Path) -> None:
+    """Verifies that TrayApp handles state change when icon is None without raising."""
+    settings_file = tmp_path / "settings.json"
+    settings_svc = SettingsService(custom_path=settings_file)
+    mock_detector = MagicMock(spec=GameDetector)
+    mock_rpc = MagicMock()
+    orchestrator = AppOrchestrator(
+        detector=mock_detector,
+        rpc_manager=mock_rpc,
+        auto_install_bridge=False,
+        sync_startup=False,
+        settings_service=settings_svc,
+    )
+
+    app = ExpeditionTrayApp(orchestrator=orchestrator)
+    app.icon = None
+
+    state = GameState.create(is_running=True, zone_name="Lumiere")
+    # Must not raise AttributeError
+    app.on_orchestrator_state_change(state, anti_spoiler=False)

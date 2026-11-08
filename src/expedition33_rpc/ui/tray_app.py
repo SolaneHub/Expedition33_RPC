@@ -88,7 +88,8 @@ class ExpeditionTrayApp:
                 self._last_menu_state = menu_state
                 self._safe_update_menu()
 
-            self.icon.title = format_tray_title(state, anti_spoiler=anti_spoiler)
+            with contextlib.suppress(Exception):
+                self.icon.title = format_tray_title(state, anti_spoiler=anti_spoiler)
 
     def on_update_available(self, update_info: UpdateInfo) -> None:
         if self.icon is not None:
