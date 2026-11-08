@@ -37,15 +37,19 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Verify Code Quality & Tests (Ruff, Pyright, Pytest)
+      - name: Verify Code Quality & Tests (Ruff, Pyright, Pytest, Prettier)
         run: |
           uv run ruff check
           uv run ruff format --check
           uv run pyright
           uv run pytest
+          npx prettier --check src/expedition33_rpc/assets/game_data.json
 
       - name: Build Standalone Executable
         run: uv run python build_exe.py
+
+      - name: Run Smoke Test on Executable
+        run: dist/Expedition33_RPC.exe --smoke-test
 
       - name: Generate SHA-256 Checksums
         shell: python

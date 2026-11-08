@@ -216,6 +216,71 @@ def test_posix_file_lock_lifecycle_and_cleanup(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_win32_kernel32_typing_and_last_error_flag() -> None:
+    """Verifies that Win32 kernel32 function bindings are strictly typed with use_last_error=True."""
+    from expedition33_rpc.core import platform
+
+    if sys.platform != "win32":
+        pytest.skip("Win32 ctypes bindings are only initialized on Windows")
+
+    assert platform._kernel32 is not None
+    # Check that CreateMutexW and PeekNamedPipe exist and are configured
+    assert hasattr(platform._kernel32, "CreateMutexW")
+    assert hasattr(platform._kernel32, "PeekNamedPipe")
+    assert hasattr(platform._kernel32, "CreateFileW")
+    assert hasattr(platform._kernel32, "CloseHandle")
+
+    # Verify argtypes and restype
+    from ctypes import wintypes
+
+    expected_sec_attr = getattr(wintypes, "LPSECURITY_ATTRIBUTES", wintypes.LPVOID)
+    assert platform._kernel32.CreateMutexW.restype == wintypes.HANDLE
+    assert list(platform._kernel32.CreateMutexW.argtypes) == [
+        expected_sec_attr,
+        wintypes.BOOL,
+        wintypes.LPCWSTR,
+    ]
+    assert platform._kernel32.CloseHandle.restype == wintypes.BOOL
+    assert list(platform._kernel32.CloseHandle.argtypes) == [wintypes.HANDLE]
+    assert platform._kernel32.PeekNamedPipe.restype == wintypes.BOOL
+    expected_peek_argtypes = [
+        wintypes.HANDLE,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    assert [getattr(t, "_type_", t) for t in platform._kernel32.PeekNamedPipe.argtypes] == [
+        getattr(t, "_type_", t) for t in expected_peek_argtypes
+    ]
+
+    # Verify use_last_error works by verifying ctypes get_last_error updates after a Win32 call
+    ctypes.set_last_error(0)
+    # PeekNamedPipe with an invalid handle (0) should fail and set last_error (e.g. ERROR_INVALID_HANDLE = 6)
+    res = platform._kernel32.PeekNamedPipe(0, None, 0, None, None, None)
+    assert res == 0
+    assert ctypes.get_last_error() != 0
+
+
+@pytest.mark.unit
+def test_read_file_shared_text_nonexistent_raises_immediately_without_open(tmp_path: Path) -> None:
+    """Verifies that read_file_shared_text() raises FileNotFoundError immediately on Win32 without calling open()."""
+    from expedition33_rpc.core.platform import read_file_shared_text
+
+    if sys.platform != "win32":
+        pytest.skip("Win32 CreateFileW specific behavior")
+
+    nonexistent = tmp_path / "does_not_exist_file.json"
+
+    with patch("builtins.open") as mock_open:
+        with pytest.raises(FileNotFoundError):
+            read_file_shared_text(str(nonexistent))
+        # open() must NOT have been called on Windows when Win32 CreateFileW reports missing file
+        mock_open.assert_not_called()
+
+
+@pytest.mark.unit
 def test_peek_named_pipe_ready_cross_platform_and_handles() -> None:
     """Verifies peek_named_pipe_ready behaviour across platforms, mocks, and invalid handles."""
     from expedition33_rpc.core.platform import peek_named_pipe_ready
@@ -237,12 +302,10 @@ def test_peek_named_pipe_ready_cross_platform_and_handles() -> None:
     # 3. Handle closing or broken pipe triggers ConnectionError
     mock_kernel32 = MagicMock()
     mock_kernel32.PeekNamedPipe.return_value = 0  # Win32 failure (e.g. pipe broken/closed)
-    mock_windll = MagicMock()
-    mock_windll.kernel32 = mock_kernel32
 
     with (
         patch("sys.platform", "win32"),
-        patch("ctypes.windll", mock_windll, create=True),
+        patch("expedition33_rpc.core.platform._kernel32", mock_kernel32),
         pytest.raises(ConnectionError, match="Named pipe broken or closed"),
     ):
         peek_named_pipe_ready(999)
@@ -257,7 +320,7 @@ def test_peek_named_pipe_ready_cross_platform_and_handles() -> None:
     mock_kernel32.PeekNamedPipe.side_effect = mock_peek_success
     with (
         patch("sys.platform", "win32"),
-        patch("ctypes.windll", mock_windll, create=True),
+        patch("expedition33_rpc.core.platform._kernel32", mock_kernel32),
     ):
         assert peek_named_pipe_ready(999, timeout=0.1) is True
 
@@ -269,7 +332,7 @@ def test_peek_named_pipe_ready_cross_platform_and_handles() -> None:
     mock_kernel32.PeekNamedPipe.side_effect = mock_peek_zero
     with (
         patch("sys.platform", "win32"),
-        patch("ctypes.windll", mock_windll, create=True),
+        patch("expedition33_rpc.core.platform._kernel32", mock_kernel32),
     ):
         start = time.perf_counter()
         assert peek_named_pipe_ready(999, timeout=0.03) is False
@@ -279,33 +342,31 @@ def test_peek_named_pipe_ready_cross_platform_and_handles() -> None:
 @pytest.mark.unit
 def test_single_instance_windows_mutex() -> None:
     mock_kernel32 = MagicMock()
-    mock_windll = MagicMock()
-    mock_windll.kernel32 = mock_kernel32
 
     # Case 1: First instance (last_error == 0)
-    mock_kernel32.GetLastError.return_value = 0
     with (
         patch("sys.platform", "win32"),
-        patch.object(ctypes, "windll", mock_windll, create=True),
+        patch("expedition33_rpc.core.platform._kernel32", mock_kernel32),
+        patch("ctypes.get_last_error", return_value=0, create=True),
     ):
         assert is_already_running() is False
 
     # Case 2: Already running (ERROR_ALREADY_EXISTS = 183) - closes duplicate handle
-    mock_kernel32.GetLastError.return_value = 183
     mock_dup_handle = MagicMock()
     mock_kernel32.CreateMutexW.return_value = mock_dup_handle
     with (
         patch("sys.platform", "win32"),
-        patch.object(ctypes, "windll", mock_windll, create=True),
+        patch("expedition33_rpc.core.platform._kernel32", mock_kernel32),
+        patch("ctypes.get_last_error", return_value=183, create=True),
     ):
         assert is_already_running() is True
         mock_kernel32.CloseHandle.assert_called_with(mock_dup_handle)
 
     # Case 3: Access denied (ERROR_ACCESS_DENIED = 5)
-    mock_kernel32.GetLastError.return_value = 5
     with (
         patch("sys.platform", "win32"),
-        patch.object(ctypes, "windll", mock_windll, create=True),
+        patch("expedition33_rpc.core.platform._kernel32", mock_kernel32),
+        patch("ctypes.get_last_error", return_value=5, create=True),
     ):
         assert is_already_running() is True
 
