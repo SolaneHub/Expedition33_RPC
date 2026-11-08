@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.3.2] - 2026-11-08
+
+### Bug Fixes & Reliability
+- **Discord IPC Protocol Resilience (`integrations.discord_rpc`)**:
+  - Handled zero-length frame payloads gracefully in `DiscordFrameCodec.decode()`.
+  - Added automated `OP_PING` heartbeat auto-reply (`OP_PONG`) and clean disconnect handling on `OP_CLOSE` during IPC message receive loops.
+  - Preserved `_last_target_pid` across telemetry ticks to ensure accurate activity clearing upon disconnect.
+  - Sanitized cache fingerprints with truncated `large_text` to eliminate redundant IPC dispatch.
+- **Win32 Platform Primitives & Ctypes Signatures (`core.platform`)**:
+  - Replaced unsafe `ctypes.windll.kernel32.GetLastError()` with module-level `_kernel32` (`ctypes.WinDLL("kernel32", use_last_error=True)`) and `ctypes.get_last_error()`.
+  - Declared explicit `argtypes` and `restype` signatures for `CreateMutexW` and `PeekNamedPipe`.
+  - Propagated `FileNotFoundError` explicitly in `read_file_shared_text()` for Win32 error codes `ERROR_FILE_NOT_FOUND` (2) and `ERROR_PATH_NOT_FOUND` (3).
+- **System Tray Tooltip Protection (`ui.presentation`, `ui.tray_app`)**:
+  - Enforced `WIN32_MAX_TRAY_TITLE_LENGTH = 127` character limit with ellipsis truncation in `format_tray_title()` to prevent Win32 shell notification icon title overflow exceptions.
+  - Safely handled `None` game state in tray tooltip formatting and guarded `icon.title` assignments with exception suppression.
+- **Updater Lifecycle & Thread Cancellation (`integrations.updater`)**:
+  - Added `AppUpdater.cancel()` using `threading.Event` to interrupt pending background update delays and checks cleanly.
+  - Guarded against concurrent background update worker threads when already in `UpdateState.CHECKING`.
+- **Orchestrator Subscription Deduplication (`core.orchestrator`)**:
+  - Prevented double-dispatch of `on_update_available` and duplicate registration of `on_state_change`.
+
+### Performance & Polling
+- **Save Reader mtime Caching (`detection.save_reader`)**:
+  - Implemented O(1) `st_mtime` caching for save directory lookup and `.sav` globbing (`_latest_dir_cache`, `_dir_sav_cache`), avoiding repeated disk traversal during gameplay loops.
+
+### Testing & CI
+- **Continuous Integration Pipeline (`.github/workflows/release.yml`, `pyproject.toml`)**:
+  - Added Prettier style validation for `game_data.json` to the release workflow.
+  - Added executable smoke test (`dist/Expedition33_RPC.exe --smoke-test`) to CI build verification.
+  - Extended Ruff and Pyright inclusion to `.github/scripts/**`.
+- **Adversarial & Concurrency Test Suites (`tests/`)**:
+  - Added comprehensive integration tests for Discord IPC edge cases (empty payloads, ping/pong, pipe errors), updater cancellation, orchestrator subscription lifecycle, and Win32 tray title bounds.
+
 ## [v2.3.1] - 2026-11-08
 
 ### Bug Fixes & Reliability

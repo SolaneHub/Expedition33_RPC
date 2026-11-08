@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release tag (e.g. v2.3.1)"
+        description: "Release tag (e.g. v2.3.2)"
         required: false
         default: ""
 
@@ -115,7 +115,7 @@ jobs:
               except Exception:
                   pass
               if not tag:
-                  tag = "v2.3.1"
+                  tag = "v2.3.2"
           else:
               tag = candidate
 
@@ -174,8 +174,8 @@ jobs:
             dist/virustotal_report.json
             src/expedition33_rpc/assets/bridge.zip
           body_path: RELEASE_NOTES.md
-          tag_name: ${{ steps.extract_changelog.outputs.version || 'v2.3.1' }}
-          name: ${{ steps.extract_changelog.outputs.version || 'v2.3.1' }}
+          tag_name: ${{ steps.extract_changelog.outputs.version || 'v2.3.2' }}
+          name: ${{ steps.extract_changelog.outputs.version || 'v2.3.2' }}
           draft: false
           prerelease: false
         env:
