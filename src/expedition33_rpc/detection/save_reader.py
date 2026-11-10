@@ -80,7 +80,7 @@ class SaveFileReader:
         )
         self._checkpoint_cache: dict[str, tuple[float, int, tuple[str | None, str | None]]] = {}
         self._latest_dir_cache: tuple[float, str | None] | None = None
-        self._dir_sav_cache: dict[str, tuple[float, str | None]] = {}
+        self._dir_sav_cache: dict[str, tuple[float, list[Path]]] = {}
 
     def reset(self) -> None:
         """Clears all cached checkpoint metadata, directory mtimes, and paths."""
@@ -131,27 +131,24 @@ class SaveFileReader:
             except OSError:
                 return None, None
 
-            cached_sav = self._dir_sav_cache.get(save_dir)
-            if cached_sav is not None and cached_sav[0] == dir_mtime:
-                sav_path = cached_sav[1]
-                if sav_path is None:
-                    return None, None
-                latest = Path(sav_path)
+            cached_entry = self._dir_sav_cache.get(save_dir)
+            if cached_entry is not None and cached_entry[0] == dir_mtime:
+                candidates = cached_entry[1]
             else:
                 candidates = list(save_dir_path.glob("EXPEDITION_*.sav"))
-                if not candidates:
-                    self._dir_sav_cache[save_dir] = (dir_mtime, None)
-                    return None, None
+                self._dir_sav_cache[save_dir] = (dir_mtime, candidates)
 
-                def _mtime(p: Path) -> float:
-                    try:
-                        return p.stat().st_mtime
-                    except OSError:
-                        return 0.0
+            if not candidates:
+                return None, None
 
-                latest = max(candidates, key=_mtime)
-                sav_path = str(latest)
-                self._dir_sav_cache[save_dir] = (dir_mtime, sav_path)
+            def _mtime(p: Path) -> float:
+                try:
+                    return p.stat().st_mtime
+                except OSError:
+                    return 0.0
+
+            latest = max(candidates, key=_mtime)
+            sav_path = str(latest)
 
             try:
                 st = latest.stat()

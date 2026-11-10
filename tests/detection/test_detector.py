@@ -975,3 +975,72 @@ def test_detector_resets_save_reader_when_game_stops() -> None:
     state = detector.get_game_state()
     assert state.is_running is False
     mock_save_reader.reset.assert_called_once()
+
+
+@pytest.mark.unit
+def test_detector_is_starting_consecutive_ticks_without_telemetry() -> None:
+    """Verifies that is_starting remains True over multiple consecutive ticks when telemetry is absent,
+
+    self.last_raw_zone is not polluted with 'Starting', and timer tracker zone_id is not polluted.
+    """
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    detector = GameDetector(
+        process_scanner=lambda: [mock_proc],
+        bridge_provider=None,
+    )
+
+    for tick in range(1, 5):
+        state = detector.get_game_state(now=1700000000.0 + tick)
+        assert state.is_running is True
+        assert state.is_starting is True, f"Failed on tick {tick}"
+        assert state.raw_zone == "Starting"
+        assert state.zone_name == "Starting..."
+        assert detector.last_raw_zone != "Starting"
+        assert detector.timer_tracker.current_zone_id != "Starting"
+
+
+@pytest.mark.unit
+def test_detector_endless_tower_canonical_boss_override() -> None:
+    """Verifies that when tower_trial is provided in bridge payload with non-canonical enemy name,
+
+    the canonical boss name from ENDLESS_TOWER_TRIALS is resolved (e.g. Painted Love for trial [11, 3]).
+    """
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    bridge_provider = MagicMock(spec=BridgeStateProvider)
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_EndlessTower",
+        "in_combat": True,
+        "enemy_name": "Unknown Grunt",
+        "tower_trial": [11, 3],
+        "timestamp": 1000.0,
+    }
+
+    detector = GameDetector(
+        bridge_provider=bridge_provider,
+        process_scanner=lambda: [mock_proc],
+    )
+
+    state = detector.get_game_state(now=1000.0)
+    assert state.is_running is True
+    assert state.in_combat is True
+    assert state.enemy_name == "Painted Love"
+
+
+@pytest.mark.unit
+def test_detector_clock_epoch_does_not_corrupt_monotonic_scan_backoff() -> None:
+    """Verifies that passing epoch timestamp to get_game_state does not corrupt monotonic scan backoff."""
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    detector = GameDetector(
+        process_scanner=lambda: [mock_proc],
+        bridge_provider=None,
+    )
+
+    # Initial call with epoch timestamp (e.g. year 2026 / 1.7e9)
+    epoch_now = 1770000000.0
+    state = detector.get_game_state(now=epoch_now)
+    assert state.is_running is True
+
+    # _last_process_scan_time should be tracked via monotonic clock, NOT epoch
+    # If it was contaminated with epoch_now (~1.7e9), monotonic time (usually thousands of seconds)
+    # would make (current_time - _last_process_scan_time) strongly negative, breaking idle backoff.
+    assert detector._last_process_scan_time < 100000000.0

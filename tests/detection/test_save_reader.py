@@ -279,3 +279,63 @@ def test_save_reader_mtime_caching_and_reset(tmp_path: Path) -> None:
     assert len(reader._checkpoint_cache) == 0
     assert reader._latest_dir_cache is None
     assert len(reader._dir_sav_cache) == 0
+
+
+@pytest.mark.unit
+def test_save_reader_inplace_file_modification_detection(tmp_path: Path) -> None:
+    profile_dir = tmp_path / "player_profile_inplace"
+    profile_dir.mkdir(parents=True)
+    sav_file1 = profile_dir / "EXPEDITION_0.sav"
+    sav_file2 = profile_dir / "EXPEDITION_1.sav"
+
+    payload1 = (
+        b"\x00" * 20
+        + b"LastUsedSavePoint\x00\x0f\x00\x00\x00StructProperty\x00\x02\x00\x00\x00"
+        + b"LevelAssetName\x00\r\x00\x00\x00NameProperty\x00\x00\x00\x00\x00Level_Initial\x00"
+        + b"SpawnPointTag\x00Level.SpawnPoint.Initial.Tag\x00"
+        + b"\x00" * 20
+    )
+    sav_file1.write_bytes(payload1)
+    sav_file2.write_bytes(payload1)
+
+    import os
+    import time
+
+    # Set initial timestamps so sav_file1 is older and sav_file2 is slightly newer
+    base_t = time.time() - 100.0
+    os.utime(sav_file1, (base_t, base_t))
+    os.utime(sav_file2, (base_t + 10.0, base_t + 10.0))
+    fixed_dir_mtime = base_t + 20.0
+    os.utime(profile_dir, (fixed_dir_mtime, fixed_dir_mtime))
+
+    reader = SaveFileReader(base_save_dir=tmp_path)
+
+    # Initial read should pick sav_file2
+    lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
+    assert lvl == "Level_Initial"
+    assert tag == "Level.SpawnPoint.Initial.Tag"
+
+    # Now simulate an in-place overwrite of sav_file1 with updated checkpoint
+    payload_new = (
+        b"\x00" * 20
+        + b"LastUsedSavePoint\x00\x0f\x00\x00\x00StructProperty\x00\x02\x00\x00\x00"
+        + b"LevelAssetName\x00\r\x00\x00\x00NameProperty\x00\x00\x00\x00\x00Level_Overwritten\x00"
+        + b"SpawnPointTag\x00Level.SpawnPoint.Overwritten.Tag\x00"
+        + b"\x00" * 20
+    )
+    sav_file1.write_bytes(payload_new)
+    new_t = base_t + 50.0
+    os.utime(sav_file1, (new_t, new_t))
+
+    # CRITICAL: Keep directory mtime completely frozen (simulating filesystem in-place edit where dir mtime is untouched)
+    os.utime(profile_dir, (fixed_dir_mtime, fixed_dir_mtime))
+
+    # Assert glob is NOT called (candidate list is reused from cache)
+    def _fail_glob(_self: Path, _pattern: str) -> Any:
+        raise AssertionError("glob called unexpectedly when dir mtime was unchanged!")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(Path, "glob", _fail_glob)
+        lvl2, tag2 = reader.read_checkpoint_from_save(str(profile_dir))
+        assert lvl2 == "Level_Overwritten"
+        assert tag2 == "Level.SpawnPoint.Overwritten.Tag"

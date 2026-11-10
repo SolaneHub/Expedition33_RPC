@@ -16,7 +16,7 @@ from expedition33_rpc.detection.compat_paths import (
     get_telemetry_file_path,
     get_telemetry_file_paths,
 )
-from expedition33_rpc.detection.game_data import TARGET_PROCESS_NAMES
+from expedition33_rpc.detection.game_data import ENDLESS_TOWER_TRIALS, TARGET_PROCESS_NAMES
 from expedition33_rpc.detection.normalization import (
     format_checkpoint_tag,
     format_enemy_name,
@@ -241,6 +241,8 @@ class BridgeStateProvider:
                             return data
                     elif attempt < 5:
                         time.sleep(0.001 * (attempt + 1))
+                except FileNotFoundError:
+                    break
                 except (PermissionError, json.JSONDecodeError, UnicodeDecodeError, OSError):
                     if attempt < 5:
                         time.sleep(0.001 * (attempt + 1))
@@ -512,11 +514,7 @@ class GameDetector:
 
     def get_game_state(self, now: float | None = None, force: bool = False) -> GameState:
         """Executes a full detection cycle returning an immutable GameState snapshot."""
-        proc = (
-            self.find_game_process(now, force)
-            if (now is not None or force)
-            else self.find_game_process()
-        )
+        proc = self.find_game_process(force=force) if force else self.find_game_process()
 
         if not proc:
             self.cached_pid = None
@@ -533,7 +531,7 @@ class GameDetector:
             self.timer_tracker.reset()
             return GameState(is_running=False, game_language=self._cached_language)
 
-        lang = self.get_game_language(now=now)
+        lang = self.get_game_language(force=force)
 
         # Extract process creation time safely only for the matched process
         proc_create_time: float | None = None
@@ -566,7 +564,7 @@ class GameDetector:
             tower_floor = data.get("tower_floor")
             raw_checkpoint = str(data.get("checkpoint", "") or "")
         else:
-            if not self.has_received_telemetry and not self.last_raw_zone:
+            if not self.has_received_telemetry:
                 is_starting = True
                 raw_zone = "Starting"
             else:
@@ -607,7 +605,8 @@ class GameDetector:
                 raw_checkpoint = ""
                 self.last_raw_checkpoint = ""
 
-        self.last_raw_zone = raw_zone
+        if not is_starting:
+            self.last_raw_zone = raw_zone
 
         # Track Endless Tower stage and trial
         effective_enemy = raw_enemy
@@ -615,6 +614,20 @@ class GameDetector:
             bridge_trial = data.get("tower_trial") if data else None
             if bridge_trial:
                 self.current_tower_trial = bridge_trial
+                bt_tuple = (
+                    tuple(bridge_trial) if isinstance(bridge_trial, (list, tuple)) else bridge_trial
+                )
+                for stage_info, canonical_boss, _ in ENDLESS_TOWER_TRIALS:
+                    st_tuple = (
+                        tuple(stage_info) if isinstance(stage_info, (list, tuple)) else stage_info
+                    )
+                    if st_tuple == bt_tuple and canonical_boss:
+                        effective_enemy = canonical_boss
+                        break
+                if effective_enemy == raw_enemy and (raw_enemy or raw_enemies):
+                    _, clean_enemy = resolve_tower_trial(raw_enemy, enemies=raw_enemies)
+                    if clean_enemy:
+                        effective_enemy = clean_enemy
             elif raw_enemy or raw_enemies:
                 trial_info, clean_enemy = resolve_tower_trial(raw_enemy, enemies=raw_enemies)
                 self.current_tower_trial = trial_info
@@ -626,12 +639,15 @@ class GameDetector:
             self.current_tower_trial = None
 
         # Determine zone key and update state timing machine
-        zone_key = raw_zone.strip() or "Exploring"
-        if zone_key == "Exploring" and self.timer_tracker.current_zone_id not in (
-            None,
-            "Exploring",
-        ):
-            zone_key = self.timer_tracker.current_zone_id
+        if is_starting:
+            zone_key = "Exploring"
+        else:
+            zone_key = raw_zone.strip() or "Exploring"
+            if zone_key == "Exploring" and self.timer_tracker.current_zone_id not in (
+                None,
+                "Exploring",
+            ):
+                zone_key = self.timer_tracker.current_zone_id
 
         current_epoch = time.time() if now is None else now
         effective_start = self.timer_tracker.update(
