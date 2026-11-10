@@ -61,12 +61,12 @@ Right-click the tray icon to monitor status and adjust preferences:
 | :--- | :--- | :--- |
 | **Game Status** | `Game: Running (PID: X)` / `Not running` | Displays real-time process detection status and game PID |
 | **Location** | `Location: <Zone Name>` / `[Hidden - Anti-Spoiler]` | Displays current in-game zone or hides it when anti-spoiler mode is active |
-| **Status** | `Status: In Combat (<Enemy>)` / `Exploring` | Shows active exploration or real-time battle encounter targets |
+| **Status** | `Status: Exploring` / `Combat: Fighting <Enemy>` / `Status: In Combat` / `Status: In Menu` | Shows active exploration or real-time battle encounter targets |
 | **Discord** | `Discord: Connected` / `Standby` | Displays local Discord IPC Named Pipe connection status |
 | **Anti-Spoiler Mode** | `[Enabled / Disabled]` | One-click toggle masking story locations and enemy encounter titles |
 | **Combat Bridge** | `[Installed / Install Now]` | Displays UE4SS Lua bridge status or initiates manual deployment |
 | **Start with Windows** | `[X / ]` | Toggles automatic startup registration in `HKCU\...\Run` |
-| **Check for Updates** | `Check for Updates` / `Update to vX.X.X` | Polls GitHub Releases API and executes seamless in-place self-update |
+| **Check for Updates** | `Check for Updates` / `Update to vX.X.X` | Checks GitHub Releases API and opens the official release download page in the default web browser |
 | **Exit** | *(Action)* | Cleanly disconnects Discord RPC session and closes the companion |
 
 ---
@@ -80,7 +80,7 @@ Presence dynamically updates to reflect current game activity:
 | **Exploration** | `Exploring` | `<Zone Name> (<Flag Name>)` *(e.g. `Sirene (Dancing Classes)`)* | `Clair Obscur: Expedition 33` | Active session duration |
 | **Combat Encounter** | `Fighting: <Enemy / Boss>` *(e.g. `Fighting: Lancelier`)* | `<Zone Name> (<Flag Name>)` | `Clair Obscur: Expedition 33` | Active session duration |
 | **Endless Tower** | `Fighting: <Boss / Enemy>` | `Endless Tower (Stage <X>, Trial <Y>)` | `Clair Obscur: Expedition 33` | Active session duration |
-| **Anti-Spoiler Shield** | `In Combat` *(or omitted during exploration)* | `Hidden Location` | `Clair Obscur: Expedition 33` | Active session duration |
+| **Anti-Spoiler Shield** | `In Combat / Exploring` | `Hidden Location` | `Clair Obscur: Expedition 33` | Active session duration |
 
 > [!NOTE]
 > Presences automatically adapt to the user's selected game language (supporting all 20 officially localized game languages via `game_data.json`).

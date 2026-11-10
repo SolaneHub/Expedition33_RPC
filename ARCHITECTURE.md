@@ -188,9 +188,10 @@ In development mode, points to `pythonw.exe` to suppress console allocation.
 
 The codebase decouples domain logic from OS system calls and external sockets through dedicated test doubles located in `tests/harness/` and `tests/`:
 
-- **`FakeProcessScanner`**: Simulates process discovery, lifecycle state transitions, PID allocation, and abrupt crashes without launching external executables.
-- **`FakeBridgeProvider`**: Injects synthetic telemetry payloads and triggers edge-case timings (e.g. stale timestamps, corrupt JSON, missing keys).
-- **`FakeUpdater`**: Implements `UpdaterProtocol` to simulate release discovery, network failures, and cancellation deterministically without external HTTP requests.
-- **`DiscordPipeSimulator`**: Acts as a loopback Discord Named Pipe server in-memory, asserting opcode sequences, verifying `<II` packet parsing, and simulating pipe dropouts or invalid responses.
+- **`FakeProcess`**: Simulates process discovery, lifecycle state transitions, PID allocation, and abrupt crashes without launching external executables.
+- **`GameSessionSimulator`**: Injects synthetic telemetry payloads, manages game state lifecycle, and triggers edge-case timings (e.g. stale timestamps, corrupt JSON, missing keys).
+- **`DiscordPipeSimulator & MockDiscordServer`**: Act as loopback Discord Named Pipe servers in-memory, asserting opcode sequences, verifying `<II` packet parsing, and simulating pipe dropouts or invalid responses.
+- **`HeadlessTrayHarness`**: Simulates the system tray graphical lifecycle, menu callbacks, and state updates headless without an OS windowing server.
+- **`FakeUpdater` & `FakeBridgeInstaller`**: Protocol test doubles in `tests/core/test_orchestrator.py` simulating GitHub release checks, update flow, and UE4SS bridge deployments without disk or network operations.
 
 This enables sub-second, 100% deterministic end-to-end integration test execution across macOS, Linux, and Windows in CI without requiring the game or Discord to be installed.

@@ -25,7 +25,7 @@ Always verify changes using [`uv`](https://github.com/astral-sh/uv). Never push 
    - *Update Engine Decoupling*: Decouple update checking from the polling engine via `UpdaterProtocol`. Background checks must run asynchronously in a dedicated worker thread with delayed execution (3.0s), never blocking or injecting latency into the telemetry polling loop.
    - *Bridge Installation*: Background daemon thread with strict cooldown and retry limits.
    - *Discord IPC*: Dirty-checking on outbound frames; never send identical presence payloads.
-3. **Dry-Run & Integration-First**: Test observable system behavior and interface contracts, not brittle private methods. Use `FakeProcessScanner`, `FakeBridgeProvider`, `FakeUpdater`, and `DiscordPipeSimulator` from `tests/harness/` and `tests/` for deterministic testing.
+3. **Dry-Run & Integration-First**: Test observable system behavior and interface contracts, not brittle private methods. Use `FakeProcess`, `GameSessionSimulator`, `DiscordPipeSimulator & MockDiscordServer`, `HeadlessTrayHarness`, `FakeUpdater`, and `FakeBridgeInstaller` from `tests/harness/` and `tests/` for deterministic testing.
 4. **Hard Stop on Semi-Reversible Choices**: Never add dependencies to `pyproject.toml`, alter the external IPC status JSON schema, or mutate the Discord binary `<II` wire frame layout without explicit human approval.
 5. **Zero Suppressed Warnings**: 100% strict type safety under Pyright (`typeCheckingMode = "standard"`). Absolutely zero `type: ignore`, `# noqa`, or unjustified Ruff suppressions across the codebase.
 
