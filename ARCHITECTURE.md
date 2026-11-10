@@ -30,7 +30,7 @@ src/expedition33_rpc/
 │
 ├── core/                     # Application lifecycle, platform primitives & orchestrator
 │   ├── app.py                # Single-instance application bootstrap and clean shutdown
-│   ├── orchestrator.py       # Headless AppOrchestrator coordinating detector, IPC, and UI
+│   ├── orchestrator.py       # Headless AppOrchestrator, UpdaterProtocol & lifecycle coordination
 │   ├── platform.py           # OS abstraction: Win32 mutex, flock, CreateFileW 0x7, winreg
 │   ├── presence.py           # Decoupled immutable PresencePayload DTO
 │   ├── resources.py          # PyInstaller bundle (_MEIPASS) and development path resolution
@@ -49,7 +49,7 @@ src/expedition33_rpc/
 ├── integrations/             # External boundaries and daemon installers
 │   ├── bridge_installer.py   # Automatic and manual UE4SS Lua mod bridge deployment
 │   ├── discord_rpc.py        # Native Discord IPC client with binary <II framing & rate limits
-│   └── updater.py            # GitHub Releases auto-update checker and background worker
+│   └── updater.py            # GitHub Releases auto-updater (AppUpdater conforming to UpdaterProtocol)
 │
 ├── ui/                       # Presentation layer and graphical shell
 │   ├── presentation.py       # Pure formatting functions for Discord status and tray text
@@ -90,13 +90,35 @@ The application runtime maintains resilient execution across host process faults
    - When telemetry is stale or missing, the state machine drops active combat/boss status to prevent ghost presences and falls back to zone exploration or `.sav` checkpoint inspection.
 4. **Frame Dirty-Checking**:
    - Presence payloads are hashed/compared against the previous broadcast frame. Identical states are not re-sent, preventing pipe saturations and Discord rate-limit throttling.
-5. **Startup & Telemetry Liveness (`has_received_telemetry`)**:
-   - Upon initial process detection before UE4SS writes the first frame, the state engine sets `is_starting = True` ("Starting... / Loading...").
-   - Once the first valid telemetry payload is ingested, `has_received_telemetry` locks `True` for the lifetime of that PID.
-   - Any transient telemetry stall or file contention falls back to zone exploration of the last known zone (`last_raw_zone`) and never regresses to the starting/loading screen state.
+5. **Startup & Telemetry Liveness (`has_received_telemetry` & `is_starting`)**:
+   - Upon initial process detection, `has_received_telemetry` is initialized to `False`, and `is_starting` is set to `True` ("Starting... / Loading...").
+   - The `is_starting` state is strictly reserved for initial launch before the first telemetry frame arrives; it remains `True` across empty reads until the first actual frame is ingested.
+   - Once the first valid telemetry payload is ingested, `has_received_telemetry` locks `True` for the lifetime of that process PID.
+   - Any transient telemetry stall, file read contention, or empty payload sets `is_starting = False` and falls back to zone exploration of the last known zone (`last_raw_zone`).
+   - The state machine NEVER regresses to `is_starting = True` during transient stalls or empty frames while the game process is running. The starting state is cleared exclusively upon process termination (`cached_pid = None`).
 6. **Dynamic Checkpoint Synchronization**:
    - When telemetry contains an empty checkpoint string, `SaveFileReader` inspects the active player save profile.
    - Fast-travel and save-point rests are detected in sub-millisecond time via $O(1)$ `st.st_mtime` file caching on `EXPEDITION_*.sav`, dynamically updating checkpoint labels across both intra-zone and inter-zone travel without polling overhead.
+7. **Deterministic Clock Decoupling (Monotonic vs. Epoch)**:
+   - **Monotonic Clock (`time.monotonic()`)**: Exclusively governs internal engine timekeeping, intervals, retry loops, and backoff logic immune to system clock shifts, NTP synchronization, or leap seconds:
+     * Telemetry polling intervals and adaptive idle backoff (`_stop_event.wait(timeout=...)`).
+     * Process scanning backoff cadences (`GameDetector._last_process_scan_time`, `idle_poll_interval`).
+     * Discord RPC reconnection retry loop with exponential backoff and connection timeout deadlines (`DiscordRPCManager`).
+     * Cumulative thread join deadlines and orchestrator shutdown timeout budgets (`deadline = time.monotonic() + 3.0`).
+     * Bridge installer cooldown gating (`bridge_install_cooldown`).
+     * Invariant: Monotonic timestamps must never be compared against or contaminated with epoch timestamps.
+   - **Epoch Timestamp (`time.time()`)**: Exclusively reserved for wall-clock alignment and outbound Discord Rich Presence wire frames:
+     * Telemetry heartbeat freshness SLA verification against mod emission timestamps (`abs(epoch_now - telemetry.timestamp) > 5.0`).
+     * Zone exploration and combat start timestamps (`ZoneTimerTracker.update(..., now=current_epoch)`).
+     * Discord Rich Presence wire frame payloads (`PresencePayload.start_timestamp` / `timestamps: {"start": ...}`) serialized into binary `<II` IPC packets.
+8. **Background Update Engine Decoupling (`UpdaterProtocol`)**:
+   - The update checker subsystem is formally decoupled from the primary polling engine via `UpdaterProtocol`:
+     * `AppOrchestrator` depends strictly on the `UpdaterProtocol` interface (`check_in_background`, `cancel`, `open_release_page`, `get_status_text`), rather than a concrete implementation.
+     * Update checks run asynchronously in a dedicated background worker thread (`_worker_thread`), delayed by 3.0 seconds at startup to prioritize immediate game detection and presence publishing without network latency.
+     * Network I/O, DNS resolution, and GitHub Releases API latency cannot stall `AppOrchestrator.step_update` or inject jitter into the 2.0s telemetry polling cycle.
+     * Update discovery is communicated event-driven via `on_complete` callback (`on_update_check_complete`), notifying UI subscribers without busy-waiting.
+     * Clean shutdown: `AppOrchestrator.stop()` cancels in-flight update requests and joins the worker thread within the cumulative monotonic shutdown deadline.
+     * Deterministic testability: In unit and integration test suites, `FakeUpdater(UpdaterProtocol)` simulates all update lifecycle states offline without making external HTTP requests.
 
 ---
 
@@ -164,10 +186,11 @@ In development mode, points to `pythonw.exe` to suppress console allocation.
 
 ## 5. Dry-Run Test Harness Design
 
-The codebase decouples domain logic from OS system calls and external sockets through dedicated test doubles located in `tests/harness/`:
+The codebase decouples domain logic from OS system calls and external sockets through dedicated test doubles located in `tests/harness/` and `tests/`:
 
 - **`FakeProcessScanner`**: Simulates process discovery, lifecycle state transitions, PID allocation, and abrupt crashes without launching external executables.
 - **`FakeBridgeProvider`**: Injects synthetic telemetry payloads and triggers edge-case timings (e.g. stale timestamps, corrupt JSON, missing keys).
+- **`FakeUpdater`**: Implements `UpdaterProtocol` to simulate release discovery, network failures, and cancellation deterministically without external HTTP requests.
 - **`DiscordPipeSimulator`**: Acts as a loopback Discord Named Pipe server in-memory, asserting opcode sequences, verifying `<II` packet parsing, and simulating pipe dropouts or invalid responses.
 
 This enables sub-second, 100% deterministic end-to-end integration test execution across macOS, Linux, and Windows in CI without requiring the game or Discord to be installed.

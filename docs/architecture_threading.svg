@@ -90,7 +90,7 @@
 
   <rect class="node" x="580" y="300" width="264" height="58" rx="11" stroke="#f43f5e"/>
   <text class="main" x="712" y="324">&#127760; Background Updater</text>
-  <text class="sub" x="712" y="342">GitHub Releases &#183; daemon</text>
+  <text class="sub" x="712" y="342">UpdaterProtocol &#183; daemon</text>
 
   <!-- Bottom Architecture Caption -->
   <text class="caption" x="440" y="432">Win32 message pump stays fluid &#183; Zero lock contention on telemetry reads &#183; Background workers exit instantly on app quit</text>
