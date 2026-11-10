@@ -1044,3 +1044,94 @@ def test_detector_clock_epoch_does_not_corrupt_monotonic_scan_backoff() -> None:
     # If it was contaminated with epoch_now (~1.7e9), monotonic time (usually thousands of seconds)
     # would make (current_time - _last_process_scan_time) strongly negative, breaking idle backoff.
     assert detector._last_process_scan_time < 100000000.0
+
+
+@pytest.mark.unit
+def test_game_detector_resets_on_pid_reuse_with_different_create_time() -> None:
+    """Simulates a process keeping the same PID whose create_time() changes from 1000.0 to 2000.0.
+
+    Verifies that telemetry, zone, checkpoint, tower trial, and timer tracker are completely reset.
+    """
+    bridge_provider = MagicMock(spec=BridgeStateProvider)
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_EndlessTower",
+        "checkpoint": "Level.SpawnPoint.Manor.Entry",
+        "in_combat": True,
+        "tower_trial": [2, 1],
+        "timestamp": 1000.0,
+    }
+    save_reader = MagicMock(spec=SaveReaderProtocol)
+
+    current_proc = FakeProcess(pid=4321, name="Sandfall-Win64-Shipping.exe", create_time=1000.0)
+
+    detector = GameDetector(
+        bridge_provider=bridge_provider,
+        save_reader=save_reader,
+        process_scanner=lambda: [current_proc],
+    )
+
+    # 1. First tick with create_time=1000.0
+    state1 = detector.get_game_state(now=1000.0)
+    assert state1.is_running is True
+    assert detector.has_received_telemetry is True
+    assert detector.last_raw_zone == "Level_EndlessTower"
+    assert detector.last_raw_checkpoint == "Level.SpawnPoint.Manor.Entry"
+    assert detector.current_tower_trial == (2, 1)
+    assert detector._cached_create_time == 1000.0
+
+    # 2. Simulate rapid restart reusing PID 4321 with create_time=2000.0 without intermediate idle tick
+    current_proc._create_time = 2000.0
+    # Telemetry not yet received for new process
+    bridge_provider.read_game_data.return_value = None
+
+    state2 = detector.get_game_state(now=2000.0)
+    assert state2.is_running is True
+    assert state2.is_starting is True
+    assert detector.has_received_telemetry is False
+    assert detector.last_raw_zone == ""
+    assert detector.last_raw_checkpoint == ""
+    assert detector.current_tower_trial is None
+    assert detector._cached_create_time == 2000.0
+    bridge_provider.reset.assert_called_once()
+    save_reader.reset.assert_called_once()
+    assert detector.timer_tracker.current_zone_id != "Level_EndlessTower"
+    assert detector.timer_tracker.zone_start_time == 2000.0
+
+
+@pytest.mark.unit
+def test_game_detector_normalizes_list_tower_trial() -> None:
+    """Verifies that providing tower_trial: [10, 2] in telemetry normalizes current_tower_trial
+
+    to tuple (10, 2) and avoids spurious combat timer resets.
+    """
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    bridge_provider = MagicMock(spec=BridgeStateProvider)
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_EndlessTower",
+        "in_combat": True,
+        "tower_trial": [10, 2],
+        "timestamp": 1000.0,
+    }
+
+    detector = GameDetector(
+        bridge_provider=bridge_provider,
+        process_scanner=lambda: [mock_proc],
+    )
+
+    # First tick
+    state1 = detector.get_game_state(now=1000.0)
+    assert state1.is_running is True
+    assert detector.current_tower_trial == (10, 2)
+    assert isinstance(detector.current_tower_trial, tuple)
+    start_t1 = state1.start_time
+
+    # Second tick with same trial [10, 2] (sent as list again by telemetry)
+    bridge_provider.read_game_data.return_value = {
+        "raw_zone": "Level_EndlessTower",
+        "in_combat": True,
+        "tower_trial": [10, 2],
+        "timestamp": 1005.0,
+    }
+    state2 = detector.get_game_state(now=1005.0)
+    assert state2.start_time == start_t1
+    assert detector.current_tower_trial == (10, 2)

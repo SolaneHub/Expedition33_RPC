@@ -346,6 +346,7 @@ class GameDetector:
         save_reader: SaveReaderProtocol | None = None,
     ):
         self.cached_pid: int | None = None
+        self._cached_create_time: float | None = None
         self.game_exe_path: str | None = None
         self.game_win64_dir: Path | None = None
         self.last_raw_zone: str = ""
@@ -433,6 +434,7 @@ class GameDetector:
                 except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
                     pass
             self.cached_pid = None
+            self._cached_create_time = None
             self.game_exe_path = None
             self.game_win64_dir = None
             self.has_received_telemetry = False
@@ -514,10 +516,11 @@ class GameDetector:
 
     def get_game_state(self, now: float | None = None, force: bool = False) -> GameState:
         """Executes a full detection cycle returning an immutable GameState snapshot."""
-        proc = self.find_game_process(force=force) if force else self.find_game_process()
+        proc = self.find_game_process(force=force)
 
         if not proc:
             self.cached_pid = None
+            self._cached_create_time = None
             self.game_exe_path = None
             self.game_win64_dir = None
             self.has_received_telemetry = False
@@ -539,6 +542,22 @@ class GameDetector:
             proc_create_time = float(proc.create_time())
         except Exception:
             proc_create_time = None
+
+        if proc_create_time is not None:
+            if (
+                self._cached_create_time is not None
+                and self._cached_create_time != proc_create_time
+            ):
+                self.has_received_telemetry = False
+                self.last_raw_zone = ""
+                self.last_raw_checkpoint = ""
+                self.current_tower_trial = None
+                if self.bridge_provider is not None:
+                    self.bridge_provider.reset()
+                if self.save_reader is not None:
+                    self.save_reader.reset()
+                self.timer_tracker.reset()
+            self._cached_create_time = proc_create_time
 
         # Query configured telemetry provider
         data: RawGameData | None = (
@@ -613,9 +632,17 @@ class GameDetector:
         if is_tower and in_combat:
             bridge_trial = data.get("tower_trial") if data else None
             if bridge_trial:
-                self.current_tower_trial = bridge_trial
+                normalized_trial: tuple[int, int] | str
+                if isinstance(bridge_trial, (list, tuple)) and len(bridge_trial) == 2:
+                    normalized_trial = (
+                        int(bridge_trial[0]),
+                        int(bridge_trial[1]),
+                    )
+                else:
+                    normalized_trial = str(bridge_trial)
+                self.current_tower_trial = normalized_trial
                 bt_tuple = (
-                    tuple(bridge_trial) if isinstance(bridge_trial, (list, tuple)) else bridge_trial
+                    normalized_trial if isinstance(normalized_trial, tuple) else normalized_trial
                 )
                 for stage_info, canonical_boss, _ in ENDLESS_TOWER_TRIALS:
                     st_tuple = (
