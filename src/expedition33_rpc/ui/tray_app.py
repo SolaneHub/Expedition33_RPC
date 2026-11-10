@@ -104,7 +104,8 @@ class ExpeditionTrayApp:
         icon_path = get_resource_path("icon.png")
         if os.path.exists(icon_path):
             try:
-                return Image.open(icon_path).convert("RGBA")
+                with Image.open(icon_path) as img:
+                    return img.convert("RGBA")
             except Exception as e:
                 logger.warning("[TrayApp] Warning loading icon file: %s", e)
 

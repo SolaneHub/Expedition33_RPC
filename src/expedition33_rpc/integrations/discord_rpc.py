@@ -374,6 +374,7 @@ class DiscordRPCManager:
 
     def disconnect(self) -> None:
         self._retry_failures = 0
+        self.last_retry_time = 0.0
         if self._rpc:
             with contextlib.suppress(Exception):
                 self._rpc.clear_activity(pid=self._last_target_pid or os.getpid())
@@ -382,6 +383,7 @@ class DiscordRPCManager:
 
     def reconnect(self) -> None:
         self.disconnect()
+        self.last_retry_time = 0.0
         self.connect()
 
     def invalidate(self) -> None:

@@ -207,19 +207,29 @@ def test_discord_rpc_manager_loopback_lifecycle_and_backoff() -> None:
         manager.disconnect()
         assert manager.is_connected is False
 
-        # Immediate reconnect is throttled by 5.0s backoff
-        assert manager.connect() is False
-        assert manager.is_connected is False
+        # Immediate connect after disconnect connects cleanly without auto-throttling
+        assert manager.connect() is True
+        assert manager.is_connected is True
 
-        # Bypass backoff with client injected via constructor
-        custom_client = DiscordIPCClient(
-            client_id="manager_test", custom_pipe_path=server.pipe_path
+        # Reconnect also reconnects cleanly without auto-throttling
+        manager.reconnect()
+        assert manager.is_connected is True
+        manager.disconnect()
+
+        # Verify backoff applies on actual connection failures
+        unique_name = uuid.uuid4().hex[:12]
+        bogus_path = (
+            rf"\\.\pipe\nonexistent-discord-ipc-{unique_name}"
+            if sys.platform == "win32"
+            else f"/tmp/nonexistent-discord-ipc-{unique_name}"
         )
-        mgr2 = DiscordRPCManager(client=custom_client)
-        mgr2.last_retry_time = 0.0
-        assert mgr2.connect() is True
-        assert mgr2.is_connected is True
-        mgr2.disconnect()
+        fail_client = DiscordIPCClient(client_id="fail_manager", custom_pipe_path=bogus_path)
+        mgr_fail = DiscordRPCManager(client=fail_client)
+        assert mgr_fail.connect() is False
+        assert mgr_fail._retry_failures == 1
+
+        # Second immediate connect is throttled by backoff
+        assert mgr_fail.connect() is False
 
 
 @pytest.mark.integration
@@ -737,3 +747,27 @@ def test_update_presence_fingerprint_dirty_checking_with_normalized_large_text()
     frames4 = mock_pipe.drain_all_frames()
     assert len(frames4) == 1
     assert frames4[0][1]["args"]["activity"]["assets"]["large_text"] == "Custom Mission Title"
+
+
+@pytest.mark.integration
+def test_discord_rpc_manager_reconnect_rapid_calls_without_throttling() -> None:
+    """Verifies that reconnect() and connect() rapidly after disconnect() do not hit auto-throttling."""
+    with MockDiscordServer() as server:
+        client = DiscordIPCClient(client_id="reconnect_test", custom_pipe_path=server.pipe_path)
+        manager = DiscordRPCManager(client=client)
+
+        assert manager.connect() is True
+        assert manager.is_connected is True
+
+        # Rapid reconnect within milliseconds succeeds without hitting 5s auto-throttling
+        manager.reconnect()
+        assert manager.is_connected is True
+
+        # Disconnect and immediately connect again succeeds without hitting 5s auto-throttling
+        manager.disconnect()
+        assert manager.is_connected is False
+        assert manager.last_retry_time == 0.0
+
+        assert manager.connect() is True
+        assert manager.is_connected is True
+        manager.disconnect()
