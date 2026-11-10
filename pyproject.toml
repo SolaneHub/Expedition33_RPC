@@ -50,7 +50,7 @@ packages = ["src/expedition33_rpc"]
 target-version = "py312"
 line-length = 100
 src = ["src"]
-extend-include = [".github/scripts/**"]
+extend-include = [".github/scripts/**", "tools/**"]
 exclude = [
     ".git",
     "__pycache__",
@@ -84,7 +84,7 @@ known-first-party = ["expedition33_rpc"]
 [tool.pyright]
 include = ["src", "main.py", "build_exe.py", "tests", "tools", ".github/scripts"]
 
-extraPaths = ["src", ".github/scripts"]
+extraPaths = [".", "src", ".github/scripts"]
 exclude = [
     "**/__pycache__",
     "build",

@@ -10,18 +10,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-# Ensure repository root is on sys.path for direct CLI execution
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from tests.harness.game_session import (  # noqa: E402
+from tests.harness.game_session import (
     SCENARIOS,
     create_telemetry_payload,
 )

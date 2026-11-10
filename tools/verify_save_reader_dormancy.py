@@ -21,11 +21,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-# ruff: noqa: E402
 from tests.harness import FakeProcess
 
 from expedition33_rpc.detection.detector import (
@@ -49,6 +44,10 @@ _ORIGINAL_OS_STAT = os.stat
 _ORIGINAL_OS_EXISTS = os.path.exists
 _ORIGINAL_OS_ISFILE = os.path.isfile
 _ORIGINAL_OS_ISDIR = os.path.isdir
+
+
+def _apply_patch(target: Any, attr: str, val: Any) -> None:
+    setattr(target, attr, val)
 
 
 class FilesystemActivityAudit:
@@ -130,35 +129,35 @@ class FilesystemActivityAudit:
             audit._record("os.path.isdir", *args)
             return _ORIGINAL_OS_ISDIR(*args, **kwargs)
 
-        builtins.open = hooked_open  # type: ignore[assignment]
-        mmap.mmap = hooked_mmap  # type: ignore[assignment]
-        pathlib.Path.glob = hooked_path_glob  # type: ignore[assignment]
-        pathlib.Path.iterdir = hooked_path_iterdir  # type: ignore[assignment]
-        pathlib.Path.stat = hooked_path_stat  # type: ignore[assignment]
-        pathlib.Path.exists = hooked_path_exists  # type: ignore[assignment]
-        pathlib.Path.is_file = hooked_path_is_file  # type: ignore[assignment]
-        pathlib.Path.is_dir = hooked_path_is_dir  # type: ignore[assignment]
-        os.stat = hooked_os_stat  # type: ignore[assignment]
-        os.path.exists = hooked_os_exists  # type: ignore[assignment]
-        os.path.isfile = hooked_os_isfile  # type: ignore[assignment]
-        os.path.isdir = hooked_os_isdir  # type: ignore[assignment]
+        _apply_patch(builtins, "open", hooked_open)
+        _apply_patch(mmap, "mmap", hooked_mmap)
+        _apply_patch(pathlib.Path, "glob", hooked_path_glob)
+        _apply_patch(pathlib.Path, "iterdir", hooked_path_iterdir)
+        _apply_patch(pathlib.Path, "stat", hooked_path_stat)
+        _apply_patch(pathlib.Path, "exists", hooked_path_exists)
+        _apply_patch(pathlib.Path, "is_file", hooked_path_is_file)
+        _apply_patch(pathlib.Path, "is_dir", hooked_path_is_dir)
+        _apply_patch(os, "stat", hooked_os_stat)
+        _apply_patch(os.path, "exists", hooked_os_exists)
+        _apply_patch(os.path, "isfile", hooked_os_isfile)
+        _apply_patch(os.path, "isdir", hooked_os_isdir)
         self._installed = True
 
     def stop(self) -> None:
         if not self._installed:
             return
-        builtins.open = _ORIGINAL_OPEN  # type: ignore[assignment]
-        mmap.mmap = _ORIGINAL_MMAP  # type: ignore[assignment]
-        pathlib.Path.glob = _ORIGINAL_PATH_GLOB  # type: ignore[assignment]
-        pathlib.Path.iterdir = _ORIGINAL_PATH_ITERDIR  # type: ignore[assignment]
-        pathlib.Path.stat = _ORIGINAL_PATH_STAT  # type: ignore[assignment]
-        pathlib.Path.exists = _ORIGINAL_PATH_EXISTS  # type: ignore[assignment]
-        pathlib.Path.is_file = _ORIGINAL_PATH_IS_FILE  # type: ignore[assignment]
-        pathlib.Path.is_dir = _ORIGINAL_PATH_IS_DIR  # type: ignore[assignment]
-        os.stat = _ORIGINAL_OS_STAT  # type: ignore[assignment]
-        os.path.exists = _ORIGINAL_OS_EXISTS  # type: ignore[assignment]
-        os.path.isfile = _ORIGINAL_OS_ISFILE  # type: ignore[assignment]
-        os.path.isdir = _ORIGINAL_OS_ISDIR  # type: ignore[assignment]
+        _apply_patch(builtins, "open", _ORIGINAL_OPEN)
+        _apply_patch(mmap, "mmap", _ORIGINAL_MMAP)
+        _apply_patch(pathlib.Path, "glob", _ORIGINAL_PATH_GLOB)
+        _apply_patch(pathlib.Path, "iterdir", _ORIGINAL_PATH_ITERDIR)
+        _apply_patch(pathlib.Path, "stat", _ORIGINAL_PATH_STAT)
+        _apply_patch(pathlib.Path, "exists", _ORIGINAL_PATH_EXISTS)
+        _apply_patch(pathlib.Path, "is_file", _ORIGINAL_PATH_IS_FILE)
+        _apply_patch(pathlib.Path, "is_dir", _ORIGINAL_PATH_IS_DIR)
+        _apply_patch(os, "stat", _ORIGINAL_OS_STAT)
+        _apply_patch(os.path, "exists", _ORIGINAL_OS_EXISTS)
+        _apply_patch(os.path, "isfile", _ORIGINAL_OS_ISFILE)
+        _apply_patch(os.path, "isdir", _ORIGINAL_OS_ISDIR)
         self._installed = False
 
     def clear(self) -> None:
@@ -197,7 +196,7 @@ def run_dormancy_test(audit: FilesystemActivityAudit, tmp_path: Path) -> None:
         resolve_calls.append(raw_zone)
         return original_resolve(raw_zone, zone_display)
 
-    real_save_reader.resolve_checkpoint_for_zone = tracked_resolve  # type: ignore[assignment]
+    _apply_patch(real_save_reader, "resolve_checkpoint_for_zone", tracked_resolve)
 
     fake_proc = FakeProcess(pid=4321, name="Sandfall-Win64-Shipping.exe")
     mock_bridge = MagicMock(spec=BridgeProviderProtocol)

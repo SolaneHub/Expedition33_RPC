@@ -109,19 +109,17 @@ jobs:
           tag = candidate
           if not tag:
               # Dynamically resolve version from pyproject.toml
+              import tomllib
               pyproject_path = Path("pyproject.toml")
               if pyproject_path.exists():
                   try:
-                      with open(pyproject_path, "r", encoding="utf-8") as f:
-                          for line in f:
-                              line_clean = line.strip()
-                              if line_clean.startswith("version =") or line_clean.startswith("version="):
-                                  ver = line_clean.split("=", 1)[1].strip().strip('"').strip("'")
-                                  if ver:
-                                      tag = f"v{ver}" if not ver.startswith("v") else ver
-                                      break
+                      with open(pyproject_path, "rb") as f:
+                          data = tomllib.load(f)
+                          ver = data.get("project", {}).get("version", "")
+                          if ver:
+                              tag = f"v{ver}" if not ver.startswith("v") else ver
                   except Exception as e:
-                      print(f"[Warning] Failed reading pyproject.toml: {e}")
+                      print(f"Warning: Failed to parse pyproject.toml with tomllib: {e}", file=sys.stderr)
 
               # Secondary fallback: src/expedition33_rpc/__init__.py
               if not tag:

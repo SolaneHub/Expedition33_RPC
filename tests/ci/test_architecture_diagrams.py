@@ -7,6 +7,11 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
+from tools.generate_diagrams import (
+    PIPELINE_SVG_CONTENT,
+    STATE_MACHINE_SVG_CONTENT,
+    THREADING_SVG_CONTENT,
+)
 
 pytestmark = pytest.mark.ci
 
@@ -42,3 +47,11 @@ def test_architecture_svg_validity_and_compactness(svg_path: Path, expected_tag:
     root = tree.getroot()
     assert root.tag == "{http://www.w3.org/2000/svg}svg"
     assert root.attrib.get("viewBox") == "0 0 880 470"
+
+
+@pytest.mark.ci
+def test_architecture_svg_content_matches_generator() -> None:
+    """Verifies that docs/ architecture SVG files match constants in tools/generate_diagrams.py."""
+    assert PIPELINE_SVG.read_text(encoding="utf-8") == PIPELINE_SVG_CONTENT.strip() + "\n"
+    assert THREADING_SVG.read_text(encoding="utf-8") == THREADING_SVG_CONTENT.strip() + "\n"
+    assert STATE_MACHINE_SVG.read_text(encoding="utf-8") == STATE_MACHINE_SVG_CONTENT.strip() + "\n"
