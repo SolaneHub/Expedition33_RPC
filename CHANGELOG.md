@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.3.4] - 2026-11-10
+
+### Bug Fixes & Reliability
+- **Detection Engine & Process Lifecycle (\`detection.detector\`)**:
+  - Detected PID recycling via process \`create_time()\` tracking, resetting telemetry, zone, trial, and timer states on rapid restarts.
+  - Normalized \`tower_trial\` payload tokens from list to tuple \`(stage, trial)\` for consistent mapping against \`ENDLESS_TOWER_TRIALS\`.
+- **Save Reader File Filtering (\`detection.save_reader\`)**:
+  - Filtered non-regular candidate paths using \`stat.S_ISREG\` to eliminate stat race conditions and prevent scanning invalid directories.
+- **Discord RPC & Updater Lifecycle (\`integrations.discord_rpc\`, \`core.orchestrator\`, \`integrations.updater\`)**:
+  - Reset \`last_retry_time\` to 0.0 upon connection drop to permit an immediate reconnection attempt before exponential backoff.
+  - Added \`join()\` to \`UpdaterProtocol\` and \`AppUpdater\` ensuring clean shutdown synchronization within the application timeout deadline.
+
+### CI & Tooling
+- **Workflow & Tooling Hardening (\`.github/workflows/release.yml\`, \`tools/\`)**:
+  - Replaced ad-hoc string parsing in \`release.yml\` with Python standard library \`tomllib\` for robust dynamic version extraction.
+  - Added CI verification guaranteeing architecture SVG assets match constants in \`tools/generate_diagrams.py\`.
+  - Replaced direct \`sys.path\` mutations and unsafe assignment overrides with structured patch utilities in testing tools.
+
 ## [v2.3.3] - 2026-11-10
 
 ### Bug Fixes & Reliability
