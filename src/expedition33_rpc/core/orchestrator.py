@@ -53,6 +53,28 @@ class StartupProtocol(Protocol):
     def toggle_startup(self) -> bool: ...
 
 
+@runtime_checkable
+class UpdaterProtocol(Protocol):
+    """Protocol defining update checker lifecycle and status operations."""
+
+    state: UpdateState
+    available_update: UpdateInfo | None
+    error_message: str | None
+    _worker_thread: threading.Thread | None
+
+    def cancel(self) -> None: ...
+
+    def check_in_background(
+        self,
+        delay_seconds: float = ...,
+        on_complete: Callable[[UpdateInfo | None], None] | None = ...,
+    ) -> None: ...
+
+    def open_release_page(self) -> bool: ...
+
+    def get_status_text(self) -> str: ...
+
+
 class AppOrchestrator:
     """Headless controller coordinating telemetry detection, Discord RPC, auto-updates, and settings."""
 
@@ -63,7 +85,7 @@ class AppOrchestrator:
         self,
         detector: GameDetector | None = None,
         rpc_manager: DiscordRPCManager | None = None,
-        updater: AppUpdater | None = None,
+        updater: UpdaterProtocol | None = None,
         settings_service: SettingsService | None = None,
         bridge_installer: BridgeInstallerProtocol | None = None,
         startup_service: StartupProtocol | None = None,
@@ -82,7 +104,7 @@ class AppOrchestrator:
             detector if detector is not None else GameDetector(save_reader=SaveFileReader())
         )
         self.time_provider = time_provider if time_provider is not None else time.monotonic
-        self.updater = updater if updater is not None else AppUpdater()
+        self.updater: UpdaterProtocol = updater if updater is not None else AppUpdater()
         self.bridge_installer: BridgeInstallerProtocol = (
             bridge_installer if bridge_installer is not None else bridge_installer_module
         )
@@ -353,6 +375,12 @@ class AppOrchestrator:
                 self._bridge_install_thread.join(timeout=max(0.0, deadline - time.monotonic()))
             self._bridge_install_thread = None
 
+        with contextlib.suppress(Exception):
+            self.updater.cancel()
+        updater_thread = getattr(self.updater, "_worker_thread", None)
+        if isinstance(updater_thread, threading.Thread) and updater_thread is not current:
+            updater_thread.join(timeout=max(0.0, deadline - time.monotonic()))
+
         self.rpc_manager.disconnect()
 
     def toggle_anti_spoiler(self) -> bool:
@@ -435,4 +463,4 @@ class AppOrchestrator:
         }
 
 
-__all__ = ["AppOrchestrator", "BridgeInstallerProtocol", "StartupProtocol"]
+__all__ = ["AppOrchestrator", "BridgeInstallerProtocol", "StartupProtocol", "UpdaterProtocol"]

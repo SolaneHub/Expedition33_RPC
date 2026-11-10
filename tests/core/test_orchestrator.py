@@ -18,6 +18,7 @@ from expedition33_rpc.core.orchestrator import (
     AppOrchestrator,
     BridgeInstallerProtocol,
     StartupProtocol,
+    UpdaterProtocol,
 )
 from expedition33_rpc.core.settings import SettingsService
 from expedition33_rpc.detection.detector import BridgeStateProvider, GameDetector, GameState
@@ -1558,3 +1559,64 @@ def test_orchestrator_subscriber_exception_does_not_break_other_subscribers_or_d
     state = orchestrator.step_update()
     assert state is not None
     assert received == ["healthy_sub", "direct_slot"]
+
+
+@pytest.mark.unit
+def test_orchestrator_stop_cancels_updater_and_joins_worker_thread() -> None:
+    """Verifies that orchestrator.stop() deterministically cancels updater and joins worker thread."""
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+
+    class FakeUpdater(UpdaterProtocol):
+        def __init__(self) -> None:
+            self.state = UpdateState.IDLE
+            self.available_update: UpdateInfo | None = None
+            self.error_message: str | None = None
+            self.cancel_called = False
+            self._worker_thread: threading.Thread | None = None
+
+        def cancel(self) -> None:
+            self.cancel_called = True
+            release_worker.set()
+
+        def check_in_background(
+            self,
+            delay_seconds: float = 0.0,
+            on_complete: Callable[[UpdateInfo | None], None] | None = None,
+        ) -> None:
+            del delay_seconds, on_complete
+
+            def _run() -> None:
+                worker_started.set()
+                release_worker.wait(timeout=2.0)
+
+            t = threading.Thread(target=_run, name="FakeUpdaterWorker", daemon=True)
+            self._worker_thread = t
+            t.start()
+
+        def open_release_page(self) -> bool:
+            return True
+
+        def get_status_text(self) -> str:
+            return "Fake Updater Status"
+
+    fake_updater = FakeUpdater()
+    fake_updater.check_in_background()
+    assert worker_started.wait(timeout=1.0) is True
+
+    orchestrator = AppOrchestrator(
+        detector=MagicMock(spec=GameDetector),
+        rpc_manager=MagicMock(spec=DiscordRPCManager),
+        updater=fake_updater,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+    assert fake_updater._worker_thread is not None
+    assert fake_updater._worker_thread.is_alive() is True
+
+    # Call stop() on orchestrator
+    orchestrator.stop()
+
+    assert fake_updater.cancel_called is True
+    # The worker thread must have been joined cleanly
+    assert fake_updater._worker_thread.is_alive() is False
