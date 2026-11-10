@@ -244,53 +244,45 @@ def read_file_shared_text(path: str | Path) -> str:
     """
     path_str = str(path)
     if sys.platform == "win32" and _kernel32 is not None and _msvcrt is not None:
-        raw: bytes | None = None
+        handle = _kernel32.CreateFileW(
+            path_str,
+            _GENERIC_READ,
+            _FILE_SHARE_READ | _FILE_SHARE_WRITE | _FILE_SHARE_DELETE,
+            None,
+            _OPEN_EXISTING,
+            _FILE_ATTRIBUTE_NORMAL,
+            None,
+        )
+        if handle in (_INVALID_HANDLE_VALUE, None, 0, -1, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
+            err = ctypes.get_last_error()
+            # ERROR_FILE_NOT_FOUND = 2, ERROR_PATH_NOT_FOUND = 3
+            if err in (2, 3):
+                raise FileNotFoundError(path_str)
+            raise OSError(None, ctypes.FormatError(err), path_str, err)
         try:
-            handle = _kernel32.CreateFileW(
-                path_str,
-                _GENERIC_READ,
-                _FILE_SHARE_READ | _FILE_SHARE_WRITE | _FILE_SHARE_DELETE,
-                None,
-                _OPEN_EXISTING,
-                _FILE_ATTRIBUTE_NORMAL,
-                None,
-            )
-            if handle in (_INVALID_HANDLE_VALUE, None, 0, -1, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
-                err = ctypes.get_last_error()
-                # ERROR_FILE_NOT_FOUND = 2, ERROR_PATH_NOT_FOUND = 3
-                if err in (2, 3):
-                    raise FileNotFoundError(path_str)
-                raise OSError(None, ctypes.FormatError(err), path_str, err)
-            try:
-                fd = _msvcrt.open_osfhandle(handle, os.O_RDONLY)
-            except Exception:
-                _kernel32.CloseHandle(handle)
-                raise
-
-            try:
-                chunk = os.read(fd, 65536)
-                if len(chunk) < 65536:
-                    raw = chunk
-                else:
-                    chunks = [chunk]
-                    while True:
-                        more = os.read(fd, 65536)
-                        if not more:
-                            break
-                        chunks.append(more)
-                        if len(more) < 65536:
-                            break
-                    raw = b"".join(chunks)
-            finally:
-                os.close(fd)
-        except FileNotFoundError:
-            raise
+            fd = _msvcrt.open_osfhandle(handle, os.O_RDONLY)
         except Exception:
-            # Fall back to standard read if custom Win32 handle creation fails with unexpected errors
-            pass
+            _kernel32.CloseHandle(handle)
+            raise
 
-        if raw is not None:
-            return raw.decode("utf-8")
+        try:
+            chunk = os.read(fd, 65536)
+            if len(chunk) < 65536:
+                raw = chunk
+            else:
+                chunks = [chunk]
+                while True:
+                    more = os.read(fd, 65536)
+                    if not more:
+                        break
+                    chunks.append(more)
+                    if len(more) < 65536:
+                        break
+                raw = b"".join(chunks)
+        finally:
+            os.close(fd)
+
+        return raw.decode("utf-8")
 
     with open(path_str, "rb") as f:
         return f.read().decode("utf-8")
