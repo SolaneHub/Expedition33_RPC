@@ -60,9 +60,10 @@ class UpdaterProtocol(Protocol):
     state: UpdateState
     available_update: UpdateInfo | None
     error_message: str | None
-    _worker_thread: threading.Thread | None
 
     def cancel(self) -> None: ...
+
+    def join(self, timeout: float | None = None) -> None: ...
 
     def check_in_background(
         self,
@@ -377,9 +378,13 @@ class AppOrchestrator:
 
         with contextlib.suppress(Exception):
             self.updater.cancel()
-        updater_thread = getattr(self.updater, "_worker_thread", None)
-        if isinstance(updater_thread, threading.Thread) and updater_thread is not current:
-            updater_thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        if hasattr(self.updater, "join"):
+            with contextlib.suppress(Exception):
+                self.updater.join(timeout=max(0.0, deadline - time.monotonic()))
+        else:
+            updater_thread = getattr(self.updater, "_worker_thread", None)
+            if isinstance(updater_thread, threading.Thread) and updater_thread is not current:
+                updater_thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
         self.rpc_manager.disconnect()
 

@@ -496,7 +496,7 @@ def test_area6_flapping_resilience_and_leak_freedom(tmp_path: Path) -> None:
             # 2. Reconnect with fresh transport
             new_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
             ipc_client._transport = new_pipe
-            rpc_manager.last_retry_time = 0.0  # Bypass 5s cooldown for stress test
+            rpc_manager.disconnect()
             rpc_manager.invalidate()
 
             state_reconnected = orchestrator.step_update()

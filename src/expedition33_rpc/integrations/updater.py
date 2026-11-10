@@ -153,6 +153,13 @@ class AppUpdater:
         """Signals waiting threads to cancel pending update checks."""
         self._cancel_event.set()
 
+    def join(self, timeout: float | None = None) -> None:
+        """Waits for the background update thread to finish, if running."""
+        t = self._worker_thread
+        current = threading.current_thread()
+        if t is not None and t.is_alive() and t is not current:
+            t.join(timeout=timeout)
+
     def check_in_background(
         self,
         delay_seconds: float = 0.0,

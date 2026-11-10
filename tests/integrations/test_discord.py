@@ -512,7 +512,7 @@ def test_discord_rpc_manager_exponential_backoff_and_reset(monkeypatch: pytest.M
     assert manager._retry_failures == 3
     assert manager.last_retry_time == 116.0
 
-    # 4. Success resets failures
+    # 4. Success resets failures and last_retry_time
     mock_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
     success_client = DiscordIPCClient(client_id="success", transport=mock_pipe)
     manager._client = success_client
@@ -520,11 +520,28 @@ def test_discord_rpc_manager_exponential_backoff_and_reset(monkeypatch: pytest.M
     simulated_now = 150.0
     assert manager.connect() is True
     assert manager._retry_failures == 0
+    assert manager.last_retry_time == 0.0
 
-    # 5. Disconnect resets failures
+    # 5. Unexpected connection drop allows immediate reconnection attempt at next tick before backoff
+    success_client.is_connected = False
+    simulated_now = 151.0  # Only 1.0s elapsed after last connection, but retry_failures is 0
+    # Simulate a failing reconnection on this immediate attempt
+    manager._client = client
+    manager._rpc = client
+    assert manager.connect() is False
+    assert manager._retry_failures == 1
+    assert manager.last_retry_time == 151.0
+
+    # Next attempt 1s later is throttled because retry_failures == 1
+    simulated_now = 152.0
+    assert manager.connect() is False
+    assert manager._retry_failures == 1
+
+    # 6. Disconnect resets failures and last_retry_time
     manager._retry_failures = 5
     manager.disconnect()
     assert manager._retry_failures == 0
+    assert manager.last_retry_time == 0.0
 
 
 @pytest.mark.unit

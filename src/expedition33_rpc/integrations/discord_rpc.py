@@ -343,13 +343,12 @@ class DiscordRPCManager:
             return True
 
         now = time.monotonic()
-        if self.last_retry_time != 0.0:
+        if self._retry_failures > 0 and self.last_retry_time != 0.0:
             delay = min(30.0, self.base_retry_interval * (2 ** max(0, self._retry_failures - 1)))
             if self._retry_failures > 1:
                 delay += random.uniform(0.0, 0.5)
             if now - self.last_retry_time < delay:
                 return False
-        self.last_retry_time = now
 
         try:
             if self._rpc is None:
@@ -360,14 +359,17 @@ class DiscordRPCManager:
             connected = bool(getattr(self._rpc, "is_connected", True) if res is None else res)
             if connected:
                 self._retry_failures = 0
+                self.last_retry_time = 0.0
                 logger.info("Connected to Discord IPC (Client ID: %s)", self.client_id)
             else:
                 self._retry_failures += 1
+                self.last_retry_time = now
                 if self._client is None:
                     self._rpc = None
             return connected
         except Exception:
             self._retry_failures += 1
+            self.last_retry_time = now
             if self._client is None:
                 self._rpc = None
             return False

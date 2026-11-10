@@ -1579,6 +1579,10 @@ def test_orchestrator_stop_cancels_updater_and_joins_worker_thread() -> None:
             self.cancel_called = True
             release_worker.set()
 
+        def join(self, timeout: float | None = None) -> None:
+            if self._worker_thread is not None:
+                self._worker_thread.join(timeout=timeout)
+
         def check_in_background(
             self,
             delay_seconds: float = 0.0,
