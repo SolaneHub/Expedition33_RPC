@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.3.3] - 2026-11-10
+
+### Bug Fixes & Reliability
+- **Win32 Platform Error Handling (`core.platform`)**:
+  - Propagated explicit `FileNotFoundError` and `OSError` in `read_file_shared_text()` on Win32 handle creation errors, removing silent exception fallback to standard `open()`.
+- **Detection Engine & Startup Lifecycle (`detection.detector`)**:
+  - Fast-failed file reads on `FileNotFoundError` in `BridgeStateProvider` to avoid unnecessary retry backoff delays when bridge file is absent.
+  - Preserved `is_starting` across multiple telemetry-less ticks without corrupting `last_raw_zone` or `timer_tracker.current_zone_id` with `"Starting"`.
+  - Resolved canonical boss names in Endless Tower using `tower_trial` payload tokens mapped to `ENDLESS_TOWER_TRIALS`.
+  - Ensured process scan timing strictly tracks monotonic clock, avoiding contamination from epoch timestamps.
+- **Save Reader Dynamic Cache (`detection.save_reader`)**:
+  - Cached candidate save paths while dynamically evaluating individual file `st_mtime`, detecting in-place `.sav` overwrites even when directory `st_mtime` remains unchanged.
+- **Discord RPC Reconnection Backoff (`integrations.discord_rpc`)**:
+  - Reset `last_retry_time` to 0.0 upon explicit `disconnect()` and `reconnect()` to permit immediate reconnect attempts without hitting failure backoff.
+- **UI Tray File Descriptor Safety (`ui.tray_app`)**:
+  - Wrapped icon image loading in a context manager to guarantee proper file handle cleanup on Win32.
+
+### Architecture & Refactoring
+- **Updater Protocol Decoupling (`core.orchestrator`)**:
+  - Introduced `UpdaterProtocol` structural interface to decouple update checking logic from `AppOrchestrator`.
+  - Enhanced `AppOrchestrator.stop()` with deterministic updater cancellation and worker thread join bounded by a monotonic shutdown deadline budget.
+
+### CI & Tooling
+- **VirusTotal Scanner Polling (`.github/scripts/virustotal_scan.py`)**:
+  - Added `min_interval` property to `RateLimiter` and enforced a minimum 5.0s wait in `poll_analysis` to prevent tight polling loops.
+- **Dynamic Tag Resolution (`.github/workflows/release.yml`)**:
+  - Replaced hardcoded fallback release tag strings with dynamic extraction from `pyproject.toml` and `__init__.py`.
+
 ## [v2.3.2] - 2026-11-08
 
 ### Bug Fixes & Reliability
