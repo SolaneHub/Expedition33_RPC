@@ -33,6 +33,15 @@ class RateLimiter:
         self.interval = 60.0 / requests_per_minute if requests_per_minute > 0 else 0.0
         self.last_request_time = 0.0
 
+    @property
+    def min_interval(self) -> float:
+        """Returns the configured minimum interval in seconds between requests."""
+        return self.interval
+
+    @min_interval.setter
+    def min_interval(self, value: float) -> None:
+        self.interval = value
+
     def wait(self) -> None:
         if self.interval <= 0:
             return
@@ -236,6 +245,19 @@ def poll_analysis(
                 ratio_str = f"{clean}/{total} Clean" if total > 0 else "Clean"
                 return True, stats, ratio_str
             print(f"[VirusTotal] Status: {analysis_status}... waiting next cycle.")
+        else:
+            print(f"[VirusTotal] Polling check failed (HTTP {status})... waiting next cycle.")
+
+        if time.time() - start >= timeout:
+            break
+
+        raw_interval = getattr(rate_limiter, "min_interval", None)
+        if raw_interval is None or not isinstance(raw_interval, (int, float)):
+            raw_interval = getattr(rate_limiter, "interval", 0.0)
+        limiter_interval = float(raw_interval) if isinstance(raw_interval, (int, float)) else 0.0
+        wait_seconds = max(5.0, limiter_interval)
+        time.sleep(wait_seconds)
+
     return False, None, None
 
 

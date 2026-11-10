@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release tag (e.g. v2.3.2)"
+        description: "Release tag (e.g. vX.Y.Z)"
         required: false
         default: ""
 
@@ -98,26 +98,52 @@ jobs:
         run: |
           import os
           import re
+          import sys
+          from pathlib import Path
+
           input_tag = os.environ.get("INPUT_TAG_NAME", "").strip()
           ref_name = os.environ.get("REF_NAME", "").strip()
           ref_type = os.environ.get("REF_TYPE", "").strip()
           candidate = input_tag if input_tag else (ref_name if ref_type == "tag" else "")
-          if not candidate:
-              # Fallback: estrai la versione corrente da pyproject.toml
-              tag = ""
-              try:
-                  with open("pyproject.toml", "r", encoding="utf-8") as f:
-                      for line in f:
-                          if line.strip().startswith("version ="):
-                              ver = line.split("=")[1].strip().strip('"').strip("'")
-                              tag = f"v{ver}"
-                              break
-              except Exception:
-                  pass
+
+          tag = candidate
+          if not tag:
+              # Dynamically resolve version from pyproject.toml
+              pyproject_path = Path("pyproject.toml")
+              if pyproject_path.exists():
+                  try:
+                      with open(pyproject_path, "r", encoding="utf-8") as f:
+                          for line in f:
+                              line_clean = line.strip()
+                              if line_clean.startswith("version =") or line_clean.startswith("version="):
+                                  ver = line_clean.split("=", 1)[1].strip().strip('"').strip("'")
+                                  if ver:
+                                      tag = f"v{ver}" if not ver.startswith("v") else ver
+                                      break
+                  except Exception as e:
+                      print(f"[Warning] Failed reading pyproject.toml: {e}")
+
+              # Secondary fallback: src/expedition33_rpc/__init__.py
               if not tag:
-                  tag = "v2.3.2"
-          else:
-              tag = candidate
+                  init_path = Path("src/expedition33_rpc/__init__.py")
+                  if init_path.exists():
+                      try:
+                          with open(init_path, "r", encoding="utf-8") as f:
+                              for line in f:
+                                  line_clean = line.strip()
+                                  if line_clean.startswith("__version__"):
+                                      ver = line_clean.split("=", 1)[1].strip().strip('"').strip("'")
+                                      if ver:
+                                          tag = f"v{ver}" if not ver.startswith("v") else ver
+                                          break
+                      except Exception as e:
+                          print(f"[Warning] Failed reading src/expedition33_rpc/__init__.py: {e}")
+
+          if not tag:
+              sys.exit(
+                  "Error: Unable to resolve release version. Neither input tag/ref, pyproject.toml, "
+                  "nor src/expedition33_rpc/__init__.py provided a valid version string."
+              )
 
           clean_num = tag.lstrip("v")
 
@@ -174,8 +200,8 @@ jobs:
             dist/virustotal_report.json
             src/expedition33_rpc/assets/bridge.zip
           body_path: RELEASE_NOTES.md
-          tag_name: ${{ steps.extract_changelog.outputs.version || 'v2.3.2' }}
-          name: ${{ steps.extract_changelog.outputs.version || 'v2.3.2' }}
+          tag_name: ${{ steps.extract_changelog.outputs.version }}
+          name: ${{ steps.extract_changelog.outputs.version }}
           draft: false
           prerelease: false
         env:
