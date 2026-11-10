@@ -5,6 +5,7 @@ from __future__ import annotations
 import mmap
 import os
 import re
+import stat
 from pathlib import Path
 
 from expedition33_rpc.detection.compat_paths import resolve_user_data_path
@@ -141,22 +142,20 @@ class SaveFileReader:
             if not candidates:
                 return None, None
 
-            def _mtime(p: Path) -> float:
+            valid_candidates: list[tuple[float, os.stat_result, Path]] = []
+            for p in candidates:
                 try:
-                    return p.stat().st_mtime
+                    st = p.stat()
+                    if stat.S_ISREG(st.st_mode):
+                        valid_candidates.append((st.st_mtime, st, p))
                 except OSError:
-                    return 0.0
+                    continue
 
-            latest = max(candidates, key=_mtime)
-            sav_path = str(latest)
-
-            try:
-                st = latest.stat()
-            except OSError:
+            if not valid_candidates:
                 return None, None
 
-            if not os.path.isfile(sav_path):
-                return None, None
+            _latest_mtime, st, latest_path = max(valid_candidates, key=lambda item: item[0])
+            sav_path = str(latest_path)
 
             cache_key = (st.st_mtime, st.st_size)
             if (

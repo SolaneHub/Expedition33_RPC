@@ -339,3 +339,41 @@ def test_save_reader_inplace_file_modification_detection(tmp_path: Path) -> None
         lvl2, tag2 = reader.read_checkpoint_from_save(str(profile_dir))
         assert lvl2 == "Level_Overwritten"
         assert tag2 == "Level.SpawnPoint.Overwritten.Tag"
+
+
+@pytest.mark.unit
+def test_save_reader_filters_non_regular_files_and_empty_candidates(tmp_path: Path) -> None:
+    profile_dir = tmp_path / "12345"
+    profile_dir.mkdir(parents=True)
+
+    reader = SaveFileReader(base_save_dir=tmp_path)
+
+    # Empty candidate list
+    lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
+    assert lvl is None
+    assert tag is None
+
+    # Subdirectory matching candidate pattern EXPEDITION_*.sav
+    sub_dir = profile_dir / "EXPEDITION_directory.sav"
+    sub_dir.mkdir()
+
+    lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
+    assert lvl is None
+    assert tag is None
+
+    # Now add a regular valid .sav file
+    regular_sav = profile_dir / "EXPEDITION_1.sav"
+    payload = (
+        b"\x00" * 20
+        + b"LastUsedSavePoint\x00\x0f\x00\x00\x00StructProperty\x00\x02\x00\x00\x00"
+        + b"LevelAssetName\x00\r\x00\x00\x00NameProperty\x00\x00\x00\x00\x00Level_Valid\x00"
+        + b"SpawnPointTag\x00Level.SpawnPoint.Valid.Tag\x00"
+        + b"\x00" * 20
+    )
+    regular_sav.write_bytes(payload)
+
+    # Reset cache to pick up new glob
+    reader.reset()
+    lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
+    assert lvl == "Level_Valid"
+    assert tag == "Level.SpawnPoint.Valid.Tag"
