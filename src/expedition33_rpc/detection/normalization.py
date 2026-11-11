@@ -102,7 +102,7 @@ def strip_accents(text: str) -> str:
 
 
 @functools.lru_cache(maxsize=1)
-def _get_main_menu_displays() -> frozenset[str]:
+def get_main_menu_displays() -> frozenset[str]:
     return frozenset(
         table["mainmenu"].lower().strip()
         for table in game_data.ZONE_NAME_OVERRIDES_BY_LANG.values()
@@ -123,7 +123,7 @@ def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
         return True
     if "bootstrap" in raw_lower:
         return True
-    return display_lower in _get_main_menu_displays()
+    return display_lower in get_main_menu_displays()
 
 
 def resolve_menu_substate(
@@ -490,15 +490,16 @@ def format_checkpoint_tag(
 
 __all__ = [
     "MenuSubstate",
+    "format_checkpoint_tag",
+    "format_enemy_name",
+    "format_zone_name",
     "get_checkpoint_hash_map",
-    "normalize_language_code",
-    "strip_accents",
+    "get_main_menu_displays",
+    "is_continent_zone",
     "is_main_menu",
     "is_menu_zone",
+    "normalize_language_code",
     "resolve_menu_substate",
-    "is_continent_zone",
-    "format_enemy_name",
     "resolve_tower_trial",
-    "format_zone_name",
-    "format_checkpoint_tag",
+    "strip_accents",
 ]

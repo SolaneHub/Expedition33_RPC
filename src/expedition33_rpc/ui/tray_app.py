@@ -153,7 +153,7 @@ class ExpeditionTrayApp:
         self._safe_update_menu()
 
     def action_select_game_folder(self, *_):
-        folder = self._prompt_folder_selection()
+        folder = self.prompt_folder_selection()
         if folder:
             success, msg = self.orchestrator.install_bridge_to(folder)
             if self.icon is not None:
@@ -166,7 +166,7 @@ class ExpeditionTrayApp:
                     )
             self._safe_update_menu()
 
-    def _prompt_folder_selection(self) -> str | None:
+    def prompt_folder_selection(self) -> str | None:
         return prompt_folder_selection()
 
     def menu_startup_toggle(self, *_) -> str:

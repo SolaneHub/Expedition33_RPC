@@ -74,18 +74,17 @@ def test_settings_service_update(tmp_path: Path) -> None:
     custom_path = tmp_path / "update_settings.json"
     service = SettingsService(custom_path=custom_path)
 
-    assert service.update(anti_spoiler=True, theme="dark") is True
+    assert service.update(anti_spoiler=True) is True
     assert service.anti_spoiler is True
 
     data = json.loads(custom_path.read_text(encoding="utf-8"))
     assert data["anti_spoiler"] is True
-    assert data["theme"] == "dark"
 
-    # Sequential update to an already existing custom key must persist
-    assert service.update(theme="light") is True
+    # Sequential update must persist
+    assert service.update(anti_spoiler=False) is True
     data_updated = json.loads(custom_path.read_text(encoding="utf-8"))
-    assert data_updated["theme"] == "light"
-    assert data_updated["anti_spoiler"] is True
+    assert data_updated["anti_spoiler"] is False
+    assert service.anti_spoiler is False
 
 
 @pytest.mark.unit
@@ -138,7 +137,7 @@ def test_settings_service_concurrent_updates(tmp_path: Path) -> None:
     service = SettingsService(custom_path=custom_path)
 
     def worker(i: int) -> bool:
-        return service.update(anti_spoiler=(i % 2 == 0), **{f"key_{i}": i})
+        return service.update(anti_spoiler=(i % 2 == 0))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         results = list(executor.map(worker, range(20)))
@@ -146,8 +145,7 @@ def test_settings_service_concurrent_updates(tmp_path: Path) -> None:
     assert all(results)
     assert custom_path.is_file()
     data = json.loads(custom_path.read_text(encoding="utf-8"))
-    for i in range(20):
-        assert data[f"key_{i}"] == i
+    assert "anti_spoiler" in data
 
 
 @pytest.mark.unit

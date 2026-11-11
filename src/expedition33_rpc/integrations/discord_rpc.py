@@ -102,6 +102,14 @@ class DiscordIPCClient:
         self.is_connected: bool = False
         self._lock = threading.RLock()
 
+    @property
+    def transport(self) -> IPCTransport | None:
+        return self._transport
+
+    @transport.setter
+    def transport(self, transport: IPCTransport | None) -> None:
+        self._transport = transport
+
     def _candidate_pipe_paths(self) -> list[str]:
         if self.custom_pipe_path:
             return [self.custom_pipe_path]
@@ -231,6 +239,10 @@ class DiscordIPCClient:
             self._pipe = None
             self.is_connected = False
 
+    def read_frame(self) -> tuple[int, dict[str, Any]]:
+        """Receives and decodes the next Discord IPC frame."""
+        return self._recv()
+
     def set_activity(
         self,
         pid: int,
@@ -321,6 +333,27 @@ class DiscordRPCManager:
         self.base_retry_interval: float = 5.0
         self.is_stopping: Callable[[], bool] | None = is_stopping
         self._last_target_pid: int | None = None
+
+    @property
+    def retry_failures(self) -> int:
+        return self._retry_failures
+
+    @retry_failures.setter
+    def retry_failures(self, value: int) -> None:
+        self._retry_failures = value
+
+    @property
+    def last_target_pid(self) -> int | None:
+        return self._last_target_pid
+
+    @property
+    def client(self) -> DiscordIPCClient | None:
+        return self._client
+
+    @client.setter
+    def client(self, client: DiscordIPCClient | None) -> None:
+        self._client = client
+        self._rpc = client
 
     @property
     def rpc(self) -> DiscordIPCClient | None:

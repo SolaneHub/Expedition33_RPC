@@ -531,8 +531,8 @@ def test_target_process_names_and_main_menu_tokens_ssot(monkeypatch: pytest.Monk
     monkeypatch.setattr(game_data, "get_game_data", lambda: empty_data)
     fallback_procs = game_data.get_target_process_names()
     fallback_tokens = game_data.get_main_menu_tokens()
-    assert fallback_procs == game_data._DEFAULT_TARGET_PROCESS_NAMES
-    assert fallback_tokens == frozenset(game_data._DEFAULT_MAIN_MENU_TOKENS)
+    assert fallback_procs == game_data.DEFAULT_TARGET_PROCESS_NAMES
+    assert fallback_tokens == frozenset(game_data.DEFAULT_MAIN_MENU_TOKENS)
 
 
 def test_lazy_loading_does_not_read_disk_until_attribute_access() -> None:
@@ -540,9 +540,9 @@ def test_lazy_loading_does_not_read_disk_until_attribute_access() -> None:
     from expedition33_rpc.detection import game_data, normalization
 
     game_data.get_game_data.cache_clear()
-    normalization._get_main_menu_displays.cache_clear()
+    normalization.get_main_menu_displays.cache_clear()
 
-    displays = normalization._get_main_menu_displays()
+    displays = normalization.get_main_menu_displays()
     assert isinstance(displays, frozenset)
     assert len(displays) > 0
     assert "main menu" in displays

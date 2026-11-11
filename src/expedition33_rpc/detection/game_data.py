@@ -42,7 +42,7 @@ def get_game_data() -> dict[str, Any]:
     return _load_game_data()
 
 
-_DEFAULT_MAIN_MENU_TOKENS: list[str] = [
+DEFAULT_MAIN_MENU_TOKENS: list[str] = [
     "bootstrap",
     "gamebootstrap",
     "level_mainmenu",
@@ -84,7 +84,7 @@ _DEFAULT_MAIN_MENU_TOKENS: list[str] = [
     "wbp_splashscreens_logos_c",
 ]
 
-_DEFAULT_TARGET_PROCESS_NAMES: tuple[str, ...] = (
+DEFAULT_TARGET_PROCESS_NAMES: tuple[str, ...] = (
     "sandfall-win64-shipping.exe",
     "sandfall-wingdk-shipping.exe",
 )
@@ -98,7 +98,7 @@ def get_target_process_names() -> tuple[str, ...]:
         names = tuple(str(p).strip().lower() for p in custom if str(p).strip())
         if names:
             return names
-    return _DEFAULT_TARGET_PROCESS_NAMES
+    return DEFAULT_TARGET_PROCESS_NAMES
 
 
 def get_main_menu_tokens() -> frozenset[str]:
@@ -109,7 +109,7 @@ def get_main_menu_tokens() -> frozenset[str]:
         tokens = frozenset(str(tok).strip().lower() for tok in custom if str(tok).strip())
         if tokens:
             return tokens
-    return frozenset(_DEFAULT_MAIN_MENU_TOKENS)
+    return frozenset(DEFAULT_MAIN_MENU_TOKENS)
 
 
 ALL_SUPPORTED_LANGUAGES: tuple[str, ...] = (
@@ -147,7 +147,7 @@ def _build_endless_tower_trials(raw_trials: list[Any]) -> list[TrialDefinition]:
     ]
 
 
-_LAZY_ATTRIBUTES = frozenset(
+LAZY_ATTRIBUTES = frozenset(
     {
         "TARGET_PROCESS_NAMES",
         "MAIN_MENU_TOKENS",
@@ -163,7 +163,7 @@ _LAZY_ATTRIBUTES = frozenset(
 
 def __getattr__(name: str) -> Any:
     """Lazily loads heavy localized game data catalogs only upon access."""
-    if name not in _LAZY_ATTRIBUTES:
+    if name not in LAZY_ATTRIBUTES:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     match name:
         case "TARGET_PROCESS_NAMES":
@@ -198,7 +198,10 @@ __all__ = [
     "ALL_SUPPORTED_LANGUAGES",
     "CONTEXTUAL_CHECKPOINTS",
     "CHECKPOINT_NAMES_BY_LANG",
+    "DEFAULT_MAIN_MENU_TOKENS",
+    "DEFAULT_TARGET_PROCESS_NAMES",
     "ENDLESS_TOWER_TRIALS",
+    "LAZY_ATTRIBUTES",
     "LOCALIZED_PRESENTATION",
     "MAIN_MENU_TOKENS",
     "TARGET_PROCESS_NAMES",

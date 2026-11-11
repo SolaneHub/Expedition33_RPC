@@ -226,7 +226,7 @@ def test_discord_rpc_manager_loopback_lifecycle_and_backoff() -> None:
         fail_client = DiscordIPCClient(client_id="fail_manager", custom_pipe_path=bogus_path)
         mgr_fail = DiscordRPCManager(client=fail_client)
         assert mgr_fail.connect() is False
-        assert mgr_fail._retry_failures == 1
+        assert mgr_fail.retry_failures == 1
 
         # Second immediate connect is throttled by backoff
         assert mgr_fail.connect() is False
@@ -484,63 +484,61 @@ def test_discord_rpc_manager_exponential_backoff_and_reset(monkeypatch: pytest.M
 
     client = FailingClient(client_id="backoff_test")
     manager = DiscordRPCManager(client=client)
-    assert manager._retry_failures == 0
+    assert manager.retry_failures == 0
 
     # 1. First attempt: proceeds immediately because last_retry_time == 0.0
     assert manager.connect() is False
     assert manager.last_retry_time == 100.0
-    assert manager._retry_failures == 1
+    assert manager.retry_failures == 1
 
     # 2. Second attempt immediately afterwards: throttled by 5.0s (failures=1 => 5 * 2^0 = 5.0s, no jitter)
     simulated_now = 102.0
     assert manager.connect() is False
-    assert manager._retry_failures == 1  # Throttled, did not execute connect()
+    assert manager.retry_failures == 1  # Throttled, did not execute connect()
 
     # Advance clock to 105.0s (5.0s elapsed)
     simulated_now = 105.0
     assert manager.connect() is False
-    assert manager._retry_failures == 2
+    assert manager.retry_failures == 2
     assert manager.last_retry_time == 105.0
 
     # 3. Third attempt: interval is 5 * 2^1 = 10.0s (+ jitter [0, 0.5])
     simulated_now = 110.0
     assert manager.connect() is False  # Throttled because < 10.0s elapsed
-    assert manager._retry_failures == 2
+    assert manager.retry_failures == 2
 
     simulated_now = 116.0  # > 10.5s elapsed
     assert manager.connect() is False
-    assert manager._retry_failures == 3
+    assert manager.retry_failures == 3
     assert manager.last_retry_time == 116.0
 
     # 4. Success resets failures and last_retry_time
     mock_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
     success_client = DiscordIPCClient(client_id="success", transport=mock_pipe)
-    manager._client = success_client
-    manager._rpc = success_client
+    manager.client = success_client
     simulated_now = 150.0
     assert manager.connect() is True
-    assert manager._retry_failures == 0
+    assert manager.retry_failures == 0
     assert manager.last_retry_time == 0.0
 
     # 5. Unexpected connection drop allows immediate reconnection attempt at next tick before backoff
     success_client.is_connected = False
     simulated_now = 151.0  # Only 1.0s elapsed after last connection, but retry_failures is 0
     # Simulate a failing reconnection on this immediate attempt
-    manager._client = client
-    manager._rpc = client
+    manager.client = client
     assert manager.connect() is False
-    assert manager._retry_failures == 1
+    assert manager.retry_failures == 1
     assert manager.last_retry_time == 151.0
 
     # Next attempt 1s later is throttled because retry_failures == 1
     simulated_now = 152.0
     assert manager.connect() is False
-    assert manager._retry_failures == 1
+    assert manager.retry_failures == 1
 
     # 6. Disconnect resets failures and last_retry_time
-    manager._retry_failures = 5
+    manager.retry_failures = 5
     manager.disconnect()
-    assert manager._retry_failures == 0
+    assert manager.retry_failures == 0
     assert manager.last_retry_time == 0.0
 
 
@@ -600,7 +598,7 @@ def test_discord_ipc_client_handles_op_ping_with_automatic_op_pong() -> None:
     ping_payload_2 = {"nonce": "ping_2", "timestamp": 123456}
     mock_pipe.queue_response(ping_payload_2, op=OP_PING)
     mock_pipe.queue_response({"cmd": "DISPATCH", "evt": "TEST"}, op=OP_FRAME)
-    op, resp = client._recv()
+    op, resp = client.read_frame()
     assert op == OP_FRAME
     assert resp == {"cmd": "DISPATCH", "evt": "TEST"}
     frames_after = mock_pipe.drain_all_frames()
@@ -620,15 +618,14 @@ def test_discord_ipc_client_handles_op_close_clean_closure_and_error() -> None:
     assert client.is_connected is True
     mock_pipe.drain_all_frames()
 
-    # 1. Direct _recv() handling of OP_CLOSE
+    # 1. Direct read_frame() handling of OP_CLOSE
     close_payload = {"code": 4000, "message": "Connection closed by Discord"}
     mock_pipe.queue_response(close_payload, op=OP_CLOSE)
 
     with pytest.raises(ConnectionError, match="Discord closed IPC connection"):
-        client._recv()
+        client.read_frame()
 
     assert client.is_connected is False
-    assert client._pipe is None
     assert mock_pipe.is_closed is True
 
     # 2. set_activity() handling when OP_CLOSE is received
@@ -652,7 +649,7 @@ def test_discord_rpc_manager_disconnect_uses_last_target_pid() -> None:
     client = DiscordIPCClient(client_id="pid_test_client", transport=mock_pipe)
     manager = DiscordRPCManager(client=client)
 
-    assert manager._last_target_pid is None
+    assert manager.last_target_pid is None
     assert manager.connect() is True
 
     payload = PresencePayload(
@@ -664,7 +661,7 @@ def test_discord_rpc_manager_disconnect_uses_last_target_pid() -> None:
     # 1. When update_presence is called with a specific game PID
     effective_game_pid = 77123
     manager.update_presence(payload, pid=effective_game_pid)
-    assert manager._last_target_pid == effective_game_pid
+    assert manager.last_target_pid == effective_game_pid
 
     # Drain outgoing SET_ACTIVITY frames
     mock_pipe.drain_all_frames()

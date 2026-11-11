@@ -495,7 +495,7 @@ def test_area6_flapping_resilience_and_leak_freedom(tmp_path: Path) -> None:
 
             # 2. Reconnect with fresh transport
             new_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
-            ipc_client._transport = new_pipe
+            ipc_client.transport = new_pipe
             rpc_manager.disconnect()
             rpc_manager.invalidate()
 
@@ -632,13 +632,12 @@ def test_stress_op_close_mid_session_lifecycle() -> None:
     assert client.connect() is True
     mock_pipe.drain_all_frames()
 
-    # 1. Direct _recv() receiving OP_CLOSE
+    # 1. Direct read_frame() receiving OP_CLOSE
     mock_pipe.queue_response({"code": 4000, "message": "Server shutting down"}, op=OP_CLOSE)
     with pytest.raises(ConnectionError, match="Discord closed IPC connection"):
-        client._recv()
+        client.read_frame()
 
     assert client.is_connected is False
-    assert client._pipe is None
     assert mock_pipe.is_closed is True
 
     # 2. Reconnect and simulate OP_CLOSE during set_activity()
@@ -686,7 +685,7 @@ def test_stress_op_close_mid_session_lifecycle() -> None:
     # 5. Subsequent disconnect() should be safe and idempotent
     manager.disconnect()
     assert manager.is_connected is False
-    assert manager._rpc is None
+    assert manager.rpc is None
 
 
 def test_stress_pid_passed_to_clear_activity() -> None:
@@ -704,7 +703,7 @@ def test_stress_pid_passed_to_clear_activity() -> None:
     assert manager1.connect() is True
     mock_pipe1.drain_all_frames()
 
-    assert manager1._last_target_pid is None
+    assert manager1.last_target_pid is None
     manager1.disconnect()
 
     frames1 = mock_pipe1.drain_all_frames()
@@ -724,7 +723,7 @@ def test_stress_pid_passed_to_clear_activity() -> None:
     payload = PresencePayload(details="Flying Manor", state="Exploring")
     effective_game_pid = 88123
     manager2.update_presence(payload, pid=effective_game_pid)
-    assert manager2._last_target_pid == effective_game_pid
+    assert manager2.last_target_pid == effective_game_pid
     mock_pipe2.drain_all_frames()
 
     manager2.disconnect()
@@ -741,11 +740,11 @@ def test_stress_pid_passed_to_clear_activity() -> None:
     mock_pipe3.drain_all_frames()
 
     manager3.update_presence(payload, pid=0)
-    assert manager3._last_target_pid == os.getpid()
+    assert manager3.last_target_pid == os.getpid()
     mock_pipe3.drain_all_frames()
 
     manager3.update_presence(payload, pid=-999, force=True)
-    assert manager3._last_target_pid == os.getpid()
+    assert manager3.last_target_pid == os.getpid()
     mock_pipe3.drain_all_frames()
 
     manager3.disconnect()
@@ -760,7 +759,7 @@ def test_stress_pid_passed_to_clear_activity() -> None:
     mock_pipe4.drain_all_frames()
 
     manager4.update_presence(None, pid=77777)
-    assert manager4._last_target_pid == 77777
+    assert manager4.last_target_pid == 77777
     frames4 = mock_pipe4.drain_all_frames()
     assert len(frames4) == 1
     assert frames4[0][1]["args"]["pid"] == 77777

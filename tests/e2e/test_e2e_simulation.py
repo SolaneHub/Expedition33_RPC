@@ -684,7 +684,7 @@ def test_dry_run_full_lifecycle_with_binary_wire_frame_verification(
 
         # Reconnect with fresh pipe simulator
         new_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
-        ipc_client._transport = new_pipe
+        ipc_client.transport = new_pipe
         rpc_manager.disconnect()
         rpc_manager.invalidate()
 

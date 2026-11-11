@@ -100,16 +100,11 @@ class SettingsService:
                             tmp_path.unlink()
                 return False
 
-    def update(self, anti_spoiler: bool | None = None, **kwargs: Any) -> bool:
+    def update(self, anti_spoiler: bool | None = None) -> bool:
         """Updates settings and persists changes to disk."""
         with self._lock:
             if anti_spoiler is not None:
                 self.settings.anti_spoiler = anti_spoiler
-            for k, v in kwargs.items():
-                if hasattr(self.settings, k):
-                    setattr(self.settings, k, v)
-                else:
-                    self._raw_data[k] = v
             return self.save()
 
     def is_anti_spoiler_enabled(self) -> bool:

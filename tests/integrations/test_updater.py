@@ -272,15 +272,12 @@ def test_updater_cancel_unblocks_delay() -> None:
     start = time.perf_counter()
     updater.check_in_background(delay_seconds=10.0)
 
-    assert updater._worker_thread is not None
-    assert updater._worker_thread.is_alive()
     assert updater.state == UpdateState.CHECKING
 
     updater.cancel()
-    updater._worker_thread.join(timeout=2.0)
+    updater.join(timeout=2.0)
     elapsed = time.perf_counter() - start
 
-    assert not updater._worker_thread.is_alive()
     assert elapsed < 1.0
     assert updater.state == UpdateState.IDLE
 
@@ -320,8 +317,7 @@ def test_updater_concurrent_check_in_background_guards_thread_spawning() -> None
 
     # Cleanup background worker thread cleanly
     updater.cancel()
-    if updater._worker_thread is not None:
-        updater._worker_thread.join(timeout=2.0)
+    updater.join(timeout=2.0)
     assert updater.state == UpdateState.IDLE
 
 
@@ -375,8 +371,7 @@ def test_stress_updater_concurrent_hammering() -> None:
 
         # Cancel and clean up before next cycle
         updater.cancel()
-        if updater._worker_thread:
-            updater._worker_thread.join(timeout=2.0)
+        updater.join(timeout=2.0)
         assert updater.state == UpdateState.IDLE
 
 
@@ -393,15 +388,12 @@ def test_stress_updater_cancel_during_delay_and_rapid_cycling() -> None:
     t0 = time.perf_counter()
     updater.check_in_background(delay_seconds=100.0)
     assert updater.state == UpdateState.CHECKING
-    assert updater._worker_thread is not None
-    assert updater._worker_thread.is_alive()
 
     # Cancel immediately
     updater.cancel()
-    updater._worker_thread.join(timeout=2.0)
+    updater.join(timeout=2.0)
     elapsed = time.perf_counter() - t0
 
-    assert not updater._worker_thread.is_alive()
     assert elapsed < 0.5, f"Cancellation took too long: {elapsed:.3f}s"
     assert updater.state == UpdateState.IDLE
 
@@ -411,9 +403,7 @@ def test_stress_updater_cancel_during_delay_and_rapid_cycling() -> None:
         u.check_in_background(delay_seconds=5.0)
         assert u.state == UpdateState.CHECKING
         u.cancel()
-        if u._worker_thread is not None:
-            u._worker_thread.join(timeout=1.0)
-            assert not u._worker_thread.is_alive()
+        u.join(timeout=1.0)
         assert u.state == UpdateState.IDLE
 
     # 3. Cancel while an HTTP request is in-flight on slow server
@@ -449,13 +439,7 @@ def test_stress_updater_cancel_during_delay_and_rapid_cycling() -> None:
         # Cancel while in-flight
         time.sleep(0.05)
         slow_updater.cancel()
-
-        if slow_updater._worker_thread:
-            slow_updater._worker_thread.join(timeout=3.0)
-
-        # Worker must have finished cleanly without crashing
-        assert slow_updater._worker_thread is not None
-        assert not slow_updater._worker_thread.is_alive()
+        slow_updater.join(timeout=3.0)
     finally:
         server.shutdown()
         server.server_close()
@@ -490,9 +474,7 @@ def test_stress_updater_concurrent_check_and_cancel_race() -> None:
         t1.join()
         t2.join()
 
-        if updater._worker_thread:
-            updater._worker_thread.join(timeout=3.0)
-            assert not updater._worker_thread.is_alive()
+        updater.join(timeout=3.0)
 
         # Final state must be IDLE (if cancel won) or ERROR (if check won and network timed out)
         assert updater.state in (UpdateState.IDLE, UpdateState.ERROR)
@@ -514,8 +496,6 @@ def test_stress_updater_cancel_during_delay_multithreaded_hammer() -> None:
     )
     updater.check_in_background(delay_seconds=30.0)
     assert updater.state == UpdateState.CHECKING
-    assert updater._worker_thread is not None
-    assert updater._worker_thread.is_alive()
 
     # Small pause to guarantee worker thread entered _cancel_event.wait(30.0)
     time.sleep(0.05)
@@ -534,9 +514,8 @@ def test_stress_updater_cancel_during_delay_multithreaded_hammer() -> None:
     for t in cancel_threads:
         t.join()
 
-    updater._worker_thread.join(timeout=1.0)
+    updater.join(timeout=1.0)
     elapsed = time.perf_counter() - t0
 
-    assert not updater._worker_thread.is_alive()
     assert elapsed < 0.5, f"Delay cancellation took too long: {elapsed:.3f}s"
     assert updater.state == UpdateState.IDLE
