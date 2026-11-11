@@ -232,20 +232,16 @@ class BridgeStateProvider:
         for p in self.paths:
             if not os.path.exists(p):
                 continue
-            for attempt in range(6):
+            for _attempt in range(6):
                 try:
                     content = _read_file_shared_text(p).strip()
                     if content:
                         data = json.loads(content)
                         if isinstance(data, dict):
                             return data
-                    elif attempt < 5:
-                        time.sleep(0.001 * (attempt + 1))
                 except FileNotFoundError:
                     break
                 except (PermissionError, json.JSONDecodeError, UnicodeDecodeError, OSError):
-                    if attempt < 5:
-                        time.sleep(0.001 * (attempt + 1))
                     continue
                 except Exception:
                     break

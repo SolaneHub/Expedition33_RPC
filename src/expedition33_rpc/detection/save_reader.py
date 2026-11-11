@@ -29,32 +29,32 @@ SEMANTIC_ZONE_ALIASES: list[SemanticAlias] = [
     },
     {
         "cp_tokens": frozenset({"esquie", "francois"}),
-        "zone_tokens": frozenset({"esquie", "nest", "nido"}),
+        "zone_tokens": frozenset({"esquie", "nest"}),
     },
     {
         "cp_tokens": frozenset({"chromazone", "chroma"}),
-        "zone_tokens": frozenset({"sunless", "senza sole", "chroma"}),
+        "zone_tokens": frozenset({"sunless", "chroma"}),
     },
     {
         "cp_tokens": frozenset({"yellowforest", "yellow"}),
-        "zone_tokens": frozenset({"yellow", "giallo", "harvest"}),
+        "zone_tokens": frozenset({"yellow", "harvest"}),
     },
     {
         "cp_tokens": frozenset({"reacher"}),
-        "zone_tokens": frozenset({"reacher", "scalatore"}),
+        "zone_tokens": frozenset({"reacher"}),
     },
     {
         "cp_tokens": frozenset({"seacliff"}),
-        "zone_tokens": frozenset({"stone wave", "onda di pietra", "seacliff"}),
+        "zone_tokens": frozenset({"stone wave", "stonewave", "seacliff"}),
     },
     {
         "cp_tokens": frozenset({"goblu"}),
-        "zone_tokens": frozenset({"goblu", "flying waters", "acque volanti"}),
+        "zone_tokens": frozenset({"goblu", "flying waters", "flyingwaters"}),
     },
 ]
 
 SAVE_READER_IGNORED_ZONE_WORDS: frozenset[str] = frozenset(
-    {"the", "il", "la", "inside", "peak", "main", "zone", "camp", "area"}
+    {"the", "inside", "peak", "main", "zone", "camp", "area"}
 )
 
 SAVE_READER_IGNORED_CP_WORDS: frozenset[str] = frozenset(

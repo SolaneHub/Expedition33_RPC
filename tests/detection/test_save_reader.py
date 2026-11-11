@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -140,10 +141,10 @@ def test_save_reader_semantic_aliases_all() -> None:
         )
         is True
     )
-    # 5. Reacher / Scalatore
+    # 5. Reacher
     assert (
         reader.is_checkpoint_for_zone(
-            "Level_Reacher", "Level.SpawnPoint.Reacher", "Level_Reacher", "Scalatore"
+            "Level_Reacher", "Level.SpawnPoint.Reacher", "Level_Reacher", "The Reacher"
         )
         is True
     )
@@ -190,18 +191,12 @@ def test_save_reader_corrupt_or_partial_binary_save(tmp_path: Path) -> None:
     assert lvl == "Level_Short"
     assert tag == "Level.SpawnPoint.Short.Tag"
 
-    # 3. Cache hit: verify cached result is returned without re-parsing
-    sav_str = str(sav_file)
-    assert sav_str in reader._checkpoint_cache
-    cached_entry = reader._checkpoint_cache[sav_str]
-    reader._checkpoint_cache[sav_str] = (
-        cached_entry[0],
-        cached_entry[1],
-        ("CachedLevel", "CachedTag"),
-    )
-    lvl_cached, tag_cached = reader.read_checkpoint_from_save(str(profile_dir))
-    assert lvl_cached == "CachedLevel"
-    assert tag_cached == "CachedTag"
+    # 3. Cache hit: verify cached result is returned without re-reading from disk
+    with patch("builtins.open") as mock_open:
+        lvl_cached, tag_cached = reader.read_checkpoint_from_save(str(profile_dir))
+        assert lvl_cached == "Level_Short"
+        assert tag_cached == "Level.SpawnPoint.Short.Tag"
+        mock_open.assert_not_called()
 
 
 @pytest.mark.unit
@@ -224,7 +219,6 @@ def test_save_reader_mtime_caching_and_reset(tmp_path: Path) -> None:
     # 1. First lookup caches latest dir
     latest_dir = reader.get_latest_save_dir()
     assert latest_dir == str(profile_dir)
-    assert reader._latest_dir_cache is not None
 
     # Patch iterdir to prove get_latest_save_dir does not scan directory when mtime is unchanged
     def _fail_iterdir(_self: Path) -> Any:
@@ -242,7 +236,6 @@ def test_save_reader_mtime_caching_and_reset(tmp_path: Path) -> None:
     lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
     assert lvl == "Level_Cached"
     assert tag == "Level.SpawnPoint.Cached.Tag"
-    assert str(profile_dir) in reader._dir_sav_cache
 
     # Patch glob to prove read_checkpoint_from_save does not glob when dir mtime is unchanged
     with pytest.MonkeyPatch.context() as mp:
@@ -270,15 +263,21 @@ def test_save_reader_mtime_caching_and_reset(tmp_path: Path) -> None:
     assert lvl_updated == "Level_Updated"
     assert tag_updated == "Level.SpawnPoint.Updated.Tag"
 
-    # 4. Verify reset() clears all cache structures
-    assert len(reader._checkpoint_cache) > 0
-    assert reader._latest_dir_cache is not None
-    assert len(reader._dir_sav_cache) > 0
-
+    # 4. Verify reset() clears all cached state so subsequent calls re-query the filesystem
     reader.reset()
-    assert len(reader._checkpoint_cache) == 0
-    assert reader._latest_dir_cache is None
-    assert len(reader._dir_sav_cache) == 0
+
+    # After reset, iterdir should be called again when get_latest_save_dir is called
+    iterdir_called = False
+    orig_iterdir = Path.iterdir
+
+    def _tracking_iterdir(self: Path):
+        nonlocal iterdir_called
+        iterdir_called = True
+        return orig_iterdir(self)
+
+    with patch.object(Path, "iterdir", _tracking_iterdir):
+        assert reader.get_latest_save_dir() == str(profile_dir)
+        assert iterdir_called is True
 
 
 @pytest.mark.unit

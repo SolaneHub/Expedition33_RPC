@@ -10,6 +10,7 @@ Empirically validates:
 from __future__ import annotations
 
 import builtins
+import contextlib
 import inspect
 import mmap
 import os
@@ -18,8 +19,11 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 from unittest.mock import MagicMock
+
+# Bootstrap sys.path to allow standalone execution without PYTHONPATH=.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tests.harness import FakeProcess
 
@@ -46,16 +50,29 @@ _ORIGINAL_OS_ISFILE = os.path.isfile
 _ORIGINAL_OS_ISDIR = os.path.isdir
 
 
+type FsViolation = dict[str, Any]
+
+
 def _apply_patch(target: Any, attr: str, val: Any) -> None:
     setattr(target, attr, val)
 
 
 class FilesystemActivityAudit:
-    """Hooks all low-level filesystem and mmap APIs to trace activity originating from save_reader.py."""
+    """Hooks all low-level filesystem and mmap APIs to trace activity originating from save_reader.py or on .sav files."""
 
     def __init__(self) -> None:
-        self.save_reader_fs_calls: list[dict[str, Any]] = []
+        self.save_reader_fs_calls: list[FsViolation] = []
+        self.sav_file_accesses: list[FsViolation] = []
+        self.violations: list[FsViolation] = []
+        self._sav_fds: set[int] = set()
         self._installed = False
+
+    def __enter__(self) -> Self:
+        self.start()
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.stop()
 
     def _is_from_save_reader(self) -> bool:
         # Check call stack for save_reader.py frame
@@ -72,9 +89,31 @@ class FilesystemActivityAudit:
             del frame
         return False
 
+    def _is_sav_target(self, *args: Any) -> bool:
+        for arg in args:
+            if isinstance(arg, int) and arg in self._sav_fds:
+                return True
+            if isinstance(arg, (str, bytes, os.PathLike)):
+                p = (
+                    os.fspath(arg)
+                    if not isinstance(arg, bytes)
+                    else arg.decode("latin1", "replace")
+                )
+                p_lower = p.lower()
+                if p_lower.endswith(".sav") or ".sav" in p_lower:
+                    return True
+        return False
+
     def _record(self, func_name: str, *args: Any) -> None:
-        if self._is_from_save_reader():
-            self.save_reader_fs_calls.append({"func": func_name, "args": args})
+        from_save_reader = self._is_from_save_reader()
+        is_sav = self._is_sav_target(*args)
+        if from_save_reader or is_sav:
+            entry: FsViolation = {"func": func_name, "args": args}
+            self.violations.append(entry)
+            if from_save_reader:
+                self.save_reader_fs_calls.append(entry)
+            if is_sav:
+                self.sav_file_accesses.append(entry)
 
     def start(self) -> None:
         if self._installed:
@@ -83,7 +122,11 @@ class FilesystemActivityAudit:
 
         def hooked_open(*args: Any, **kwargs: Any) -> Any:
             audit._record("open", *args)
-            return _ORIGINAL_OPEN(*args, **kwargs)
+            handle = _ORIGINAL_OPEN(*args, **kwargs)
+            if audit._is_sav_target(*args):
+                with contextlib.suppress(Exception):
+                    audit._sav_fds.add(handle.fileno())
+            return handle
 
         def hooked_mmap(*args: Any, **kwargs: Any) -> Any:
             audit._record("mmap", *args)
@@ -162,6 +205,9 @@ class FilesystemActivityAudit:
 
     def clear(self) -> None:
         self.save_reader_fs_calls.clear()
+        self.sav_file_accesses.clear()
+        self.violations.clear()
+        self._sav_fds.clear()
 
 
 def create_test_save_structure(base_dir: Path) -> tuple[Path, str]:
@@ -252,6 +298,7 @@ def run_fallback_test(audit: FilesystemActivityAudit, tmp_path: Path) -> None:
         process_scanner=lambda: [fake_proc],
         save_reader=real_save_reader,
     )
+    detector.has_received_telemetry = True
 
     # Scenario A: Telemetry is stale / None, zone is known from previous state
     detector.last_raw_zone = "Level_Side_VersosDraft"
@@ -301,6 +348,7 @@ def run_fallback_test(audit: FilesystemActivityAudit, tmp_path: Path) -> None:
         process_scanner=lambda: [fake_proc],
         save_reader=real_save_reader,
     )
+    detector_with_real_bridge.has_received_telemetry = True
     detector_with_real_bridge.last_raw_zone = "Level_Side_VersosDraft"
 
     audit.clear()
@@ -553,6 +601,7 @@ def run_corrupted_save_file_test(audit: FilesystemActivityAudit, tmp_path: Path)
         process_scanner=lambda: [fake_proc],
         save_reader=reader,
     )
+    detector.has_received_telemetry = True
     detector.last_raw_zone = "Level_Side_VersosDraft"
 
     audit.clear()

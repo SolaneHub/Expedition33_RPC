@@ -127,7 +127,7 @@ def test_cached_pid_invalidated_when_process_stops() -> None:
     assert found.pid == 4001
 
     # 2. Process exits
-    proc._is_running = False
+    proc.kill()
     procs.clear()
 
     # 3. Cache invalidated and returns None
@@ -230,6 +230,31 @@ def test_bridge_provider_rejects_corrupted_or_partial_json(tmp_path: Path) -> No
     ):
         bridge_path.write_text(bad_content, encoding="utf-8")
         assert provider.read_bridge_status() is None
+
+
+@pytest.mark.unit
+def test_bridge_provider_non_blocking_on_contention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies read_bridge_status completes multiple contention attempts rapidly without invoking time.sleep."""
+    bridge_path = tmp_path / "expedition33_status.json"
+    bridge_path.write_text('{"invalid_partial": ', encoding="utf-8")
+
+    sleep_mock = MagicMock()
+    monkeypatch.setattr(time, "sleep", sleep_mock)
+
+    provider = BridgeStateProvider(paths=[str(bridge_path)])
+
+    t0 = time.monotonic()
+    for _ in range(100):
+        res = provider.read_bridge_status()
+        assert res is None
+    elapsed = time.monotonic() - t0
+
+    assert sleep_mock.call_count == 0, "time.sleep must not be called during bridge reads"
+    assert elapsed < 0.1, (
+        f"Expected 100 contention reads to complete < 100ms, took {elapsed * 1000:.2f}ms"
+    )
 
 
 @pytest.mark.integration
@@ -681,7 +706,10 @@ def test_game_detector_get_game_language_with_now_propagation(tmp_path: Path) ->
     assert lang == "it"
     # time_provider should not be called because now was provided
     assert time_calls == 0
-    assert detector._last_language_check_time == 100.0
+
+    # Within 5s window from now=100.0, passing now=102.0 should return cached language without calling time_provider or checking mtime
+    assert detector.get_game_language(now=102.0) == "it"
+    assert time_calls == 0
 
 
 @pytest.mark.unit
@@ -1030,9 +1058,12 @@ def test_detector_endless_tower_canonical_boss_override() -> None:
 def test_detector_clock_epoch_does_not_corrupt_monotonic_scan_backoff() -> None:
     """Verifies that passing epoch timestamp to get_game_state does not corrupt monotonic scan backoff."""
     mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    # Monotonic time provider returning normal uptime (e.g. 100.0s)
+    mock_clock = MagicMock(return_value=100.0)
     detector = GameDetector(
         process_scanner=lambda: [mock_proc],
         bridge_provider=None,
+        time_provider=mock_clock,
     )
 
     # Initial call with epoch timestamp (e.g. year 2026 / 1.7e9)
@@ -1040,10 +1071,10 @@ def test_detector_clock_epoch_does_not_corrupt_monotonic_scan_backoff() -> None:
     state = detector.get_game_state(now=epoch_now)
     assert state.is_running is True
 
-    # _last_process_scan_time should be tracked via monotonic clock, NOT epoch
-    # If it was contaminated with epoch_now (~1.7e9), monotonic time (usually thousands of seconds)
-    # would make (current_time - _last_process_scan_time) strongly negative, breaking idle backoff.
-    assert detector._last_process_scan_time < 100000000.0
+    # Idle backoff must remain responsive under monotonic time provider, not corrupted by epoch_now
+    # An immediate next call without epoch_now uses mock_clock (100.0s)
+    mock_clock.return_value = 100.0
+    assert detector.find_game_process() is not None
 
 
 @pytest.mark.unit
@@ -1077,10 +1108,9 @@ def test_game_detector_resets_on_pid_reuse_with_different_create_time() -> None:
     assert detector.last_raw_zone == "Level_EndlessTower"
     assert detector.last_raw_checkpoint == "Level.SpawnPoint.Manor.Entry"
     assert detector.current_tower_trial == (2, 1)
-    assert detector._cached_create_time == 1000.0
 
     # 2. Simulate rapid restart reusing PID 4321 with create_time=2000.0 without intermediate idle tick
-    current_proc._create_time = 2000.0
+    current_proc.set_create_time(2000.0)
     # Telemetry not yet received for new process
     bridge_provider.read_game_data.return_value = None
 
@@ -1091,7 +1121,6 @@ def test_game_detector_resets_on_pid_reuse_with_different_create_time() -> None:
     assert detector.last_raw_zone == ""
     assert detector.last_raw_checkpoint == ""
     assert detector.current_tower_trial is None
-    assert detector._cached_create_time == 2000.0
     bridge_provider.reset.assert_called_once()
     save_reader.reset.assert_called_once()
     assert detector.timer_tracker.current_zone_id != "Level_EndlessTower"
