@@ -12,8 +12,8 @@ body:
     id: version
     attributes:
       label: Application Version
-      description: What version of Expedition33_RPC are you running? (e.g. v2.3.4)
-      placeholder: v2.3.4
+      description: What version of Expedition33_RPC are you running? (e.g. v2.3.5)
+      placeholder: v2.3.5
     validations:
       required: true
 

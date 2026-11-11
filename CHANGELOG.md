@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.3.5] - 2026-11-11
+
+### Performance & Ingestion Invariants
+- **Telemetry Ingestion Engine (`detection.detector`)**:
+  - Eliminated blocking `time.sleep` delays during contention retries in `BridgeStateProvider.read_bridge_status`, replacing them with immediate non-blocking attempts (up to 6 iterations) to protect the strict 2.0s polling cadence against jitter.
+- **Save Reader Dormancy & Invariant Enforcement (`detection.save_reader`, `tests.detection`)**:
+  - Enforced strict dormancy of `SaveFileReader` with zero disk I/O, zero `stat`, and zero `mmap` calls during active bridge telemetry (< 5.0s TTL).
+  - Standardized semantic alias tokens to canonical English identifiers (`stonewave`, `flyingwaters`) and pruned non-canonical localized stop-words.
+
+### Architecture & Refactoring
+- **Public API & Contract Encapsulation (`integrations.discord_rpc`, `detection.game_data`, `detection.normalization`, `ui.tray_app`)**:
+  - Encapsulated `DiscordIPCClient` and `DiscordRPCManager` properties (`transport`, `read_frame()`, `retry_failures`, `last_target_pid`, `client`), eliminating private attribute mutations in external consumers and test suites.
+  - Promoted lazy catalog constants (`DEFAULT_MAIN_MENU_TOKENS`, `DEFAULT_TARGET_PROCESS_NAMES`, `LAZY_ATTRIBUTES`) and `get_main_menu_displays()` to public exports.
+  - Promoted `prompt_folder_selection()` in `ExpeditionTrayApp` to a public method.
+- **Radical Feature Parsimony (`core.settings`)**:
+  - Pruned speculative `**kwargs` support from `SettingsService.update()`, strictly restricting configuration persistence to defined dataclass fields.
+
+### Test Harness & Tooling
+- **Unified Test Doubles (`tests.harness`)**:
+  - Consolidated scattered protocol doubles into `fake_services.py` (`FakeBridgeInstaller`, `FakeStartupService`, `FakeUpdater`), exposing them via `tests.harness`.
+  - Added `set_create_time()` to `FakeProcess` for deterministic PID recycling simulation.
+- **Documentation & SLA Alignment (`ARCHITECTURE.md`, `AGENTS.md`, `pyproject.toml`)**:
+  - Documented non-blocking ingestion and immediate retry semantics in `ARCHITECTURE.md`.
+  - Formalized pre-commit and gatekeeper execution SLAs (Tier 1 < 3s, Tier 2 < 8s, Tier 3 < 15s) in `AGENTS.md` and `pyproject.toml` test markers.
+
 ## [v2.3.4] - 2026-11-10
 
 ### Bug Fixes & Reliability
