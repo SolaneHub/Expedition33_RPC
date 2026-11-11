@@ -58,6 +58,9 @@ class FakeProcess:
     def create_time(self) -> float:
         return self._create_time
 
+    def set_create_time(self, val: float) -> None:
+        self._create_time = val
+
     def poll(self) -> int | None:
         if not self._is_running:
             self.returncode = self._target_returncode

@@ -3,6 +3,11 @@
 from tests.harness.discord_pipe import DiscordPipeSimulator
 from tests.harness.discord_transport_mock import MockDiscordServer
 from tests.harness.fake_process import FakeProcess
+from tests.harness.fake_services import (
+    FakeBridgeInstaller,
+    FakeStartupService,
+    FakeUpdater,
+)
 from tests.harness.game_session import (
     SCENARIOS,
     GameSessionSimulator,
@@ -14,7 +19,10 @@ from tests.harness.tray_harness import HeadlessTrayHarness
 __all__ = [
     "SCENARIOS",
     "DiscordPipeSimulator",
+    "FakeBridgeInstaller",
     "FakeProcess",
+    "FakeStartupService",
+    "FakeUpdater",
     "GameSessionSimulator",
     "HeadlessTrayHarness",
     "MockDiscordServer",
