@@ -88,18 +88,22 @@ The application runtime maintains resilient execution across host process faults
    - Status JSON files carry a mandatory Unix epoch `timestamp`.
    - If `abs(current_time - telemetry.timestamp) > 5.0`, telemetry is marked stale.
    - When telemetry is stale or missing, the state machine drops active combat/boss status to prevent ghost presences and falls back to zone exploration or `.sav` checkpoint inspection.
-4. **Frame Dirty-Checking**:
+4. **Non-Blocking Ingestion & Immediate Retry Invariants**:
+   - File reads from the bridge IPC status file via `_read_file_shared_text` execute with non-blocking Win32 `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE` (flags `0x7`).
+   - During temporary file locks, race conditions, or partial writes by the Lua mod, retry iterations in `BridgeStateProvider` proceed immediately across up to 6 non-blocking attempts without blocking sleep delays (`time.sleep` is strictly forbidden in the ingestion hot loop).
+   - If telemetry remains unreadable or empty after non-blocking attempts, ingestion yields cleanly to the orchestrator tick, preserving the strict 2.0s polling cadence without jitter.
+5. **Frame Dirty-Checking**:
    - Presence payloads are hashed/compared against the previous broadcast frame. Identical states are not re-sent, preventing pipe saturations and Discord rate-limit throttling.
-5. **Startup & Telemetry Liveness (`has_received_telemetry` & `is_starting`)**:
+6. **Startup & Telemetry Liveness (`has_received_telemetry` & `is_starting`)**:
    - Upon initial process detection, `has_received_telemetry` is initialized to `False`, and `is_starting` is set to `True` ("Starting... / Loading...").
    - The `is_starting` state is strictly reserved for initial launch before the first telemetry frame arrives; it remains `True` across empty reads until the first actual frame is ingested.
    - Once the first valid telemetry payload is ingested, `has_received_telemetry` locks `True` for the lifetime of that process PID.
    - Any transient telemetry stall, file read contention, or empty payload sets `is_starting = False` and falls back to zone exploration of the last known zone (`last_raw_zone`).
    - The state machine NEVER regresses to `is_starting = True` during transient stalls or empty frames while the game process is running. The starting state is cleared exclusively upon process termination (`cached_pid = None`).
-6. **Dynamic Checkpoint Synchronization**:
+7. **Dynamic Checkpoint Synchronization**:
    - When telemetry contains an empty checkpoint string, `SaveFileReader` inspects the active player save profile.
    - Fast-travel and save-point rests are detected in sub-millisecond time via $O(1)$ `st.st_mtime` file caching on `EXPEDITION_*.sav`, dynamically updating checkpoint labels across both intra-zone and inter-zone travel without polling overhead.
-7. **Deterministic Clock Decoupling (Monotonic vs. Epoch)**:
+8. **Deterministic Clock Decoupling (Monotonic vs. Epoch)**:
    - **Monotonic Clock (`time.monotonic()`)**: Exclusively governs internal engine timekeeping, intervals, retry loops, and backoff logic immune to system clock shifts, NTP synchronization, or leap seconds:
      * Telemetry polling intervals and adaptive idle backoff (`_stop_event.wait(timeout=...)`).
      * Process scanning backoff cadences (`GameDetector._last_process_scan_time`, `idle_poll_interval`).
@@ -111,7 +115,7 @@ The application runtime maintains resilient execution across host process faults
      * Telemetry heartbeat freshness SLA verification against mod emission timestamps (`abs(epoch_now - telemetry.timestamp) > 5.0`).
      * Zone exploration and combat start timestamps (`ZoneTimerTracker.update(..., now=current_epoch)`).
      * Discord Rich Presence wire frame payloads (`PresencePayload.start_timestamp` / `timestamps: {"start": ...}`) serialized into binary `<II` IPC packets.
-8. **Background Update Engine Decoupling (`UpdaterProtocol`)**:
+9. **Background Update Engine Decoupling (`UpdaterProtocol`)**:
    - The update checker subsystem is formally decoupled from the primary polling engine via `UpdaterProtocol`:
      * `AppOrchestrator` depends strictly on the `UpdaterProtocol` interface (`check_in_background`, `cancel`, `open_release_page`, `get_status_text`), rather than a concrete implementation.
      * Update checks run asynchronously in a dedicated background worker thread (`_worker_thread`), delayed by 3.0 seconds at startup to prioritize immediate game detection and presence publishing without network latency.
@@ -184,14 +188,24 @@ In development mode, points to `pythonw.exe` to suppress console allocation.
 
 ---
 
-## 5. Dry-Run Test Harness Design
+## 5. Dry-Run Test Harness & 3-Tier Testing Architecture
 
-The codebase decouples domain logic from OS system calls and external sockets through dedicated test doubles located in `tests/harness/` and `tests/`:
+The codebase decouples domain logic from OS system calls and external sockets through a unified test harness located in `tests/harness/`:
 
 - **`FakeProcess`**: Simulates process discovery, lifecycle state transitions, PID allocation, and abrupt crashes without launching external executables.
 - **`GameSessionSimulator`**: Injects synthetic telemetry payloads, manages game state lifecycle, and triggers edge-case timings (e.g. stale timestamps, corrupt JSON, missing keys).
 - **`DiscordPipeSimulator & MockDiscordServer`**: Act as loopback Discord Named Pipe servers in-memory, asserting opcode sequences, verifying `<II` packet parsing, and simulating pipe dropouts or invalid responses.
 - **`HeadlessTrayHarness`**: Simulates the system tray graphical lifecycle, menu callbacks, and state updates headless without an OS windowing server.
-- **`FakeUpdater` & `FakeBridgeInstaller`**: Protocol test doubles in `tests/core/test_orchestrator.py` simulating GitHub release checks, update flow, and UE4SS bridge deployments without disk or network operations.
+- **`FakeUpdater`, `FakeBridgeInstaller` & `FakeStartupService`**: Unified test doubles in `tests/harness/fake_services.py` simulating GitHub release checks, update flow, autostart registry, and UE4SS bridge deployments without disk or network operations.
+
+### The 3-Tier Test Pyramid
+
+To guarantee instantaneous developer iteration alongside absolute CI stability, test execution is structured into three deterministic tiers:
+
+| Tier | Marker | Scope & Constraints | SLA | Command |
+| :--- | :--- | :--- | :---: | :--- |
+| **Tier 1: Fast Track** | `unit` | Pure in-memory unit tests; no filesystem I/O, no time delays, zero system calls. | **< 3.0s** | `uv run pytest -m unit` |
+| **Tier 2: Integration** | `integration` | High-level orchestration, state transitions, process lifecycle, filesystem mock & IPC simulation. | **< 8.0s** | `uv run pytest -m integration` |
+| **Tier 3: Strict Gatekeeper** | *(full matrix)* | Full test suite across unit, integration, and CI schema/diagram validation. | **< 15.0s** | `uv run pytest` |
 
 This enables sub-second, 100% deterministic end-to-end integration test execution across macOS, Linux, and Windows in CI without requiring the game or Discord to be installed.

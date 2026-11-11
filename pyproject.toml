@@ -106,9 +106,9 @@ reportUnknownVariableType = false
 testpaths = ["tests"]
 pythonpath = [".", ".github/scripts"]
 markers = [
-    "unit: Fast in-memory unit tests",
-    "integration: Integration tests exercising filesystem or IPC",
-    "ci: CI release and tooling tests",
+    "unit: Fast in-memory unit tests (pure logic, no heavy simulation/IO, SLA < 3.0s)",
+    "integration: High-level orchestration, state transitions, lifecycle, filesystem and IPC simulation (SLA < 8.0s)",
+    "ci: Slow full matrix, CI release tooling and diagrams (SLA < 15.0s)",
 ]
 
 
