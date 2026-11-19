@@ -6,11 +6,22 @@ Imperative directives for LLMs and developers modifying this codebase. Zero ambi
 
 Always verify changes using [`uv`](https://github.com/astral-sh/uv). Never push unverified code.
 
-- **Fast Track (Pre-commit / Iteration - Tier 1 & 2)**:
-  `uv run ruff check && uv run pytest -m unit` (SLA < 3.0s)
-  `uv run pytest -m integration` (SLA < 8.0s)
+- **Fast Track (Universal Pre-commit Runner - Recommended)**:
+  `uv run python tools/pre_commit.py`
+  *(Runs `ruff check`, `ruff format --check`, and `pytest -m unit` with immediate fail-fast semantics across all OS and shell environments, SLA < 3.0s)*
+
+- **Fast Track (Direct Shell)**:
+  - *Bash / PowerShell 7+*:
+    `uv run ruff check && uv run pytest -m unit` (SLA < 3.0s)
+    `uv run pytest -m integration` (SLA < 8.0s)
+  - *Windows PowerShell 5.1 (Standard)*:
+    `uv run ruff check; if ($LASTEXITCODE -eq 0) { uv run pytest -m unit }`
+
 - **Full Matrix (Strict Gatekeeper - Tier 1, 2 & 3)**:
-  `uv run ruff check && uv run ruff format --check && uv run pyright && uv run pytest && npx prettier --check src/expedition33_rpc/assets/game_data.json` (SLA < 15.0s)
+  - *Bash / PowerShell 7+*:
+    `uv run ruff check && uv run ruff format --check && uv run pyright && uv run pytest && npx prettier --check src/expedition33_rpc/assets/game_data.json` (SLA < 15.0s)
+  - *Windows PowerShell 5.1 (Standard)*:
+    `uv run ruff check; if ($LASTEXITCODE -eq 0) { uv run ruff format --check }; if ($LASTEXITCODE -eq 0) { uv run pyright }; if ($LASTEXITCODE -eq 0) { uv run pytest }; if ($LASTEXITCODE -eq 0) { npx prettier --check src/expedition33_rpc/assets/game_data.json }`
 
 ## 2. Core Engineering Directives for AI Agents
 
