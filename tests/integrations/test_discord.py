@@ -295,7 +295,8 @@ def test_discord_rpc_manager_injected_client_retention() -> None:
     # Disconnect
     manager.disconnect()
     assert manager.is_connected is False
-    assert manager.rpc is None
+    assert manager.client is custom_client
+    assert manager.rpc is custom_client
 
     # Bypass backoff and reconnect
     manager.last_retry_time = 0.0

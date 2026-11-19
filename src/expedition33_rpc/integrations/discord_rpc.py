@@ -325,14 +325,20 @@ class DiscordRPCManager:
         is_stopping: Callable[[], bool] | None = None,
     ) -> None:
         self.client_id: str = EMBEDDED_CLIENT_ID
-        self._client: DiscordIPCClient | None = client
-        self._rpc: DiscordIPCClient | None = client
+        self._is_injected_client: bool = client is not None
+        self._client: DiscordIPCClient = (
+            client if client is not None else DiscordIPCClient(self.client_id)
+        )
         self.last_update_state: str | None = None
         self.last_retry_time: float = 0.0
         self._retry_failures: int = 0
         self.base_retry_interval: float = 5.0
         self.is_stopping: Callable[[], bool] | None = is_stopping
         self._last_target_pid: int | None = None
+
+    @property
+    def is_injected_client(self) -> bool:
+        return self._is_injected_client
 
     @property
     def retry_failures(self) -> int:
@@ -347,26 +353,29 @@ class DiscordRPCManager:
         return self._last_target_pid
 
     @property
-    def client(self) -> DiscordIPCClient | None:
+    def client(self) -> DiscordIPCClient:
         return self._client
 
     @client.setter
     def client(self, client: DiscordIPCClient | None) -> None:
-        self._client = client
-        self._rpc = client
+        if client is not None:
+            self._is_injected_client = True
+            self._client = client
+        else:
+            self._is_injected_client = False
+            self._client = DiscordIPCClient(self.client_id)
 
     @property
-    def rpc(self) -> DiscordIPCClient | None:
-        return self._rpc
+    def rpc(self) -> DiscordIPCClient:
+        return self._client
 
     @property
     def is_connected(self) -> bool:
-        return self._rpc is not None and self._rpc.is_connected
+        return self._client.is_connected
 
     @is_connected.setter
     def is_connected(self, value: bool) -> None:
-        if self._rpc is not None:
-            self._rpc.is_connected = value
+        self._client.is_connected = value
 
     def connect(self) -> bool:
         if self.is_stopping is not None and self.is_stopping():
@@ -384,12 +393,10 @@ class DiscordRPCManager:
                 return False
 
         try:
-            if self._rpc is None:
-                self._rpc = (
-                    self._client if self._client is not None else DiscordIPCClient(self.client_id)
-                )
-            res = self._rpc.connect()
-            connected = bool(getattr(self._rpc, "is_connected", True) if res is None else res)
+            if not self._is_injected_client and not self._client.is_connected:
+                self._client = DiscordIPCClient(self.client_id)
+            res = self._client.connect()
+            connected = bool(getattr(self._client, "is_connected", True) if res is None else res)
             if connected:
                 self._retry_failures = 0
                 self.last_retry_time = 0.0
@@ -397,24 +404,24 @@ class DiscordRPCManager:
             else:
                 self._retry_failures += 1
                 self.last_retry_time = now
-                if self._client is None:
-                    self._rpc = None
+                if not self._is_injected_client:
+                    self._client = DiscordIPCClient(self.client_id)
             return connected
         except Exception:
             self._retry_failures += 1
             self.last_retry_time = now
-            if self._client is None:
-                self._rpc = None
+            if not self._is_injected_client:
+                self._client = DiscordIPCClient(self.client_id)
             return False
 
     def disconnect(self) -> None:
         self._retry_failures = 0
         self.last_retry_time = 0.0
-        if self._rpc:
-            with contextlib.suppress(Exception):
-                self._rpc.clear_activity(pid=self._last_target_pid or os.getpid())
-                self._rpc.close()
-        self._rpc = None
+        with contextlib.suppress(Exception):
+            self._client.clear_activity(pid=self._last_target_pid or os.getpid())
+            self._client.close()
+        if not self._is_injected_client:
+            self._client = DiscordIPCClient(self.client_id)
 
     def reconnect(self) -> None:
         self.disconnect()
@@ -448,9 +455,9 @@ class DiscordRPCManager:
         target_pid = pid if (pid and pid > 0) else os.getpid()
 
         if payload is None:
-            if self.last_update_state != "idle" and self._rpc:
+            if self.last_update_state != "idle":
                 try:
-                    success = self._rpc.clear_activity(pid=target_pid)
+                    success = self._client.clear_activity(pid=target_pid)
                     if success:
                         self.last_update_state = "idle"
                         self._last_target_pid = target_pid
@@ -481,33 +488,31 @@ class DiscordRPCManager:
             self._last_target_pid = target_pid
             return True
 
-        if self._rpc:
-            try:
-                success = self._rpc.set_activity(
-                    pid=target_pid,
-                    state=state_text,
-                    details=details_text,
-                    start_timestamp=start_timestamp,
-                    large_image=large_image,
-                    large_text=large_text,
-                    small_image=payload.small_image,
-                    small_text=payload.small_text,
-                    party_id=payload.party_id,
-                    party_size=payload.party_size,
-                )
-                if success:
-                    self.last_update_state = fingerprint
-                    self._last_target_pid = target_pid
-                    logger.info("Status updated: %s - %s", details_text, state_text)
-                    return True
-                else:
-                    self.is_connected = False
-                    return False
-            except Exception as e:
-                logger.error("RPC update error: %s", e)
+        try:
+            success = self._client.set_activity(
+                pid=target_pid,
+                state=state_text,
+                details=details_text,
+                start_timestamp=start_timestamp,
+                large_image=large_image,
+                large_text=large_text,
+                small_image=payload.small_image,
+                small_text=payload.small_text,
+                party_id=payload.party_id,
+                party_size=payload.party_size,
+            )
+            if success:
+                self.last_update_state = fingerprint
+                self._last_target_pid = target_pid
+                logger.info("Status updated: %s - %s", details_text, state_text)
+                return True
+            else:
                 self.is_connected = False
                 return False
-        return False
+        except Exception as e:
+            logger.error("RPC update error: %s", e)
+            self.is_connected = False
+            return False
 
     def update(
         self,

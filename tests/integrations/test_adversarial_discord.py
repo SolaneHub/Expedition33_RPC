@@ -685,7 +685,7 @@ def test_stress_op_close_mid_session_lifecycle() -> None:
     # 5. Subsequent disconnect() should be safe and idempotent
     manager.disconnect()
     assert manager.is_connected is False
-    assert manager.rpc is None
+    assert manager.rpc is client4
 
 
 def test_stress_pid_passed_to_clear_activity() -> None:
