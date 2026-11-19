@@ -19,9 +19,9 @@ Always verify changes using [`uv`](https://github.com/astral-sh/uv). Never push 
 
 - **Full Matrix (Strict Gatekeeper - Tier 1, 2 & 3)**:
   - *Bash / PowerShell 7+*:
-    `uv run ruff check && uv run ruff format --check && uv run pyright && uv run pytest && npx prettier --check src/expedition33_rpc/assets/game_data.json` (SLA < 15.0s)
+    `uv run ruff check && uv run ruff format --check && uv run pyright && uv run pytest && npx --yes prettier --check src/expedition33_rpc/assets/game_data.json` (SLA < 15.0s)
   - *Windows PowerShell 5.1 (Standard)*:
-    `uv run ruff check; if ($LASTEXITCODE -eq 0) { uv run ruff format --check }; if ($LASTEXITCODE -eq 0) { uv run pyright }; if ($LASTEXITCODE -eq 0) { uv run pytest }; if ($LASTEXITCODE -eq 0) { npx prettier --check src/expedition33_rpc/assets/game_data.json }`
+    `uv run ruff check; if ($LASTEXITCODE -eq 0) { uv run ruff format --check }; if ($LASTEXITCODE -eq 0) { uv run pyright }; if ($LASTEXITCODE -eq 0) { uv run pytest }; if ($LASTEXITCODE -eq 0) { npx --yes prettier --check src/expedition33_rpc/assets/game_data.json }`
 
 ## 2. Core Engineering Directives for AI Agents
 
@@ -38,7 +38,7 @@ Always verify changes using [`uv`](https://github.com/astral-sh/uv). Never push 
    - *Bridge Installation*: Background daemon thread with strict cooldown and retry limits.
    - *Discord IPC*: Dirty-checking on outbound frames; never send identical presence payloads.
 3. **Dry-Run & Integration-First**: Test observable system behavior and interface contracts, not brittle private methods. Use the unified harness (`FakeProcess`, `GameSessionSimulator`, `DiscordPipeSimulator & MockDiscordServer`, `HeadlessTrayHarness`, `FakeUpdater`, `FakeBridgeInstaller`, and `FakeStartupService`) from `tests/harness/` for deterministic testing across all 3 tiers.
-4. **Hard Stop on Semi-Reversible Choices**: Never add dependencies to `pyproject.toml`, alter the external IPC status JSON schema, or mutate the Discord binary `<II` wire frame layout without explicit human approval.
+4. **Hard Stop on Semi-Reversible Choices**: Never add dependencies to `pyproject.toml`, alter the external IPC status JSON schema, or mutate the Discord binary `<II` wire frame layout without explicit human approval. Production runtime dependencies are strictly frozen and enforced via `tests/ci/test_frozen_dependencies.py`: `pystray>=0.19.5`, `pillow>=10.0.0`, and `psutil>=5.9.0` (with dev dependencies limited strictly to `pyinstaller>=6.0.0`, `ruff>=0.9.0`, `pyright>=1.1.0`, and `pytest>=8.0.0`).
 5. **Zero Suppressed Warnings**: 100% strict type safety under Pyright (`typeCheckingMode = "standard"`). Absolutely zero `type: ignore`, `# noqa`, or unjustified Ruff suppressions across the codebase.
 
 ## 3. Code Conventions

@@ -14,7 +14,7 @@ The application operates as a deterministic, unidirectional data pipeline:
 
 1. **Watcher & Ingestion**: Detects game process (`SandFall-Win64-Shipping.exe` / `SandFall-WinGDK-Shipping.exe`). Reads telemetry file written by the UE4SS Lua mod using non-blocking Win32 shared reads (`0x7`).
 2. **State Engine**: Validates freshness against a strict 5.0s TTL. Resolves raw map and flag tokens against immutable catalog mappings (`assets/game_data.json`), producing an immutable `GameState` snapshot.
-3. **Presentation**: Pure functional mapping from `GameState` to `PresencePayload` DTO according to active localization and anti-spoiler settings.
+3. **Presentation**: Pure functional mapping from `GameState` to `PresencePayload` DTO according to active localization and anti-spoiler settings (focused strictly on single-player expedition status without speculative multiplayer fields).
 4. **Discord IPC & UI**: Dispatches formatted payload to Discord's local named pipe via binary `<II` framing only when dirty. Updates system tray status asynchronously.
 
 ---
@@ -32,7 +32,7 @@ src/expedition33_rpc/
 │   ├── app.py                # Single-instance application bootstrap and clean shutdown
 │   ├── orchestrator.py       # Headless AppOrchestrator, UpdaterProtocol & lifecycle coordination
 │   ├── platform.py           # OS abstraction: Win32 mutex, flock, CreateFileW 0x7, winreg
-│   ├── presence.py           # Decoupled immutable PresencePayload DTO
+│   ├── presence.py           # Decoupled immutable PresencePayload DTO (pruned of speculative multiplayer attributes)
 │   ├── resources.py          # PyInstaller bundle (_MEIPASS) and development path resolution
 │   ├── settings.py           # Persistent JSON user preferences
 │   ├── smoke.py              # Startup validation and sanity verification
@@ -115,6 +115,9 @@ The application runtime maintains resilient execution across host process faults
      * Telemetry heartbeat freshness SLA verification against mod emission timestamps (`abs(epoch_now - telemetry.timestamp) > 5.0`).
      * Zone exploration and combat start timestamps (`ZoneTimerTracker.update(..., now=current_epoch)`).
      * Discord Rich Presence wire frame payloads (`PresencePayload.start_timestamp` / `timestamps: {"start": ...}`) serialized into binary `<II` IPC packets.
+   - **Automated AST Invariant Enforcement (`test_architectural_invariants.py`)**:
+     * Temporal clock decoupling is statically verified in CI via Python Abstract Syntax Tree analysis (`ast.parse`) across all modules.
+     * The AST check inspects expressions and keyword assignments to ensure that `time.monotonic()` is never assigned or forwarded to outbound Discord timestamp parameters (`start_timestamp`, `timestamps`, `start`), preventing runtime clock skew before frames hit the wire.
 9. **Background Update Engine Decoupling (`UpdaterProtocol`)**:
    - The update checker subsystem is formally decoupled from the primary polling engine via `UpdaterProtocol`:
      * `AppOrchestrator` depends strictly on the `UpdaterProtocol` interface (`check_in_background`, `cancel`, `open_release_page`, `get_status_text`), rather than a concrete implementation.
@@ -164,6 +167,7 @@ Discord Named Pipe (`\\.\pipe\discord-ipc-0`..`9` on Windows, UNIX socket on POS
 Header packing format: `struct.pack("<II", opcode, length)`.
 - Standard opcodes: `HANDSHAKE = 0`, `FRAME = 1`, `CLOSE = 2`, `PING = 3`, `PONG = 4`.
 - Field limits: Strings in `details`, `state`, and tooltips are bounded to **128 UTF-8 bytes**, safely sliced at code point boundaries by `truncate_presence_field`.
+- Radical Feature Parsimony (YAGNI): In accordance with single-player design constraints, `PresencePayload` and outbound activity frames strictly eliminate unneeded multiplayer attributes (such as speculative `party_id` and `party_size` parameters), maintaining a zero-overhead wire footprint focused purely on expedition location, encounter details, anti-spoiler shielding, and elapsed quest timestamps.
 
 ### 4.3. SSOT Static Catalog (`assets/game_data.json`)
 Central repository for all static entities and translations:
@@ -204,7 +208,7 @@ To guarantee instantaneous developer iteration alongside absolute CI stability, 
 
 | Tier | Marker | Scope & Constraints | SLA | Command |
 | :--- | :--- | :--- | :---: | :--- |
-| **Tier 1: Fast Track** | `unit` | Pure in-memory unit tests; no filesystem I/O, no time delays, zero system calls. | **< 3.0s** | `uv run pytest -m unit` |
+| **Tier 1: Fast Track** | `unit` | Pure in-memory unit tests; no filesystem I/O, no time delays, zero system calls. Enforces frozen dependencies (`test_frozen_dependencies.py`) and AST invariant decoupling (`test_architectural_invariants.py`). | **< 3.0s** | `uv run pytest -m unit` |
 | **Tier 2: Integration** | `integration` | High-level orchestration, state transitions, process lifecycle, filesystem mock & IPC simulation. | **< 8.0s** | `uv run pytest -m integration` |
 | **Tier 3: Strict Gatekeeper** | *(full matrix)* | Full test suite across unit, integration, and CI schema/diagram validation. | **< 15.0s** | `uv run pytest` |
 
