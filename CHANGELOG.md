@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.3.6] - 2026-11-19
+
+### Quality Assurance & Test Harness
+- **Fluent Binary Save Builder (`tests.harness`, `tests.detection`)**:
+  - Introduced `SaveFileBuilder` fluent harness for synthetic Unreal Engine 5 `.sav` binary assembly, supporting configurable padding, property structs, and deliberate corruption modes.
+  - Refactored `test_save_reader.py` across all test suites (regular, empty, truncated, and in-place modified save structures) to eliminate brittle hardcoded binary slices.
+- **Contract Hardening & Deterministic Syntax Validation (`tests.core`, `tests.integrations`)**:
+  - Added frozen contract assertions verifying exact Windows autostart registry keys (`RUN_KEY`, `APP_NAME`) and access flags.
+  - Hardened Lua bridge syntax tests with deterministic offline assertions covering ASCII purity, forbidden non-Lua operators, block balance verification, and atomic file replacement semantics.
+- **Platform SLA Calibration (`tests.detection`)**:
+  - Adjusted 1000-cycle save reader dormancy test execution threshold to 8.0s on Windows to accommodate OS thread scheduling variance without relaxing zero-I/O safety invariants.
+
+### Developer Experience & Tooling
+- **Cross-Platform Pre-Commit Gate (`tools/pre_commit.py`, `AGENTS.md`)**:
+  - Introduced universal `tools/pre_commit.py` runner executing Ruff linting, Ruff formatting checks, and unit tests with fail-fast semantics across all OS and shell environments.
+  - Updated developer directives and pre-commit SLA guidelines in `AGENTS.md`.
+
 ## [v2.3.5] - 2026-11-11
 
 ### Performance & Ingestion Invariants
