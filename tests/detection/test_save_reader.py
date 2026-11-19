@@ -3,6 +3,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.harness import SaveFileBuilder
 
 from expedition33_rpc.detection.detector import SaveReaderProtocol
 from expedition33_rpc.detection.save_reader import SaveFileReader
@@ -53,14 +54,9 @@ def test_save_reader_parses_real_binary_save(tmp_path: Path) -> None:
     profile_dir.mkdir(parents=True)
     sav_file = profile_dir / "EXPEDITION_0.sav"
 
-    payload = (
-        b"\x00" * 100
-        + b"LastUsedSavePoint\x00\x0f\x00\x00\x00StructProperty\x00\x02\x00\x00\x00"
-        + b"LevelAssetName\x00\r\x00\x00\x00NameProperty\x00\x00\x00\x00\x00Level_Side_VersosDraft\x00"
-        + b"SpawnPointTag\x00Level.SpawnPoint.VersosDraft.CandyLand\x00"
-        + b"\x00" * 100
-    )
-    sav_file.write_bytes(payload)
+    SaveFileBuilder().with_header(100).with_level("Level_Side_VersosDraft").with_savepoint(
+        "Level.SpawnPoint.VersosDraft.CandyLand"
+    ).with_trailer(100).write_to(sav_file)
 
     reader = SaveFileReader(base_save_dir=tmp_path)
     lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
@@ -76,7 +72,7 @@ def test_save_reader_empty_save_file(tmp_path: Path) -> None:
     profile_dir = tmp_path / "76561198097793146"
     profile_dir.mkdir(parents=True)
     empty_sav = profile_dir / "EXPEDITION_0.sav"
-    empty_sav.write_bytes(b"")
+    SaveFileBuilder().empty().write_to(empty_sav)
 
     reader = SaveFileReader(base_save_dir=tmp_path)
     lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
@@ -171,21 +167,16 @@ def test_save_reader_corrupt_or_partial_binary_save(tmp_path: Path) -> None:
     sav_file = profile_dir / "EXPEDITION_0.sav"
 
     # 1. Payload with no LastUsedSavePoint
-    sav_file.write_bytes(b"\x00" * 500)
+    SaveFileBuilder().without_savepoint().with_header(500).write_to(sav_file)
     reader = SaveFileReader(base_save_dir=tmp_path)
     lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
     assert lvl is None
     assert tag is None
 
     # 2. Payload with LastUsedSavePoint near the EOF (< 4096 bytes)
-    payload_near_eof = (
-        b"\x00" * 10
-        + b"LastUsedSavePoint\x00\x0f\x00\x00\x00StructProperty\x00\x02\x00\x00\x00"
-        + b"LevelAssetName\x00\r\x00\x00\x00NameProperty\x00\x00\x00\x00\x00Level_Short\x00"
-        + b"SpawnPointTag\x00Level.SpawnPoint.Short.Tag\x00"
-        + b"\x00" * 10
-    )
-    sav_file.write_bytes(payload_near_eof)
+    SaveFileBuilder().with_header(10).with_level("Level_Short").with_savepoint(
+        "Level.SpawnPoint.Short.Tag"
+    ).with_trailer(10).write_to(sav_file)
     reader.reset()
     lvl, tag = reader.read_checkpoint_from_save(str(profile_dir))
     assert lvl == "Level_Short"
@@ -205,14 +196,9 @@ def test_save_reader_mtime_caching_and_reset(tmp_path: Path) -> None:
     profile_dir.mkdir(parents=True)
     sav_file = profile_dir / "EXPEDITION_0.sav"
 
-    payload = (
-        b"\x00" * 20
-        + b"LastUsedSavePoint\x00\x0f\x00\x00\x00StructProperty\x00\x02\x00\x00\x00"
-        + b"LevelAssetName\x00\r\x00\x00\x00NameProperty\x00\x00\x00\x00\x00Level_Cached\x00"
-        + b"SpawnPointTag\x00Level.SpawnPoint.Cached.Tag\x00"
-        + b"\x00" * 20
-    )
-    sav_file.write_bytes(payload)
+    SaveFileBuilder().with_header(20).with_level("Level_Cached").with_savepoint(
+        "Level.SpawnPoint.Cached.Tag"
+    ).with_trailer(20).write_to(sav_file)
 
     reader = SaveFileReader(base_save_dir=tmp_path)
 
@@ -246,14 +232,9 @@ def test_save_reader_mtime_caching_and_reset(tmp_path: Path) -> None:
 
     # 3. Simulate dir mtime update (e.g. new save file created in profile_dir)
     sav_file2 = profile_dir / "EXPEDITION_1.sav"
-    payload2 = (
-        b"\x00" * 20
-        + b"LastUsedSavePoint\x00\x0f\x00\x00\x00StructProperty\x00\x02\x00\x00\x00"
-        + b"LevelAssetName\x00\r\x00\x00\x00NameProperty\x00\x00\x00\x00\x00Level_Updated\x00"
-        + b"SpawnPointTag\x00Level.SpawnPoint.Updated.Tag\x00"
-        + b"\x00" * 20
-    )
-    sav_file2.write_bytes(payload2)
+    SaveFileBuilder().with_header(20).with_level("Level_Updated").with_savepoint(
+        "Level.SpawnPoint.Updated.Tag"
+    ).with_trailer(20).write_to(sav_file2)
     # Ensure profile_dir mtime is updated
     import os
 
@@ -287,15 +268,15 @@ def test_save_reader_inplace_file_modification_detection(tmp_path: Path) -> None
     sav_file1 = profile_dir / "EXPEDITION_0.sav"
     sav_file2 = profile_dir / "EXPEDITION_1.sav"
 
-    payload1 = (
-        b"\x00" * 20
-        + b"LastUsedSavePoint\x00\x0f\x00\x00\x00StructProperty\x00\x02\x00\x00\x00"
-        + b"LevelAssetName\x00\r\x00\x00\x00NameProperty\x00\x00\x00\x00\x00Level_Initial\x00"
-        + b"SpawnPointTag\x00Level.SpawnPoint.Initial.Tag\x00"
-        + b"\x00" * 20
+    initial_builder = (
+        SaveFileBuilder()
+        .with_header(20)
+        .with_level("Level_Initial")
+        .with_savepoint("Level.SpawnPoint.Initial.Tag")
+        .with_trailer(20)
     )
-    sav_file1.write_bytes(payload1)
-    sav_file2.write_bytes(payload1)
+    initial_builder.write_to(sav_file1)
+    initial_builder.write_to(sav_file2)
 
     import os
     import time
@@ -315,14 +296,9 @@ def test_save_reader_inplace_file_modification_detection(tmp_path: Path) -> None
     assert tag == "Level.SpawnPoint.Initial.Tag"
 
     # Now simulate an in-place overwrite of sav_file1 with updated checkpoint
-    payload_new = (
-        b"\x00" * 20
-        + b"LastUsedSavePoint\x00\x0f\x00\x00\x00StructProperty\x00\x02\x00\x00\x00"
-        + b"LevelAssetName\x00\r\x00\x00\x00NameProperty\x00\x00\x00\x00\x00Level_Overwritten\x00"
-        + b"SpawnPointTag\x00Level.SpawnPoint.Overwritten.Tag\x00"
-        + b"\x00" * 20
-    )
-    sav_file1.write_bytes(payload_new)
+    SaveFileBuilder().with_header(20).with_level("Level_Overwritten").with_savepoint(
+        "Level.SpawnPoint.Overwritten.Tag"
+    ).with_trailer(20).write_to(sav_file1)
     new_t = base_t + 50.0
     os.utime(sav_file1, (new_t, new_t))
 

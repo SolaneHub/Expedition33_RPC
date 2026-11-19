@@ -14,6 +14,7 @@ from tests.harness.game_session import (
     StoryboardStep,
     create_telemetry_payload,
 )
+from tests.harness.save_builder import SaveFileBuilder
 from tests.harness.tray_harness import HeadlessTrayHarness
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "GameSessionSimulator",
     "HeadlessTrayHarness",
     "MockDiscordServer",
+    "SaveFileBuilder",
     "StoryboardStep",
     "create_telemetry_payload",
 ]
