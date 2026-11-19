@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.3.7] - 2026-11-19
+
+### Architecture & Refactoring
+- **Discord RPC Client Retention (`integrations.discord_rpc`, `tests.integrations`)**:
+  - Initialized `DiscordRPCManager._client` with default instance, tracked client injection via `is_injected_client`, eliminated redundant `_rpc` reference, and guaranteed retention of custom test doubles across disconnect and reconnection cycles.
+- **Provider Protocol & Tray Constructor Pruning (`detection.detector`, `ui.tray_app`, `tests`)**:
+  - Pruned speculative `*args: Any, **kwargs: Any` and unused parameter forwarding from `BridgeProviderProtocol.read_game_data` and `BridgeStateProvider.read_game_data` in accordance with Radical Feature Parsimony (YAGNI).
+  - Removed obsolete `script_dir` parameter from `ExpeditionTrayApp.__init__`.
+
+### Quality Assurance & CI Invariants
+- **Automated AST Clock Decoupling Invariants (`tests.ci.test_architectural_invariants`)**:
+  - Implemented static AST syntax tree analysis verifying that `time.monotonic()` is strictly prohibited from being forwarded to outbound Discord Rich Presence timestamps (`start_timestamp`, `timestamps`, `start`), and that `time.time()` is never used in orchestrator thread wait or deadline calculations.
+- **Immutable Dependency Freeze Gate (`tests.ci.test_frozen_dependencies`)**:
+  - Added unit test enforcing strict immutability of runtime dependencies (`pystray`, `pillow`, `psutil`) and development tooling (`pyinstaller`, `ruff`, `pyright`, `pytest`) in `pyproject.toml`.
+
+### Documentation
+- **Directives & Architectural Alignment (`ARCHITECTURE.md`, `AGENTS.md`)**:
+  - Documented AST clock decoupling invariants, frozen dependency verification, and single-player presence scope in `ARCHITECTURE.md` and `AGENTS.md`.
+
 ## [v2.3.6] - 2026-11-19
 
 ### Quality Assurance & Test Harness
