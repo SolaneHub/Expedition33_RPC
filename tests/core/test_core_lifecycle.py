@@ -96,19 +96,50 @@ def test_get_current_executable_command() -> None:
 
 
 @pytest.mark.unit
+def test_startup_frozen_constants_contract() -> None:
+    """Frozen contract test: asserts registry autostart constants exactly match OS requirements."""
+    assert startup.RUN_KEY == r"Software\Microsoft\Windows\CurrentVersion\Run"
+    assert startup.APP_NAME == "Expedition33_DiscordRPC"
+
+
+@pytest.mark.unit
 def test_startup_enable_disable_and_toggle() -> None:
     mock_winreg = MagicMock()
     mock_key = MagicMock()
     mock_winreg.OpenKey.return_value.__enter__.return_value = mock_key
     mock_winreg.REG_SZ = 1
+    mock_winreg.HKEY_CURRENT_USER = 0x80000001
+    mock_winreg.KEY_SET_VALUE = 0x0002
 
     with patch.object(startup, "winreg", mock_winreg):
         # Enable
+        expected_cmd = startup.get_current_executable_command()
         assert startup.set_startup_enabled(True) is True
-        mock_winreg.SetValueEx.assert_called_once()
+        mock_winreg.OpenKey.assert_called_with(
+            mock_winreg.HKEY_CURRENT_USER,
+            startup.RUN_KEY,
+            0,
+            mock_winreg.KEY_SET_VALUE,
+        )
+        mock_winreg.SetValueEx.assert_called_once_with(
+            mock_key,
+            startup.APP_NAME,
+            0,
+            mock_winreg.REG_SZ,
+            expected_cmd,
+        )
+
+        # Reset call counts for disable test
+        mock_winreg.OpenKey.reset_mock()
 
         # Disable
         assert startup.set_startup_enabled(False) is True
+        mock_winreg.OpenKey.assert_called_with(
+            mock_winreg.HKEY_CURRENT_USER,
+            startup.RUN_KEY,
+            0,
+            mock_winreg.KEY_SET_VALUE,
+        )
         mock_winreg.DeleteValue.assert_called_once_with(mock_key, startup.APP_NAME)
 
 

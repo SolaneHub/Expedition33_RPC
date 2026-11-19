@@ -303,6 +303,87 @@ def test_bridge_lua_syntax_validity() -> None:
         )
         assert res.returncode == 0, f"luac syntax validation failed: {res.stderr}"
 
+    # 3. Deterministic offline validation (critical when luac is missing from CI / PATH)
+    # 3a. Verify ASCII-purity (prevent unescaped unicode / encoding anomalies in Lua runtime)
+    non_ascii_chars = [ch for ch in lua_content if ord(ch) > 127]
+    assert not non_ascii_chars, (
+        f"Found unescaped non-ASCII characters in main.lua: {set(non_ascii_chars)}"
+    )
+
+    # 3b. Verify illegal / invalid Lua syntax tokens (e.g. C-style operators, javascript keywords)
+    # Strip comments and literal strings first to inspect raw code tokens
+    code_no_comments = re.sub(r"--\[\[.*?\]\]", "", lua_content, flags=re.DOTALL)
+    code_no_comments = re.sub(r"--[^\n]*", "", code_no_comments)
+    code_no_strings = re.sub(r"\[\[.*?\]\]", '""', code_no_comments, flags=re.DOTALL)
+    code_no_strings = re.sub(r'"(?:[^"\\]|\\.)*"', '""', code_no_strings)
+    code_no_strings = re.sub(r"'(?:[^'\\]|\\.)*'", "''", code_no_strings)
+
+    illegal_operators = [
+        ("!=", "~="),
+        ("&&", "and"),
+        ("||", "or"),
+        ("===", "=="),
+        ("++", "+= or + 1"),
+    ]
+    # Check illegal operators that are not valid Lua outside strings/comments
+    for illegal_op, alternative in illegal_operators:
+        assert illegal_op not in code_no_strings, (
+            f"Illegal token '{illegal_op}' found in main.lua; use Lua syntax '{alternative}'"
+        )
+    illegal_keyword_matches = re.findall(r"\b(null|undefined|var|let|const|def)\b", code_no_strings)
+    assert not illegal_keyword_matches, (
+        f"Illegal non-Lua keywords found in main.lua: {set(illegal_keyword_matches)}"
+    )
+
+    # 3c. Verify block balancing (functions, ifs, dos, thens vs ends)
+    tokens = re.findall(r"\b(function|if|elseif|do|then|end)\b", code_no_strings)
+    counts = {t: tokens.count(t) for t in ("function", "if", "elseif", "do", "then", "end")}
+
+    # In Lua: every 'function', 'if', and 'do' block is closed by 'end'.
+    # Note: 'for ... do' and 'while ... do' produce a 'do', each closed by 'end'.
+    assert counts["function"] + counts["if"] + counts["do"] == counts["end"], (
+        f"Lua block imbalance: function({counts['function']}) + if({counts['if']}) + do({counts['do']}) "
+        f"!= end({counts['end']})"
+    )
+    # Every 'if' and 'elseif' must have a corresponding 'then'
+    assert counts["if"] + counts["elseif"] == counts["then"], (
+        f"Lua conditional imbalance: if({counts['if']}) + elseif({counts['elseif']}) != then({counts['then']})"
+    )
+
+    # 3d. Verify write_status block structural integrity and atomic JSON output
+    write_status_match = re.search(r"(?:local\s+)?function\s+write_status\s*\([^)]*\)", lua_content)
+    assert write_status_match is not None, "write_status function definition missing in main.lua"
+    write_status_start = write_status_match.start()
+
+    # Extract complete write_status function body by balancing nested block tokens
+    sub_code = lua_content[write_status_start:]
+    # Strip comments from sub_code for accurate block tracking
+    sub_clean = re.sub(r"--\[\[.*?\]\]", "", sub_code, flags=re.DOTALL)
+    sub_clean = re.sub(r"--[^\n]*", "", sub_clean)
+    depth = 0
+    end_idx = 0
+    for m in re.finditer(r"\b(function|if|do|end)\b", sub_clean):
+        token = m.group(1)
+        if token in ("function", "if", "do"):
+            depth += 1
+        elif token == "end":
+            depth -= 1
+            if depth == 0:
+                end_idx = m.end()
+                break
+
+    assert end_idx > 0, "Could not determine boundaries of write_status function"
+    write_status_body = sub_clean[:end_idx]
+
+    # Check atomic double-buffering write (.tmp file rename)
+    assert "tmp_path" in write_status_body, (
+        "write_status must write to tmp_path for atomic swapping"
+    )
+    assert "status_path" in write_status_body, "write_status must reference target status_path"
+    assert "os.rename" in write_status_body, "write_status must use atomic os.rename"
+    assert "json_escape" in write_status_body, "write_status must sanitize strings with json_escape"
+    assert "os.time()" in write_status_body, "write_status must timestamp payloads with os.time()"
+
 
 def test_find_game_win64_directory_from_wingdk_process(tmp_path: Path) -> None:
     """Verifies that find_game_win64_directory locates WinGDK binary directory from active process."""
