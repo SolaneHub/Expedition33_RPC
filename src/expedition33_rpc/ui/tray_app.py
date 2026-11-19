@@ -41,9 +41,7 @@ class ExpeditionTrayApp:
     def __init__(
         self,
         orchestrator: AppOrchestrator | None = None,
-        script_dir: str = "",
-    ):
-        del script_dir
+    ) -> None:
         self._menu_lock = threading.Lock()
         self.icon: Any = None
         self._last_menu_state: tuple[Any, ...] | None = None

@@ -141,10 +141,8 @@ def test_orchestrator_subscribe_state_change_and_unsubscribe(tmp_path: Path) -> 
 @pytest.mark.unit
 def test_orchestrator_step_update_error_resilience() -> None:
     class FailingProvider(BridgeStateProvider):
-        def read_game_data(
-            self, min_valid_timestamp: float | None = None, lang: str = "en"
-        ) -> None:
-            del min_valid_timestamp, lang
+        def read_game_data(self, min_valid_timestamp: float | None = None) -> None:
+            del min_valid_timestamp
             raise RuntimeError("Telemetry failure")
 
     detector = GameDetector(

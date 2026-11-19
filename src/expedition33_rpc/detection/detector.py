@@ -199,9 +199,7 @@ class BridgeProviderProtocol(Protocol):
 
     def read_bridge_status(self) -> RawGameData | None: ...
 
-    def read_game_data(
-        self, min_valid_timestamp: float | None = None, *args: Any, **kwargs: Any
-    ) -> RawGameData | None: ...
+    def read_game_data(self, min_valid_timestamp: float | None = None) -> RawGameData | None: ...
 
     def reset(self) -> None: ...
 
@@ -247,9 +245,7 @@ class BridgeStateProvider:
                     break
         return None
 
-    def read_game_data(
-        self, min_valid_timestamp: float | None = None, *_args: Any, **_kwargs: Any
-    ) -> RawGameData | None:
+    def read_game_data(self, min_valid_timestamp: float | None = None) -> RawGameData | None:
         bridge = self.read_bridge_status()
         if bridge:
             bridge_ts = bridge.get("timestamp")

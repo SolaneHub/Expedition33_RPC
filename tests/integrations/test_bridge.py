@@ -121,7 +121,7 @@ def test_bridge_lua_write_status_schema_contract_with_state_provider(tmp_path: P
     status_file.write_text(json.dumps(simulated_lua_output), encoding="utf-8")
 
     provider = BridgeStateProvider(paths=[str(status_file)], time_provider=lambda: now)
-    parsed_data = provider.read_game_data(min_valid_timestamp=now - 5.0, lang="en")
+    parsed_data = provider.read_game_data(min_valid_timestamp=now - 5.0)
 
     assert parsed_data is not None
     # Verify all expected domain fields in read_game_data output
@@ -152,7 +152,7 @@ def test_bridge_state_provider_enforces_stale_timestamp_rejection(tmp_path: Path
     )
 
     provider = BridgeStateProvider(paths=[str(status_file)])
-    assert provider.read_game_data(min_valid_timestamp=proc_start, lang="en") is None
+    assert provider.read_game_data(min_valid_timestamp=proc_start) is None
 
 
 # ---------------------------------------------------------------------------

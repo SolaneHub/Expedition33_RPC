@@ -373,10 +373,8 @@ def run_rapid_toggling_stress_test(audit: FilesystemActivityAudit, tmp_path: Pat
     current_data: dict[str, Any] | None = None
 
     class DynamicBridge:
-        def read_game_data(
-            self, min_valid_timestamp: float | None = None, lang: str = "en"
-        ) -> dict[str, Any] | None:
-            del min_valid_timestamp, lang
+        def read_game_data(self, min_valid_timestamp: float | None = None) -> dict[str, Any] | None:
+            del min_valid_timestamp
             return current_data
 
         def reset(self) -> None:

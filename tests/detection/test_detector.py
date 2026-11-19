@@ -209,7 +209,7 @@ def test_bridge_provider_reads_valid_json(tmp_path: Path) -> None:
     bridge_path.write_text(json.dumps(payload), encoding="utf-8")
 
     provider = BridgeStateProvider(paths=[str(bridge_path)])
-    data = provider.read_game_data(min_valid_timestamp=now - 5.0, lang="en")
+    data = provider.read_game_data(min_valid_timestamp=now - 5.0)
     assert data is not None
     assert data["raw_zone"] == "Level_Main_OldLumiere"
     assert data["in_combat"] is True
