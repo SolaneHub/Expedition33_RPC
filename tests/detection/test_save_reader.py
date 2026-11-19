@@ -192,6 +192,9 @@ def test_save_reader_corrupt_or_partial_binary_save(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_save_reader_mtime_caching_and_reset(tmp_path: Path) -> None:
+    import os
+    import time
+
     profile_dir = tmp_path / "player_profile_1"
     profile_dir.mkdir(parents=True)
     sav_file = profile_dir / "EXPEDITION_0.sav"
@@ -199,6 +202,11 @@ def test_save_reader_mtime_caching_and_reset(tmp_path: Path) -> None:
     SaveFileBuilder().with_header(20).with_level("Level_Cached").with_savepoint(
         "Level.SpawnPoint.Cached.Tag"
     ).with_trailer(20).write_to(sav_file)
+
+    # Establish deterministic baseline timestamps to avoid NTFS timer resolution collisions
+    base_t = time.time() - 100.0
+    os.utime(sav_file, (base_t, base_t))
+    os.utime(profile_dir, (base_t, base_t))
 
     reader = SaveFileReader(base_save_dir=tmp_path)
 
@@ -235,10 +243,10 @@ def test_save_reader_mtime_caching_and_reset(tmp_path: Path) -> None:
     SaveFileBuilder().with_header(20).with_level("Level_Updated").with_savepoint(
         "Level.SpawnPoint.Updated.Tag"
     ).with_trailer(20).write_to(sav_file2)
-    # Ensure profile_dir mtime is updated
-    import os
-
-    os.utime(profile_dir, None)
+    # Ensure profile_dir and sav_file2 have an explicitly newer mtime
+    updated_t = base_t + 10.0
+    os.utime(sav_file2, (updated_t, updated_t))
+    os.utime(profile_dir, (updated_t, updated_t))
 
     lvl_updated, tag_updated = reader.read_checkpoint_from_save(str(profile_dir))
     assert lvl_updated == "Level_Updated"
