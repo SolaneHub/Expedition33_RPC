@@ -14,7 +14,7 @@ The application operates as a deterministic, unidirectional data pipeline:
 
 1. **Watcher & Ingestion**: Detects game process (`SandFall-Win64-Shipping.exe` / `SandFall-WinGDK-Shipping.exe`). Reads telemetry file written by the UE4SS Lua mod using non-blocking Win32 shared reads (`0x7`).
 2. **State Engine**: Validates freshness against a strict 5.0s TTL. Resolves raw map and flag tokens against immutable catalog mappings (`assets/game_data.json`), producing an immutable `GameState` snapshot.
-3. **Presentation**: Pure functional mapping from `GameState` to `PresencePayload` DTO according to active localization and anti-spoiler settings (focused strictly on single-player expedition status without speculative multiplayer fields).
+3. **Presentation**: Pure functional mapping from `GameState` to `PresencePayload` DTO according to active localization and anti-spoiler settings. Definitively pruned of all speculative multiplayer fields (`party_id` and `party_size` are permanently eliminated from `PresencePayload` and the Discord IPC wire payload).
 4. **Discord IPC & UI**: Dispatches formatted payload to Discord's local named pipe via binary `<II` framing only when dirty. Updates system tray status asynchronously.
 
 ---
@@ -30,7 +30,7 @@ src/expedition33_rpc/
 │
 ├── core/                     # Application lifecycle, platform primitives & orchestrator
 │   ├── app.py                # Single-instance application bootstrap and clean shutdown
-│   ├── orchestrator.py       # Headless AppOrchestrator, UpdaterProtocol & lifecycle coordination
+│   ├── orchestrator.py       # Headless AppOrchestrator, UpdaterProtocol & unified callback lifecycle
 │   ├── platform.py           # OS abstraction: Win32 mutex, flock, CreateFileW 0x7, winreg
 │   ├── presence.py           # Decoupled immutable PresencePayload DTO (pruned of speculative multiplayer attributes)
 │   ├── resources.py          # PyInstaller bundle (_MEIPASS) and development path resolution
@@ -44,6 +44,7 @@ src/expedition33_rpc/
 │   ├── game_data.py          # SSOT catalog accessors, regexes & Endless Tower matchers
 │   ├── normalization.py      # Pure normalization routines for levels, checkpoints, and bosses
 │   ├── save_reader.py        # Checkpoint resolver & fallback parser for binary UE5 .sav files via mmap
+│   ├── steam_resolver.py     # SteamCompatResolver SSOT for Windows, Linux & Steam Deck Proton prefixes
 │   └── timer_tracker.py      # ZoneTimerTracker state machine for persistent Discord timestamps
 │
 ├── integrations/             # External boundaries and daemon installers
@@ -103,18 +104,19 @@ The application runtime maintains resilient execution across host process faults
 7. **Dynamic Checkpoint Synchronization**:
    - When telemetry contains an empty checkpoint string, `SaveFileReader` inspects the active player save profile.
    - Fast-travel and save-point rests are detected in sub-millisecond time via $O(1)$ `st.st_mtime` file caching on `EXPEDITION_*.sav`, dynamically updating checkpoint labels across both intra-zone and inter-zone travel without polling overhead.
-8. **Deterministic Clock Decoupling (Monotonic vs. Epoch)**:
-   - **Monotonic Clock (`time.monotonic()`)**: Exclusively governs internal engine timekeeping, intervals, retry loops, and backoff logic immune to system clock shifts, NTP synchronization, or leap seconds:
+8. **Mathematical Clock Decoupling (`time.monotonic()` vs. `time.time()`)**:
+   - **Monotonic Clock (`time.monotonic()`)**: Exclusively governs all internal engine timekeeping, intervals, backoff cadences, and deadlines. Completely immune to system wall-clock adjustments, NTP steps, daylight saving changes, and leap seconds:
      * Telemetry polling intervals and adaptive idle backoff (`_stop_event.wait(timeout=...)`).
      * Process scanning backoff cadences (`GameDetector._last_process_scan_time`, `idle_poll_interval`).
+     * In-memory elapsed game session and tracking time calculation in `detector.py` and `timer_tracker.py` (`time.monotonic() - session_start_mono`).
      * Discord RPC reconnection retry loop with exponential backoff and connection timeout deadlines (`DiscordRPCManager`).
      * Cumulative thread join deadlines and orchestrator shutdown timeout budgets (`deadline = time.monotonic() + 3.0`).
      * Bridge installer cooldown gating (`bridge_install_cooldown`).
-     * Invariant: Monotonic timestamps must never be compared against or contaminated with epoch timestamps.
+     * **Invariant**: Monotonic timestamps must never be compared against, subtracted from, or mixed with epoch timestamps. Monotonic domain arithmetic ($\Delta t_{mono} = t_{mono, 2} - t_{mono, 1}$) operates strictly within local process execution boundaries.
    - **Epoch Timestamp (`time.time()`)**: Exclusively reserved for wall-clock alignment and outbound Discord Rich Presence wire frames:
      * Telemetry heartbeat freshness SLA verification against mod emission timestamps (`abs(epoch_now - telemetry.timestamp) > 5.0`).
      * Zone exploration and combat start timestamps (`ZoneTimerTracker.update(..., now=current_epoch)`).
-     * Discord Rich Presence wire frame payloads (`PresencePayload.start_timestamp` / `timestamps: {"start": ...}`) serialized into binary `<II` IPC packets.
+     * Discord Rich Presence wire frame payloads (`PresencePayload.start_timestamp` / `timestamps: {"start": ...}`) serialized into binary `<II` IPC packets for Discord client elapsed duration display.
    - **Automated AST Invariant Enforcement (`test_architectural_invariants.py`)**:
      * Temporal clock decoupling is statically verified in CI via Python Abstract Syntax Tree analysis (`ast.parse`) across all modules.
      * The AST check inspects expressions and keyword assignments to ensure that `time.monotonic()` is never assigned or forwarded to outbound Discord timestamp parameters (`start_timestamp`, `timestamps`, `start`), preventing runtime clock skew before frames hit the wire.
@@ -126,6 +128,18 @@ The application runtime maintains resilient execution across host process faults
      * Update discovery is communicated event-driven via `on_complete` callback (`on_update_check_complete`), notifying UI subscribers without busy-waiting.
      * Clean shutdown: `AppOrchestrator.stop()` cancels in-flight update requests and joins the worker thread within the cumulative monotonic shutdown deadline.
      * Deterministic testability: In unit and integration test suites, `FakeUpdater(UpdaterProtocol)` simulates all update lifecycle states offline without making external HTTP requests.
+10. **Unified Callback Lifecycle in `AppOrchestrator`**:
+    - `AppOrchestrator` acts as the single central hub dispatching state updates across the headless core, system tray, and tests:
+      * Unified observer registration via `subscribe_state(callback)` / `unsubscribe_state(callback)` alongside the `on_state_change` and `on_update_available` hooks.
+      * State transitions (`step_update()`) cleanly separate state derivation, presence dirty-checking, and listener notification.
+      * Listeners are invoked with `(game_state: GameState, is_active: bool)` synchronously within the worker tick or test harness, ensuring deterministic notification without intermediate thread race conditions or dropped frames.
+11. **Unified Cross-Platform Resolution via `SteamCompatResolver`**:
+    - Centralized SSOT in `detection/steam_resolver.py` unifying path resolution across Windows native, standard Linux, and Steam Deck Proton:
+      * **Windows**: Dynamically resolves Steam installation via Windows Registry keys (`HKEY_CURRENT_USER\Software\Valve\Steam`, `HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam`, `HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam`) through `platform.winreg_read_value`.
+      * **Linux & Steam Deck**: Scans canonical Steam roots (`~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, and Flatpak `~/.var/app/com.valvesoftware.Steam/.local/share/Steam`).
+      * **VDF Parser**: Efficiently parses Valve Data Format (`libraryfolders.vdf`) to discover external and secondary Steam libraries without external dependencies.
+      * **Proton / Wine Prefix Resolution**: Locates App ID `1903340` compat data prefix (`compatdata/1903340/pfx`), resolving emulated Windows paths (`drive_c/users/steamuser/AppData/Local/...`) into native POSIX host paths.
+      * Integrates seamlessly with `compat_paths.py` to transparently map `%TEMP%\expedition33_status.json` and save directories across all platforms.
 
 ---
 
@@ -167,7 +181,7 @@ Discord Named Pipe (`\\.\pipe\discord-ipc-0`..`9` on Windows, UNIX socket on POS
 Header packing format: `struct.pack("<II", opcode, length)`.
 - Standard opcodes: `HANDSHAKE = 0`, `FRAME = 1`, `CLOSE = 2`, `PING = 3`, `PONG = 4`.
 - Field limits: Strings in `details`, `state`, and tooltips are bounded to **128 UTF-8 bytes**, safely sliced at code point boundaries by `truncate_presence_field`.
-- Radical Feature Parsimony (YAGNI): In accordance with single-player design constraints, `PresencePayload` and outbound activity frames strictly eliminate unneeded multiplayer attributes (such as speculative `party_id` and `party_size` parameters), maintaining a zero-overhead wire footprint focused purely on expedition location, encounter details, anti-spoiler shielding, and elapsed quest timestamps.
+- Radical Feature Parsimony (YAGNI): In accordance with single-player design constraints, `PresencePayload` and outbound activity frames definitively prune and eliminate speculative multiplayer attributes (`party_id` and `party_size` are strictly removed from both `PresencePayload` DTO and the outbound wire dictionary). The wire format maintains a zero-overhead wire footprint focused purely on expedition location, encounter details, anti-spoiler shielding, and elapsed quest timestamps. Presence payloads never include party metadata under any circumstance.
 
 ### 4.3. SSOT Static Catalog (`assets/game_data.json`)
 Central repository for all static entities and translations:

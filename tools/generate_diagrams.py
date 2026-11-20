@@ -12,7 +12,7 @@ from pathlib import Path
 
 DOCS_DIR = Path(__file__).resolve().parents[1] / "docs"
 
-PIPELINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" role="img" aria-label="Expedition 33 Discord RPC Telemetry Pipeline: in-game Lua hook writes IPC JSON, GameDetector verifies 5s freshness SLA and pushes to Discord; fallback mmap reader extracts save state when bridge is inactive.">
+PIPELINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" role="img" aria-label="Expedition 33 Discord RPC Telemetry Pipeline: in-game Lua hook writes IPC JSON, GameDetector verifies 5s freshness SLA and pushes to Discord; SteamCompatResolver handles prefixes and fallback mmap reader extracts save state when bridge is inactive.">
   <style>
     .flow { fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 7 7; animation: e33flow .7s linear infinite; }
     @keyframes e33flow { to { stroke-dashoffset: -14; } }
@@ -60,7 +60,7 @@ PIPELINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
 
   <rect class="node" x="256" y="84" width="180" height="58" rx="11" stroke="#38bdf8"/>
   <text class="main" x="346" y="108">&#128196; IPC Status File</text>
-  <text class="sub" x="346" y="126">%TEMP%\expedition33_status.json</text>
+  <text class="sub" x="346" y="126">SteamCompatResolver &#183; IPC</text>
 
   <rect class="node" x="480" y="84" width="180" height="58" rx="11" stroke="#34d399"/>
   <text class="main" x="570" y="108">&#9889; GameDetector Hub</text>
@@ -68,7 +68,7 @@ PIPELINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
 
   <rect class="node" x="704" y="84" width="140" height="58" rx="11" stroke="#818cf8"/>
   <text class="main" x="774" y="108">&#128172; Discord Presence</text>
-  <text class="sub" x="774" y="126">combat, zone &amp; timer</text>
+  <text class="sub" x="774" y="126">YAGNI wire &#183; no party fields</text>
 
   <!-- Row 1: Unobstructed Animated Connectors -->
   <path class="flow" d="M212,113 L250,113" stroke="#38bdf8" marker-end="url(#headCyan)"/>
@@ -85,11 +85,11 @@ PIPELINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
   <!-- Row 2: Emergency Savegame Fallback Path -->
   <rect class="node" x="144" y="300" width="180" height="58" rx="11" stroke="#fbbf24"/>
   <text class="main" x="234" y="324">&#128190; UE5 Disk Save</text>
-  <text class="sub" x="234" y="342">Saved\SaveGames\*.sav</text>
+  <text class="sub" x="234" y="342">Proton / Win32 SaveGames</text>
 
   <rect class="node" x="368" y="300" width="196" height="58" rx="11" stroke="#fbbf24"/>
   <text class="main" x="466" y="324">&#128269; SaveFileReader</text>
-  <text class="sub" x="466" y="342">O(1) mtime &#183; checkpoint sync</text>
+  <text class="sub" x="466" y="342">O(1) mtime &#183; zero I/O jitter</text>
 
   <rect class="node" x="608" y="300" width="236" height="58" rx="11" stroke="#818cf8"/>
   <text class="main" x="726" y="324">&#128737;&#65039; Presentation Shield</text>
@@ -107,11 +107,11 @@ PIPELINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
   <text class="edgelabel" x="774" y="221" fill="#818cf8" text-anchor="middle">fallback synced &#183; live</text>
 
   <!-- Bottom Architecture Caption -->
-  <text class="caption" x="440" y="432">Zero game process injection &#183; 5.0s SLA on hot telemetry &#183; O(1) mtime checkpoint sync &#183; Native Discord IPC named pipe</text>
+  <text class="caption" x="440" y="432">SteamCompatResolver &#183; 5.0s SLA &#183; Zero I/O jitter &#183; O(1) mtime sync &#183; YAGNI wire (party pruned)</text>
 </svg>
 """
 
-THREADING_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" role="img" aria-label="Expedition 33 Discord RPC Threading Model: Main thread drives Win32 pystray message pump, isolated worker thread drives detection and Discord IPC, with non-blocking platform abstraction.">
+THREADING_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" role="img" aria-label="Expedition 33 Discord RPC Threading Model: Main thread drives UI pump, isolated worker thread drives detection and Discord IPC without I/O jitter, with non-blocking platform abstraction.">
   <style>
     .flow { fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 7 7; animation: e33flow .7s linear infinite; }
     @keyframes e33flow { to { stroke-dashoffset: -14; } }
@@ -156,7 +156,7 @@ THREADING_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 
   <rect class="node" x="256" y="84" width="180" height="58" rx="11" stroke="#2dd4bf"/>
   <text class="main" x="346" y="108">&#9881;&#65039; Worker Daemon</text>
-  <text class="sub" x="346" y="126">2.0s tick &#183; detector loop</text>
+  <text class="sub" x="346" y="126">2.0s tick &#183; zero I/O jitter</text>
 
   <rect class="node" x="480" y="84" width="180" height="58" rx="11" stroke="#818cf8"/>
   <text class="main" x="570" y="108">&#9889; Shared File I/O</text>
@@ -199,14 +199,14 @@ THREADING_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 
   <rect class="node" x="300" y="300" width="220" height="58" rx="11" stroke="#f43f5e"/>
   <text class="main" x="410" y="324">&#128736;&#65039; Ephemeral Installer</text>
-  <text class="sub" x="410" y="342">isolated thread &#183; zero UI lag</text>
+  <text class="sub" x="410" y="342">SteamCompatResolver prefix</text>
 
   <rect class="node" x="580" y="300" width="264" height="58" rx="11" stroke="#f43f5e"/>
   <text class="main" x="712" y="324">&#127760; Background Updater</text>
   <text class="sub" x="712" y="342">UpdaterProtocol &#183; daemon</text>
 
   <!-- Bottom Architecture Caption -->
-  <text class="caption" x="440" y="432">Win32 message pump stays fluid &#183; Zero lock contention on telemetry reads &#183; Background workers exit instantly on app quit</text>
+  <text class="caption" x="440" y="432">UI pump stays fluid &#183; Zero lock contention on telemetry reads &#183; No I/O jitter on polling loops</text>
 </svg>
 """
 
@@ -266,7 +266,7 @@ STATE_MACHINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox=
 
   <rect class="node" x="480" y="84" width="180" height="58" rx="11" stroke="#34d399"/>
   <text class="main" x="570" y="108">&#9201;&#65039; Freshness Engine</text>
-  <text class="sub" x="570" y="126">5.0s TTL &#183; game_data SSOT</text>
+  <text class="sub" x="570" y="126">5.0s TTL &#183; clock decoupled</text>
 
   <rect class="node" x="704" y="84" width="140" height="58" rx="11" stroke="#818cf8"/>
   <text class="main" x="774" y="108">&#128172; Discord IPC</text>
@@ -290,7 +290,7 @@ STATE_MACHINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox=
   <!-- Row 2: Invariants & Fault Recovery -->
   <rect class="node" x="470" y="300" width="200" height="58" rx="11" stroke="#fbbf24"/>
   <text class="main" x="570" y="324">&#128737;&#65039; Save Sync &amp; Fallback</text>
-  <text class="sub" x="570" y="342">O(1) mtime sync &#183; safe fallback</text>
+  <text class="sub" x="570" y="342">SteamCompatResolver &#183; O(1)</text>
 
   <!-- Flow: Fallback Restores to Active Discord Pipe -->
   <path class="flow" d="M670,329 C720,329 744,250 744,148" stroke="#818cf8" marker-end="url(#headBlurpleSM)"/>
@@ -308,7 +308,7 @@ STATE_MACHINE_SVG_CONTENT = r"""<svg xmlns="http://www.w3.org/2000/svg" viewBox=
   <path class="flow" d="M820,300 C835,230 835,210 820,148" stroke="#f43f5e" marker-end="url(#headRoseSM)"/>
 
   <!-- Bottom Architecture Caption -->
-  <text class="caption" x="440" y="432">O(1) PID liveness tracking &#183; 5.0s TTL freshness SLA &#183; O(1) checkpoint mtime sync &#183; Zero ghost presences</text>
+  <text class="caption" x="440" y="432">O(1) PID liveness tracking &#183; 5.0s TTL freshness SLA &#183; Zero I/O jitter &#183; YAGNI clean state</text>
 </svg>
 """
 

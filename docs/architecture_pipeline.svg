@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" role="img" aria-label="Expedition 33 Discord RPC Telemetry Pipeline: in-game Lua hook writes IPC JSON, GameDetector verifies 5s freshness SLA and pushes to Discord; fallback mmap reader extracts save state when bridge is inactive.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" role="img" aria-label="Expedition 33 Discord RPC Telemetry Pipeline: in-game Lua hook writes IPC JSON, GameDetector verifies 5s freshness SLA and pushes to Discord; SteamCompatResolver handles prefixes and fallback mmap reader extracts save state when bridge is inactive.">
   <style>
     .flow { fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 7 7; animation: e33flow .7s linear infinite; }
     @keyframes e33flow { to { stroke-dashoffset: -14; } }
@@ -46,7 +46,7 @@
 
   <rect class="node" x="256" y="84" width="180" height="58" rx="11" stroke="#38bdf8"/>
   <text class="main" x="346" y="108">&#128196; IPC Status File</text>
-  <text class="sub" x="346" y="126">%TEMP%\expedition33_status.json</text>
+  <text class="sub" x="346" y="126">SteamCompatResolver &#183; IPC</text>
 
   <rect class="node" x="480" y="84" width="180" height="58" rx="11" stroke="#34d399"/>
   <text class="main" x="570" y="108">&#9889; GameDetector Hub</text>
@@ -54,7 +54,7 @@
 
   <rect class="node" x="704" y="84" width="140" height="58" rx="11" stroke="#818cf8"/>
   <text class="main" x="774" y="108">&#128172; Discord Presence</text>
-  <text class="sub" x="774" y="126">combat, zone &amp; timer</text>
+  <text class="sub" x="774" y="126">YAGNI wire &#183; no party fields</text>
 
   <!-- Row 1: Unobstructed Animated Connectors -->
   <path class="flow" d="M212,113 L250,113" stroke="#38bdf8" marker-end="url(#headCyan)"/>
@@ -71,11 +71,11 @@
   <!-- Row 2: Emergency Savegame Fallback Path -->
   <rect class="node" x="144" y="300" width="180" height="58" rx="11" stroke="#fbbf24"/>
   <text class="main" x="234" y="324">&#128190; UE5 Disk Save</text>
-  <text class="sub" x="234" y="342">Saved\SaveGames\*.sav</text>
+  <text class="sub" x="234" y="342">Proton / Win32 SaveGames</text>
 
   <rect class="node" x="368" y="300" width="196" height="58" rx="11" stroke="#fbbf24"/>
   <text class="main" x="466" y="324">&#128269; SaveFileReader</text>
-  <text class="sub" x="466" y="342">O(1) mtime &#183; checkpoint sync</text>
+  <text class="sub" x="466" y="342">O(1) mtime &#183; zero I/O jitter</text>
 
   <rect class="node" x="608" y="300" width="236" height="58" rx="11" stroke="#818cf8"/>
   <text class="main" x="726" y="324">&#128737;&#65039; Presentation Shield</text>
@@ -93,5 +93,5 @@
   <text class="edgelabel" x="774" y="221" fill="#818cf8" text-anchor="middle">fallback synced &#183; live</text>
 
   <!-- Bottom Architecture Caption -->
-  <text class="caption" x="440" y="432">Zero game process injection &#183; 5.0s SLA on hot telemetry &#183; O(1) mtime checkpoint sync &#183; Native Discord IPC named pipe</text>
+  <text class="caption" x="440" y="432">SteamCompatResolver &#183; 5.0s SLA &#183; Zero I/O jitter &#183; O(1) mtime sync &#183; YAGNI wire (party pruned)</text>
 </svg>

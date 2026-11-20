@@ -39,7 +39,7 @@ Always verify changes using [`uv`](https://github.com/astral-sh/uv). Never push 
    - *Discord IPC*: Dirty-checking on outbound frames; never send identical presence payloads.
 3. **Dry-Run & Integration-First**: Test observable system behavior and interface contracts, not brittle private methods. Use the unified harness (`FakeProcess`, `GameSessionSimulator`, `DiscordPipeSimulator & MockDiscordServer`, `HeadlessTrayHarness`, `FakeUpdater`, `FakeBridgeInstaller`, and `FakeStartupService`) from `tests/harness/` for deterministic testing across all 3 tiers.
 4. **Hard Stop on Semi-Reversible Choices**: Never add dependencies to `pyproject.toml`, alter the external IPC status JSON schema, or mutate the Discord binary `<II` wire frame layout without explicit human approval. Production runtime dependencies are strictly frozen and enforced via `tests/ci/test_frozen_dependencies.py`: `pystray>=0.19.5`, `pillow>=10.0.0`, and `psutil>=5.9.0` (with dev dependencies limited strictly to `pyinstaller>=6.0.0`, `ruff>=0.9.0`, `pyright>=1.1.0`, and `pytest>=8.0.0`).
-5. **Zero Suppressed Warnings**: 100% strict type safety under Pyright (`typeCheckingMode = "standard"`). Absolutely zero `type: ignore`, `# noqa`, or unjustified Ruff suppressions across the codebase.
+5. **Zero Suppressed Warnings**: 100% strict type safety under Pyright (`typeCheckingMode = "standard"` with explicit enforcement of `reportUnknownArgumentType` and `reportUnknownVariableType`). Absolutely zero `type: ignore`, `# noqa`, or unjustified Ruff suppressions across the codebase.
 
 ## 3. Code Conventions
 
