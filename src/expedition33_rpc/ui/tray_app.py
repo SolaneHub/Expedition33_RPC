@@ -47,16 +47,12 @@ class ExpeditionTrayApp:
         self._last_menu_state: tuple[Any, ...] | None = None
 
         self.orchestrator = orchestrator if orchestrator is not None else AppOrchestrator()
-        self._unsubscribe_state: Callable[[], None] | None = None
-        if hasattr(self.orchestrator, "subscribe_state_change"):
-            self._unsubscribe_state = self.orchestrator.subscribe_state_change(
-                self.on_orchestrator_state_change
-            )
-        self._unsubscribe_update: Callable[[], None] | None = None
-        if hasattr(self.orchestrator, "subscribe_update_available"):
-            self._unsubscribe_update = self.orchestrator.subscribe_update_available(
-                self._on_update_available_wrapper
-            )
+        self._unsubscribe_state: Callable[[], None] | None = (
+            self.orchestrator.subscribe_state_change(self.on_orchestrator_state_change)
+        )
+        self._unsubscribe_update: Callable[[], None] | None = (
+            self.orchestrator.subscribe_update_available(self._on_update_available_wrapper)
+        )
 
     def _on_update_available_wrapper(self, update_info: UpdateInfo) -> None:
         self.on_update_available(update_info)

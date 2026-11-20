@@ -28,8 +28,6 @@ class PresencePayload:
     large_text: str | None = None
     small_image: str | None = None
     small_text: str | None = None
-    party_id: str | None = None
-    party_size: tuple[int, int] | None = None
 
 
 __all__ = [

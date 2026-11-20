@@ -169,8 +169,8 @@ class AppUpdater:
         with self._lock:
             if self.state == UpdateState.CHECKING:
                 return
-            self.state = UpdateState.CHECKING
             self._cancel_event.clear()
+        self._set_state(UpdateState.CHECKING)
 
         def _worker() -> None:
             try:
@@ -210,11 +210,14 @@ class AppUpdater:
 
     def get_status_text(self) -> str:
         """Returns the formatted menu item label based on the current updater state."""
-        match self.state:
+        with self._lock:
+            state = self.state
+            update = self.available_update
+        match state:
             case UpdateState.CHECKING:
                 return "Checking for Updates..."
-            case UpdateState.AVAILABLE if self.available_update:
-                return f"Update to {self.available_update.tag_name}  [Open Release]"
+            case UpdateState.AVAILABLE if update:
+                return f"Update to {update.tag_name}  [Open Release]"
             case UpdateState.UP_TO_DATE:
                 return f"Version {self.current_version}  [Up to Date]"
             case UpdateState.ERROR:

@@ -253,8 +253,6 @@ class DiscordIPCClient:
         large_text: str | None = "Clair Obscur: Expedition 33",
         small_image: str | None = None,
         small_text: str | None = None,
-        party_id: str | None = None,
-        party_size: tuple[int, int] | None = None,
     ) -> bool:
         """Sends a SET_ACTIVITY frame to Discord atomically."""
         assets: dict[str, Any] = {}
@@ -274,8 +272,6 @@ class DiscordIPCClient:
         }
         if start_timestamp:
             activity["timestamps"] = {"start": start_timestamp}
-        if party_id and party_size:
-            activity["party"] = {"id": party_id, "size": list(party_size)}
 
         payload = {
             "cmd": "SET_ACTIVITY",
@@ -482,7 +478,7 @@ class DiscordRPCManager:
         fingerprint = (
             f"{details_text}|{state_text}|{start_timestamp}|{large_image}|"
             f"{large_text}|{payload.small_image}|{payload.small_text}|"
-            f"{payload.party_id}|{payload.party_size}|{target_pid}"
+            f"{target_pid}"
         )
         if fingerprint == self.last_update_state:
             self._last_target_pid = target_pid
@@ -498,8 +494,6 @@ class DiscordRPCManager:
                 large_text=large_text,
                 small_image=payload.small_image,
                 small_text=payload.small_text,
-                party_id=payload.party_id,
-                party_size=payload.party_size,
             )
             if success:
                 self.last_update_state = fingerprint
