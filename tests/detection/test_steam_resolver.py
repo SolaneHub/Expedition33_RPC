@@ -103,7 +103,7 @@ def test_steam_resolver_candidates(tmp_path: Path) -> None:
     resolver = SteamCompatResolver(is_windows=False, home_dir=fake_home, winreg_module=None)
 
     telemetry = resolver.resolve_telemetry_candidates()
-    assert any("/tmp/expedition33_status.json" in p for p in telemetry)
+    assert any(os.path.normpath("/tmp/expedition33_status.json") in p for p in telemetry)
 
     configs = resolver.resolve_config_candidates()
     assert any("GameUserSettings.ini" in p for p in configs)

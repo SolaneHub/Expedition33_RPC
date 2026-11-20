@@ -1,5 +1,6 @@
 import threading
 import time
+from collections.abc import Callable
 from typing import Any
 
 from expedition33_rpc.integrations.discord_rpc import (
@@ -172,6 +173,7 @@ class DiscordFaultInjector(DiscordPipeSimulator):
         chunk_size: int | None = None,
         fail_write_with: type[Exception] | Exception | None = None,
         fail_read_with: type[Exception] | Exception | None = None,
+        sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         super().__init__(
             incoming_data=incoming_data, auto_respond_set_activity=auto_respond_set_activity
@@ -181,6 +183,7 @@ class DiscordFaultInjector(DiscordPipeSimulator):
         self.chunk_size = chunk_size
         self.fail_write_with = fail_write_with
         self.fail_read_with = fail_read_with
+        self.sleeper = sleeper
 
     def _raise_fault(self, fault: type[Exception] | Exception) -> None:
         if isinstance(fault, type) and issubclass(fault, BaseException):
@@ -194,7 +197,7 @@ class DiscordFaultInjector(DiscordPipeSimulator):
             self._raise_fault(self.fail_write_with)
 
         if self.write_latency > 0:
-            time.sleep(self.write_latency)
+            self.sleeper(self.write_latency)
 
         return super().write(data)
 
@@ -203,7 +206,7 @@ class DiscordFaultInjector(DiscordPipeSimulator):
             self._raise_fault(self.fail_read_with)
 
         if self.read_latency > 0:
-            time.sleep(self.read_latency)
+            self.sleeper(self.read_latency)
 
         effective_n = n
         if (

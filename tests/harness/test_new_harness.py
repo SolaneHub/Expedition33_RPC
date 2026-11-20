@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import struct
-import time
 
 import pytest
 from tests.harness.bridge_contract_verifier import BridgeContractInspector
@@ -91,19 +90,20 @@ def test_discord_fault_injector_chunked_delivery_and_read_exact() -> None:
 
 @pytest.mark.unit
 def test_discord_fault_injector_write_and_read_latency() -> None:
-    injector = DiscordFaultInjector(write_latency=0.01, read_latency=0.01)
+    slept_durations: list[float] = []
+    injector = DiscordFaultInjector(
+        write_latency=0.01,
+        read_latency=0.02,
+        sleeper=slept_durations.append,
+    )
     injector.queue_response({"cmd": "DISPATCH", "evt": "READY", "data": {}})
 
-    start_write = time.monotonic()
     frame = DiscordFrameCodec.encode(OP_FRAME, {"test": "data"})
     injector.write(frame)
-    write_dur = time.monotonic() - start_write
-    assert write_dur >= 0.009
+    assert slept_durations == [0.01]
 
-    start_read = time.monotonic()
     data = injector.read(8)
-    read_dur = time.monotonic() - start_read
-    assert read_dur >= 0.009
+    assert slept_durations == [0.01, 0.02]
     assert len(data) == 8
 
 

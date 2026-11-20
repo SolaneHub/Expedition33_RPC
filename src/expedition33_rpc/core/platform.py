@@ -121,6 +121,8 @@ class SingleInstanceLock:
                     with contextlib.suppress(Exception):
                         _kernel32.CloseHandle(handle)
                 return False
+            if not handle or handle == -1:
+                return False
             if self._mutex_handle is not None and handle != self._mutex_handle:
                 with contextlib.suppress(Exception):
                     _kernel32.CloseHandle(self._mutex_handle)
@@ -220,23 +222,25 @@ def is_already_running(
 
 def acquire_posix_file_lock(lock_path: Path | str | None = None) -> bool:
     """Acquires an exclusive advisory file lock on POSIX systems (Linux / Steam Deck / macOS)."""
-    global _GLOBAL_SINGLE_INSTANCE_LOCK
     if sys.platform == "win32":
         return True
+    global _GLOBAL_SINGLE_INSTANCE_LOCK
     if lock_path is not None:
-        _GLOBAL_SINGLE_INSTANCE_LOCK._release_posix()
+        _GLOBAL_SINGLE_INSTANCE_LOCK.release()
         _GLOBAL_SINGLE_INSTANCE_LOCK = SingleInstanceLock(lock_path=lock_path)
-    return _GLOBAL_SINGLE_INSTANCE_LOCK._acquire_posix()
+    return _GLOBAL_SINGLE_INSTANCE_LOCK.acquire()
 
 
 def release_posix_file_lock() -> None:
     """Releases the POSIX advisory file lock held by the current process, if any."""
-    _GLOBAL_SINGLE_INSTANCE_LOCK._release_posix()
+    release_single_instance_lock()
 
 
 def release_single_instance_lock() -> None:
     """Releases any single-instance mutex or file lock held by this process."""
+    global _GLOBAL_SINGLE_INSTANCE_LOCK
     _GLOBAL_SINGLE_INSTANCE_LOCK.release()
+    _GLOBAL_SINGLE_INSTANCE_LOCK = SingleInstanceLock()
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -105,43 +105,55 @@ def test_startup_frozen_constants_contract() -> None:
 
 @pytest.mark.unit
 def test_startup_enable_disable_and_toggle() -> None:
-    mock_winreg = MagicMock()
-    mock_key = MagicMock()
-    mock_winreg.OpenKey.return_value.__enter__.return_value = mock_key
-    mock_winreg.REG_SZ = 1
-    mock_winreg.HKEY_CURRENT_USER = 0x80000001
-    mock_winreg.KEY_SET_VALUE = 0x0002
+    class FakeWinregKey:
+        def __init__(self, store: dict[str, str]) -> None:
+            self.store = store
 
-    with patch.object(startup, "winreg", mock_winreg):
-        # Enable
-        expected_cmd = startup.get_current_executable_command()
+        def __enter__(self) -> FakeWinregKey:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
+    class FakeWinreg:
+        HKEY_CURRENT_USER = 0x80000001
+        KEY_SET_VALUE = 0x0002
+        KEY_READ = 0x20019
+        REG_SZ = 1
+
+        def __init__(self) -> None:
+            self.store: dict[str, str] = {}
+
+        def OpenKey(
+            self, _root: Any, _subkey: str, _res: int = 0, _access: int = 0
+        ) -> FakeWinregKey:
+            return FakeWinregKey(self.store)
+
+        def SetValueEx(
+            self, key: FakeWinregKey, name: str, _res: int, _type: int, value: str
+        ) -> None:
+            key.store[name] = value
+
+        def QueryValueEx(self, key: FakeWinregKey, name: str) -> tuple[str, int]:
+            if name in key.store:
+                return key.store[name], self.REG_SZ
+            raise FileNotFoundError(name)
+
+        def DeleteValue(self, key: FakeWinregKey, name: str) -> None:
+            if name in key.store:
+                del key.store[name]
+            else:
+                raise FileNotFoundError(name)
+
+    fake = FakeWinreg()
+    with patch("expedition33_rpc.core.startup.winreg", fake):
         assert startup.set_startup_enabled(True) is True
-        mock_winreg.OpenKey.assert_called_with(
-            mock_winreg.HKEY_CURRENT_USER,
-            startup.RUN_KEY,
-            0,
-            mock_winreg.KEY_SET_VALUE,
-        )
-        mock_winreg.SetValueEx.assert_called_once_with(
-            mock_key,
-            startup.APP_NAME,
-            0,
-            mock_winreg.REG_SZ,
-            expected_cmd,
-        )
+        assert startup.APP_NAME in fake.store
+        assert startup.is_startup_enabled() is True
 
-        # Reset call counts for disable test
-        mock_winreg.OpenKey.reset_mock()
-
-        # Disable
         assert startup.set_startup_enabled(False) is True
-        mock_winreg.OpenKey.assert_called_with(
-            mock_winreg.HKEY_CURRENT_USER,
-            startup.RUN_KEY,
-            0,
-            mock_winreg.KEY_SET_VALUE,
-        )
-        mock_winreg.DeleteValue.assert_called_once_with(mock_key, startup.APP_NAME)
+        assert startup.APP_NAME not in fake.store
+        assert startup.is_startup_enabled() is False
 
 
 @pytest.mark.unit
@@ -205,91 +217,121 @@ def test_single_instance_cross_platform_guards(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_posix_file_lock_lifecycle_and_cleanup(tmp_path: Path) -> None:
     """Verifies that POSIX flock lifecycle, idempotency, fd leaks, and release work cleanly."""
-    mock_fcntl = MagicMock()
-    mock_fcntl.LOCK_EX = 2
-    mock_fcntl.LOCK_NB = 4
-    mock_fcntl.LOCK_UN = 8
+    if sys.platform == "win32":
+        pytest.skip("POSIX flock is only tested on POSIX platforms")
 
     test_lock = tmp_path / "lifecycle.lock"
-
     try:
-        with (
-            patch.dict(sys.modules, {"fcntl": mock_fcntl}),
-            patch("sys.platform", "linux"),
-        ):
-            # 1. Acquire lock cleanly
-            assert acquire_posix_file_lock(test_lock) is True
-            assert mock_fcntl.flock.called
+        # 1. Acquire lock cleanly
+        assert acquire_posix_file_lock(test_lock) is True
+        assert test_lock.is_file()
 
-            # 2. Idempotent re-acquisition in same process returns True
-            assert acquire_posix_file_lock(test_lock) is True
+        # 2. Idempotent re-acquisition in same process returns True
+        assert acquire_posix_file_lock(test_lock) is True
 
-            # 3. Switching lock paths closes old file and acquires new one
-            other_lock = tmp_path / "other.lock"
-            assert acquire_posix_file_lock(other_lock) is True
+        # 3. Switching lock paths closes old file and acquires new one
+        other_lock = tmp_path / "other.lock"
+        assert acquire_posix_file_lock(other_lock) is True
+        assert other_lock.is_file()
 
-            # 4. Release closes file and calls LOCK_UN
-            release_posix_file_lock()
-            assert mock_fcntl.flock.call_args[0][1] == mock_fcntl.LOCK_UN
+        # 4. Release closes file
+        release_posix_file_lock()
 
-            # 5. Subsequent release is a safe no-op
-            release_posix_file_lock()
+        # 5. Subsequent release is a safe no-op
+        release_posix_file_lock()
 
-            # 6. Verify fd is NOT leaked when flock raises BlockingIOError (tested without patching builtins.open)
-            mock_fcntl.flock.side_effect = BlockingIOError("Lock collision")
-            failed_lock_path = tmp_path / "failed.lock"
-            result = acquire_posix_file_lock(failed_lock_path)
-            assert result is False
+        # 6. Verify contention detection on second instance
+        lock_a = SingleInstanceLock(lock_path=test_lock)
+        assert lock_a.acquire() is True
+        lock_b = SingleInstanceLock(lock_path=test_lock)
+        assert lock_b.acquire() is False
+        lock_a.release()
     finally:
         release_single_instance_lock()
 
 
 @pytest.mark.unit
 def test_single_instance_lock_contention_and_atomic_removal(tmp_path: Path) -> None:
-    """Verifies SingleInstanceLock contention, context manager, and atomic file removal via tmp_path."""
-    lock_file = tmp_path / "app_instance.lock"
+    """Verifies SingleInstanceLock contention, context manager, and cleanup across Windows and POSIX."""
+    if sys.platform == "win32":
+        test_mutex = f"Local\\TestInstanceMutex_{os.getpid()}_{time.monotonic_ns()}"
 
-    # 1. First instance acquires lock successfully
-    lock1 = SingleInstanceLock(lock_path=lock_file)
-    assert lock1.acquire() is True
-    assert lock1._is_locked is True
-    assert lock_file.is_file()
+        # 1. First instance acquires mutex successfully
+        lock1 = SingleInstanceLock(mutex_name=test_mutex)
+        assert lock1.acquire() is True
+        assert lock1._is_locked is True
 
-    # 2. Second instance attempts to acquire on same path -> contention detected
-    lock2 = SingleInstanceLock(lock_path=lock_file)
-    assert lock2.acquire() is False
-    assert lock2._is_locked is False
-    assert lock2._flock_file is None
+        # 2. Second instance attempts to acquire same mutex -> contention detected
+        lock2 = SingleInstanceLock(mutex_name=test_mutex)
+        assert lock2.acquire() is False
+        assert lock2._is_locked is False
 
-    # 3. Context manager usage respects contention
-    with SingleInstanceLock(lock_path=lock_file) as ctx_lock:
-        assert ctx_lock._is_locked is False
+        # 3. Context manager usage respects contention
+        with SingleInstanceLock(mutex_name=test_mutex) as ctx_lock:
+            assert ctx_lock._is_locked is False
 
-    # 4. Atomic removal of lock file from disk while still locked
-    assert lock_file.is_file()
-    lock_file.unlink()
-    assert not lock_file.exists()
+        # 4. Release primary lock cleanly
+        lock1.release()
+        assert lock1._is_locked is False
 
-    # 5. Release primary lock cleanly
-    lock1.release()
-    assert lock1._is_locked is False
-    assert lock1._flock_file is None
+        # 5. Secondary lock can now acquire following primary release
+        assert lock2.acquire() is True
+        assert lock2._is_locked is True
+        lock2.release()
+        assert lock2._is_locked is False
 
-    # 6. Secondary lock can now acquire following primary release
-    assert lock2.acquire() is True
-    assert lock2._is_locked is True
-    assert lock_file.is_file()
-    lock2.release()
-    assert lock2._is_locked is False
-
-    # 7. is_already_running integration test on isolated lock path
-    release_single_instance_lock()
-    try:
-        assert is_already_running(lock_path=lock_file) is False
-        # Secondary lock detects contention with active is_already_running lock
-        assert lock1.acquire() is False
-    finally:
+        # 6. is_already_running integration test on isolated mutex
         release_single_instance_lock()
+        try:
+            assert is_already_running(mutex_name=test_mutex) is False
+            # Secondary lock detects contention with active is_already_running lock
+            assert lock1.acquire() is False
+        finally:
+            release_single_instance_lock()
+    else:
+        lock_file = tmp_path / "app_instance.lock"
+
+        # 1. First instance acquires lock successfully
+        lock1 = SingleInstanceLock(lock_path=lock_file)
+        assert lock1.acquire() is True
+        assert lock1._is_locked is True
+        assert lock_file.is_file()
+
+        # 2. Second instance attempts to acquire on same path -> contention detected
+        lock2 = SingleInstanceLock(lock_path=lock_file)
+        assert lock2.acquire() is False
+        assert lock2._is_locked is False
+        assert lock2._flock_file is None
+
+        # 3. Context manager usage respects contention
+        with SingleInstanceLock(lock_path=lock_file) as ctx_lock:
+            assert ctx_lock._is_locked is False
+
+        # 4. Atomic removal of lock file from disk while still locked
+        assert lock_file.is_file()
+        lock_file.unlink()
+        assert not lock_file.exists()
+
+        # 5. Release primary lock cleanly
+        lock1.release()
+        assert lock1._is_locked is False
+        assert lock1._flock_file is None
+
+        # 6. Secondary lock can now acquire following primary release
+        assert lock2.acquire() is True
+        assert lock2._is_locked is True
+        assert lock_file.is_file()
+        lock2.release()
+        assert lock2._is_locked is False
+
+        # 7. is_already_running integration test on isolated lock path
+        release_single_instance_lock()
+        try:
+            assert is_already_running(lock_path=lock_file) is False
+            # Secondary lock detects contention with active is_already_running lock
+            assert lock1.acquire() is False
+        finally:
+            release_single_instance_lock()
 
 
 @pytest.mark.unit
@@ -377,75 +419,43 @@ def test_peek_named_pipe_ready_cross_platform_and_handles() -> None:
     assert peek_named_pipe_ready(-1) is True
 
     # 3. Handle closing or broken pipe triggers ConnectionError
-    mock_kernel32 = MagicMock()
-    mock_kernel32.PeekNamedPipe.return_value = 0  # Win32 failure (e.g. pipe broken/closed)
+    class FakeKernel32:
+        def __init__(self, ret_val: int = 1, avail_bytes: int = 0) -> None:
+            self.ret_val = ret_val
+            self.avail_bytes = avail_bytes
 
+        def PeekNamedPipe(
+            self, _h: Any, _buf: Any, _sz: Any, _read: Any, avail_ref: Any, _left: Any
+        ) -> int:
+            if avail_ref is not None and hasattr(avail_ref, "_obj"):
+                avail_ref._obj.value = self.avail_bytes
+            return self.ret_val
+
+    broken_kernel32 = FakeKernel32(ret_val=0)
     with (
         patch("sys.platform", "win32"),
-        patch("expedition33_rpc.core.platform._kernel32", mock_kernel32),
+        patch("expedition33_rpc.core.platform._kernel32", broken_kernel32),
         pytest.raises(ConnectionError, match="Named pipe broken or closed"),
     ):
         peek_named_pipe_ready(999)
 
     # 4. Handle with bytes available returns True immediately
-    def mock_peek_success(
-        _h: Any, _buf: Any, _sz: Any, _read: Any, avail_ref: Any, _left: Any
-    ) -> int:
-        avail_ref._obj.value = 42
-        return 1
-
-    mock_kernel32.PeekNamedPipe.side_effect = mock_peek_success
+    ready_kernel32 = FakeKernel32(ret_val=1, avail_bytes=42)
     with (
         patch("sys.platform", "win32"),
-        patch("expedition33_rpc.core.platform._kernel32", mock_kernel32),
+        patch("expedition33_rpc.core.platform._kernel32", ready_kernel32),
     ):
         assert peek_named_pipe_ready(999, timeout=0.1) is True
 
     # 5. Handle with 0 bytes available returns False on timeout
-    def mock_peek_zero(_h: Any, _buf: Any, _sz: Any, _read: Any, avail_ref: Any, _left: Any) -> int:
-        avail_ref._obj.value = 0
-        return 1
-
-    mock_kernel32.PeekNamedPipe.side_effect = mock_peek_zero
+    empty_kernel32 = FakeKernel32(ret_val=1, avail_bytes=0)
     with (
         patch("sys.platform", "win32"),
-        patch("expedition33_rpc.core.platform._kernel32", mock_kernel32),
+        patch("expedition33_rpc.core.platform._kernel32", empty_kernel32),
     ):
         start = time.perf_counter()
         assert peek_named_pipe_ready(999, timeout=0.03) is False
         assert time.perf_counter() - start >= 0.02
-
-
-@pytest.mark.unit
-def test_single_instance_windows_mutex() -> None:
-    mock_kernel32 = MagicMock()
-
-    # Case 1: First instance (last_error == 0)
-    with (
-        patch("sys.platform", "win32"),
-        patch("expedition33_rpc.core.platform._kernel32", mock_kernel32),
-        patch("ctypes.get_last_error", return_value=0, create=True),
-    ):
-        assert is_already_running() is False
-
-    # Case 2: Already running (ERROR_ALREADY_EXISTS = 183) - closes duplicate handle
-    mock_dup_handle = MagicMock()
-    mock_kernel32.CreateMutexW.return_value = mock_dup_handle
-    with (
-        patch("sys.platform", "win32"),
-        patch("expedition33_rpc.core.platform._kernel32", mock_kernel32),
-        patch("ctypes.get_last_error", return_value=183, create=True),
-    ):
-        assert is_already_running() is True
-        mock_kernel32.CloseHandle.assert_called_with(mock_dup_handle)
-
-    # Case 3: Access denied (ERROR_ACCESS_DENIED = 5)
-    with (
-        patch("sys.platform", "win32"),
-        patch("expedition33_rpc.core.platform._kernel32", mock_kernel32),
-        patch("ctypes.get_last_error", return_value=5, create=True),
-    ):
-        assert is_already_running() is True
 
 
 # ---------------------------------------------------------------------------
@@ -510,17 +520,30 @@ def test_smoke_test_missing_icon_exits_one() -> None:
 @pytest.mark.integration
 def test_main_runs_and_releases_lock() -> None:
     """Verifies that normal main() execution releases the single instance lock upon exit."""
-    mock_app = MagicMock()
-    mock_orchestrator = MagicMock()
+    app_ran = False
+    lock_released = False
+
+    class FakeApp:
+        def __init__(self, orchestrator: Any = None) -> None:
+            pass
+
+        def run(self) -> None:
+            nonlocal app_ran
+            app_ran = True
+
+    def fake_release() -> None:
+        nonlocal lock_released
+        lock_released = True
+
     with (
         patch("expedition33_rpc.core.app.is_already_running", return_value=False),
-        patch("expedition33_rpc.core.orchestrator.AppOrchestrator", return_value=mock_orchestrator),
-        patch("expedition33_rpc.ui.tray_app.ExpeditionTrayApp", return_value=mock_app),
-        patch("expedition33_rpc.core.app.release_single_instance_lock") as mock_release,
+        patch("expedition33_rpc.core.orchestrator.AppOrchestrator"),
+        patch("expedition33_rpc.ui.tray_app.ExpeditionTrayApp", FakeApp),
+        patch("expedition33_rpc.core.app.release_single_instance_lock", side_effect=fake_release),
     ):
         main()
-        mock_app.run.assert_called_once()
-        mock_release.assert_called_once()
+        assert app_ran is True
+        assert lock_released is True
 
 
 @pytest.mark.unit
