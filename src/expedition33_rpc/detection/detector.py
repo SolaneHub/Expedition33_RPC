@@ -212,6 +212,7 @@ class BridgeStateProvider:
         paths: list[str] | None = None,
         grace_period: float = 2.5,
         time_provider: Callable[[], float] = time.time,
+        monotonic_provider: Callable[[], float] | None = None,
     ):
         if paths is not None:
             self.paths = list(paths)
@@ -219,12 +220,17 @@ class BridgeStateProvider:
             self.paths = get_telemetry_file_paths()
         self.grace_period = grace_period
         self.time_provider = time_provider
+        self.monotonic_provider = (
+            monotonic_provider
+            if monotonic_provider is not None
+            else (time_provider if time_provider is not time.time else time.monotonic)
+        )
         self._last_valid_data: RawGameData | None = None
-        self._last_valid_time: float = 0.0
+        self._last_valid_monotonic: float = 0.0
 
     def reset(self) -> None:
         self._last_valid_data = None
-        self._last_valid_time = 0.0
+        self._last_valid_monotonic = 0.0
 
     def read_bridge_status(self) -> dict[str, Any] | None:
         for p in self.paths:
@@ -250,11 +256,11 @@ class BridgeStateProvider:
         if bridge:
             bridge_ts = bridge.get("timestamp")
             is_fresh = True
-            now = self.time_provider()
+            now_epoch = self.time_provider()
             if bridge_ts is not None:
                 try:
                     ts_val = float(bridge_ts)
-                    if abs(now - ts_val) > 5.0 or (
+                    if abs(now_epoch - ts_val) > 5.0 or (
                         min_valid_timestamp is not None and ts_val < (min_valid_timestamp - 10)
                     ):
                         is_fresh = False
@@ -304,16 +310,17 @@ class BridgeStateProvider:
                     "checkpoint": checkpoint_str,
                 }
                 self._last_valid_data = data
-                self._last_valid_time = self.time_provider()
+                self._last_valid_monotonic = self.monotonic_provider()
                 return data
             else:
                 self._last_valid_data = None
                 return None
 
-        # Transient glitch grace period encapsulated inside bridge provider
+        # Transient glitch grace period: use monotonic time for duration measurement
+        monotonic_now = self.monotonic_provider()
         if (
             self._last_valid_data is not None
-            and (self.time_provider() - self._last_valid_time) < self.grace_period
+            and (monotonic_now - self._last_valid_monotonic) < self.grace_period
         ):
             return self._last_valid_data
 
@@ -506,9 +513,27 @@ class GameDetector:
             pass
         return self._cached_language
 
-    def get_game_state(self, now: float | None = None, force: bool = False) -> GameState:
-        """Executes a full detection cycle returning an immutable GameState snapshot."""
-        proc = self.find_game_process(force=force)
+    def get_game_state(
+        self,
+        now: float | None = None,
+        now_monotonic: float | None = None,
+        now_epoch: float | None = None,
+        force: bool = False,
+    ) -> GameState:
+        """Executes a full detection cycle returning an immutable GameState snapshot.
+
+        Args:
+            now: Legacy parameter for backward compatibility. When provided alone,
+                 it is interpreted as epoch time for timer_tracker and start_time.
+                 Prefer explicit now_monotonic / now_epoch for clock-correct usage.
+            now_monotonic: Monotonic clock value for process scan backoff and language interval.
+            now_epoch: Epoch wall-clock value for timer_tracker.update() and outbound start_time.
+            force: When True, bypasses idle backoff for process scanning.
+        """
+        # Resolve explicit dual-clock or legacy single-clock parameter
+        effective_monotonic = now_monotonic
+        effective_epoch = now_epoch if now_epoch is not None else now
+        proc = self.find_game_process(now=effective_monotonic, force=force)
 
         if not proc:
             self.cached_pid = None
@@ -526,7 +551,7 @@ class GameDetector:
             self.timer_tracker.reset()
             return GameState(is_running=False, game_language=self._cached_language)
 
-        lang = self.get_game_language(force=force)
+        lang = self.get_game_language(force=force, now=effective_monotonic)
 
         # Extract process creation time safely only for the matched process
         proc_create_time: float | None = None
@@ -668,13 +693,17 @@ class GameDetector:
             ):
                 zone_key = self.timer_tracker.current_zone_id
 
-        current_epoch = time.time() if now is None else now
+        current_epoch = time.time() if effective_epoch is None else effective_epoch
+        current_monotonic = (
+            self.time_provider() if effective_monotonic is None else effective_monotonic
+        )
         effective_start = self.timer_tracker.update(
             zone_key=zone_key,
             in_combat=in_combat,
             is_tower=is_tower,
             current_tower_trial=self.current_tower_trial,
             now=current_epoch,
+            now_monotonic=current_monotonic,
         )
 
         proc_info = GameProcessInfo(

@@ -8,7 +8,7 @@ from __future__ import annotations
 import functools
 import re
 import unicodedata
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal, TypeGuard
 
 import expedition33_rpc.detection.game_data as game_data
 
@@ -23,7 +23,15 @@ type MenuSubstate = Literal[
 ]
 
 if TYPE_CHECKING:
+    from expedition33_rpc.detection.detector import GameState
     from expedition33_rpc.detection.game_data import TowerTrial
+
+
+def _is_game_state(val: object) -> TypeGuard[GameState]:
+    """TypeGuard distinguishing GameState DTO from primitive zone strings without circular import."""
+    from expedition33_rpc.detection.detector import GameState
+
+    return isinstance(val, GameState)
 
 
 def _normalize_alphanumeric_key(text: str) -> str:
@@ -127,21 +135,25 @@ def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
 
 
 def resolve_menu_substate(
-    raw_zone_or_state: Any = None,
+    raw_zone_or_state: str | GameState | None = None,
     zone_name: str | None = None,
     *,
     raw_zone: str | None = None,
 ) -> MenuSubstate:
     """Resolves fine-grained menu substate for Discord RPC and system tray presentation."""
     target = raw_zone if raw_zone is not None else raw_zone_or_state
-    if hasattr(target, "raw_zone"):
-        rz = getattr(target, "raw_zone", "") or ""
-        zn = getattr(target, "zone_name", "") or ""
-        if getattr(target, "is_starting", False):
-            return "starting"
-    else:
-        rz = target or ""
-        zn = zone_name or ""
+    match target:
+        case state if _is_game_state(state):
+            if state.is_starting:
+                return "starting"
+            rz = state.raw_zone or ""
+            zn = state.zone_name or ""
+        case str() as rz_str:
+            rz = rz_str
+            zn = zone_name or ""
+        case _:
+            rz = ""
+            zn = zone_name or ""
 
     raw_lower = rz.lower().strip()
 
@@ -175,32 +187,40 @@ def resolve_menu_substate(
 
 
 def is_menu_zone(
-    raw_zone_or_state: Any = None,
+    raw_zone_or_state: str | GameState | None = None,
     zone_name: str | None = None,
     *,
     raw_zone: str | None = None,
 ) -> bool:
     """Detects if raw_zone, zone_name, or a GameState indicates a main menu or title screen."""
     target = raw_zone if raw_zone is not None else raw_zone_or_state
-    if hasattr(target, "raw_zone"):
-        return is_main_menu(getattr(target, "raw_zone", None), getattr(target, "zone_name", None))
-    return is_main_menu(target, zone_name)
+    match target:
+        case state if _is_game_state(state):
+            return is_main_menu(state.raw_zone, state.zone_name)
+        case str() as rz:
+            return is_main_menu(rz, zone_name)
+        case _:
+            return is_main_menu(None, zone_name)
 
 
 def is_continent_zone(
-    raw_zone_or_state: Any = None,
+    raw_zone_or_state: str | GameState | None = None,
     zone_name: str | None = None,
     *,
     raw_zone: str | None = None,
 ) -> bool:
     """Detects if current location strings or a GameState represent the world map / continent."""
     target = raw_zone if raw_zone is not None else raw_zone_or_state
-    if hasattr(target, "raw_zone"):
-        raw = (getattr(target, "raw_zone", "") or "").lower()
-        zone = (getattr(target, "zone_name", None) or "").lower()
-    else:
-        raw = (target or "").lower()
-        zone = (zone_name or "").lower()
+    match target:
+        case state if _is_game_state(state):
+            raw = (state.raw_zone or "").lower()
+            zone = (state.zone_name or "").lower()
+        case str() as rz:
+            raw = rz.lower()
+            zone = (zone_name or "").lower()
+        case _:
+            raw = ""
+            zone = (zone_name or "").lower()
     return "continent" in zone or "continente" in zone or "worldmap" in raw
 
 
