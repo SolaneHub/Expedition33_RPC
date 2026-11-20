@@ -1,4 +1,5 @@
 import threading
+import time
 from typing import Any
 
 from expedition33_rpc.integrations.discord_rpc import (
@@ -95,6 +96,21 @@ class DiscordPipeSimulator:
         with self._lock:
             return bytes(self.outgoing_bytes)
 
+    @property
+    def sent_opcodes(self) -> list[int]:
+        """Returns the list of opcodes for all frames currently in outgoing_bytes without consuming them."""
+        with self._lock:
+            opcodes: list[int] = []
+            idx = 0
+            data = bytes(self.outgoing_bytes)
+            while idx + DiscordFrameCodec.HEADER_SIZE <= len(data):
+                op, length = self._validate_frame_header(
+                    data[idx : idx + DiscordFrameCodec.HEADER_SIZE]
+                )
+                opcodes.append(op)
+                idx += DiscordFrameCodec.HEADER_SIZE + length
+            return opcodes
+
     def pop_last_frame_payload(self) -> dict[str, Any] | None:
         """Extracts and decodes the oldest pending frame written by the client."""
         with self._lock:
@@ -135,3 +151,66 @@ class DiscordPipeSimulator:
                 )
             self.outgoing_bytes.clear()
         return frames
+
+
+class DiscordFaultInjector(DiscordPipeSimulator):
+    """Simulates faulty, slow, or broken OS named pipes for Discord IPC testing.
+
+    Enables testing of:
+    - Artificial latency injection on write() and read().
+    - Partial/chunked delivery (e.g. byte-by-byte or fixed chunk sizes) of the 8-byte
+      header (<II) and payload to verify stream assembly in _read_exact().
+    - Pipe breakage or closure with immediate raising of BrokenPipeError or ConnectionError.
+    """
+
+    def __init__(
+        self,
+        incoming_data: bytes = b"",
+        auto_respond_set_activity: bool = False,
+        write_latency: float = 0.0,
+        read_latency: float = 0.0,
+        chunk_size: int | None = None,
+        fail_write_with: type[Exception] | Exception | None = None,
+        fail_read_with: type[Exception] | Exception | None = None,
+    ) -> None:
+        super().__init__(
+            incoming_data=incoming_data, auto_respond_set_activity=auto_respond_set_activity
+        )
+        self.write_latency = write_latency
+        self.read_latency = read_latency
+        self.chunk_size = chunk_size
+        self.fail_write_with = fail_write_with
+        self.fail_read_with = fail_read_with
+
+    def _raise_fault(self, fault: type[Exception] | Exception) -> None:
+        if isinstance(fault, type) and issubclass(fault, BaseException):
+            raise fault()
+        if isinstance(fault, BaseException):
+            raise fault
+        raise RuntimeError(str(fault))
+
+    def write(self, data: bytes) -> int:
+        if self.fail_write_with is not None:
+            self._raise_fault(self.fail_write_with)
+
+        if self.write_latency > 0:
+            time.sleep(self.write_latency)
+
+        return super().write(data)
+
+    def read(self, n: int = -1) -> bytes:
+        if self.fail_read_with is not None:
+            self._raise_fault(self.fail_read_with)
+
+        if self.read_latency > 0:
+            time.sleep(self.read_latency)
+
+        effective_n = n
+        if (
+            self.chunk_size is not None
+            and self.chunk_size > 0
+            and (effective_n == -1 or effective_n > self.chunk_size)
+        ):
+            effective_n = self.chunk_size
+
+        return super().read(effective_n)

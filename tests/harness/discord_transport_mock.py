@@ -26,6 +26,9 @@ from expedition33_rpc.integrations.discord_rpc import (
 if sys.platform == "win32":
     import _winapi
     import ctypes
+else:
+    _winapi: Any = None
+    ctypes: Any = None
 
 
 class MockDiscordServer:

@@ -93,11 +93,17 @@ class FakeUpdater(UpdaterProtocol):
         error_message: str | None = None,
         worker_started_event: threading.Event | None = None,
         release_worker_event: threading.Event | None = None,
+        status_text: str = "Fake Updater Status",
     ) -> None:
         self.state = state
         self.available_update = available_update
         self.error_message = error_message
+        self.status_text = status_text
         self.cancel_called = False
+        self.open_release_page_called = False
+        self.check_in_background_calls: list[
+            tuple[float, Callable[[UpdateInfo | None], None] | None]
+        ] = []
         self.worker_thread: threading.Thread | None = None
         self._worker_started_event = worker_started_event
         self._release_worker_event = release_worker_event
@@ -116,7 +122,7 @@ class FakeUpdater(UpdaterProtocol):
         delay_seconds: float = 0.0,
         on_complete: Callable[[UpdateInfo | None], None] | None = None,
     ) -> None:
-        del delay_seconds, on_complete
+        self.check_in_background_calls.append((delay_seconds, on_complete))
 
         def _run() -> None:
             if self._worker_started_event is not None:
@@ -129,10 +135,11 @@ class FakeUpdater(UpdaterProtocol):
         t.start()
 
     def open_release_page(self) -> bool:
+        self.open_release_page_called = True
         return True
 
     def get_status_text(self) -> str:
-        return "Fake Updater Status"
+        return self.status_text
 
 
 __all__ = [
