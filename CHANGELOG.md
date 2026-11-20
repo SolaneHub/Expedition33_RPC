@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.4.0] - 2026-11-20
+
+### New Features & Cross-Platform Architecture
+- **Steam & Proton Prefix Resolution (`detection.steam_resolver`, `detection.compat_paths`, `integrations.bridge_installer`)**:
+  - Introduced `SteamCompatResolver` SSOT unifying Steam root discovery, Valve Data Format (`libraryfolders.vdf`) parsing, Windows Registry detection, and Linux/Steam Deck Proton prefix mapping for App ID `1903340`.
+  - Refactored `compat_paths.py` and `find_game_win64_directory` to delegate path resolution without redundant disk I/O.
+- **Cross-Platform Single Instance Locking (`core.platform`, `tests.core`)**:
+  - Implemented `SingleInstanceLock` encapsulating Windows Named Mutex (`CreateMutexW`) and POSIX `fcntl.flock` with context manager support, contention handling, and atomic lock file unlinking.
+
+### Architecture & YAGNI Alignment
+- **Radical Feature Parsimony & Multiplayer Pruning (`core.presence`, `integrations.discord_rpc`, `ARCHITECTURE.md`)**:
+  - Definitively pruned speculative `party_id` and `party_size` fields from `PresencePayload` and outbound Discord IPC wire payloads, keeping a zero-overhead single-player wire footprint.
+- **Settings State Encapsulation (`core.settings`, `tests.core`, `tests.e2e`)**:
+  - Eliminated redundant `Settings` dataclass, encapsulating `_anti_spoiler` state directly within `SettingsService` with thread-safe `is_anti_spoiler_enabled()` accessors and atomic JSON writes.
+- **Unified Orchestrator Callback Lifecycle (`core.orchestrator`, `ui.tray_app`, `src.expedition33_rpc`)**:
+  - Unified subscriber management in `AppOrchestrator` via property-backed subscriber lists and explicit unsubscription callables.
+  - Replaced dynamic `__getattr__` exports in package roots with explicit top-level imports and typed `__all__` definitions.
+
+### Quality Assurance, Invariants & Test Harness
+- **Clock Decoupling & Anti-Jitter Hardening (`detection.detector`, `detection.timer_tracker`, `detection.normalization`)**:
+  - Decoupled `time.monotonic()` duration tracking from outbound epoch `time.time()` timestamps across `BridgeStateProvider` and `ZoneTimerTracker`, guaranteeing immunity from NTP time jumps.
+  - Enforced strict `TypeGuard[GameState]` and structural pattern matching in `normalization.py`.
+- **AST Architectural Invariant Enforcement (`tests.ci.test_architectural_invariants`)**:
+  - Added static AST syntax tree tests verifying clock decoupling in detection, zero low-level OS module imports in domain logic, zero `time.sleep()` in `BridgeStateProvider`, and zero presence of `party_id`/`party_size`.
+- **Test Harness Expansion (`tests.harness`, `tests.detection`)**:
+  - Introduced `DualClockHarness` for deterministic multi-clock simulation, `DiscordFaultInjector` for simulating pipe latency and chunked transport, and `BridgeContractInspector` for offline Lua token verification.
+
+### Documentation & Tooling
+- **Architecture Diagrams & Directives (`docs/`, `tools/generate_diagrams.py`, `ARCHITECTURE.md`, `AGENTS.md`)**:
+  - Regenerated SVG pipeline, state machine, and threading diagrams reflecting `SteamCompatResolver`, zero I/O jitter, and single-player wire layout.
+  - Documented strict Pyright warning enforcement in `AGENTS.md`.
+
 ## [v2.3.7] - 2026-11-19
 
 ### Architecture & Refactoring

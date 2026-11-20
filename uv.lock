@@ -22,7 +22,7 @@ wheels = [
 
 [[package]]
 name = "expedition33-discord-rpc"
-version = "2.3.7"
+version = "2.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "pillow" },
