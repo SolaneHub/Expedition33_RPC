@@ -77,10 +77,130 @@ def winreg_delete_value(hkey: Any, subkey: str, value_name: str, winreg_module: 
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Single-Instance Mutex & Process Locking
 # ---------------------------------------------------------------------------
-_MUTEX_HANDLE: Any = None
-_FLOCK_FILE: Any = None
+class SingleInstanceLock:
+    """Encapsulates single-instance mutual exclusion across Windows (Named Mutex) and POSIX (flock).
+
+    Can be used directly or as a context manager.
+    """
+
+    def __init__(
+        self,
+        mutex_name: str | None = None,
+        lock_path: Path | str | None = None,
+    ) -> None:
+        self.mutex_name = mutex_name
+        self.lock_path = lock_path
+        self._mutex_handle: Any = None
+        self._flock_file: Any = None
+        self._is_locked: bool = False
+
+    def acquire(self) -> bool:
+        """Attempts to acquire the single-instance lock.
+
+        Returns True if acquired successfully (this process is the sole instance),
+        or False if another instance is already holding the lock.
+        """
+        if sys.platform == "win32":
+            target_name = (
+                self.mutex_name
+                if self.mutex_name is not None
+                else os.environ.get(
+                    "EXPEDITION33_MUTEX_NAME", "Local\\Expedition33_Discord_RPC_Mutex"
+                )
+            )
+            if _kernel32 is None:
+                return True
+            handle = _kernel32.CreateMutexW(None, False, target_name)
+            last_error = ctypes.get_last_error()
+            # ERROR_ALREADY_EXISTS = 183, ERROR_ACCESS_DENIED = 5
+            if last_error in (183, 5):
+                if handle:
+                    with contextlib.suppress(Exception):
+                        _kernel32.CloseHandle(handle)
+                return False
+            if self._mutex_handle is not None and handle != self._mutex_handle:
+                with contextlib.suppress(Exception):
+                    _kernel32.CloseHandle(self._mutex_handle)
+            self._mutex_handle = handle
+            self._is_locked = True
+            return True
+
+        return self._acquire_posix()
+
+    def _acquire_posix(self) -> bool:
+        try:
+            import fcntl
+        except ImportError:
+            self._is_locked = True
+            return True
+
+        target_path = (
+            Path(
+                os.environ.get(
+                    "EXPEDITION33_LOCK_FILE",
+                    Path(tempfile.gettempdir()) / "expedition33_rpc.lock",
+                )
+            )
+            if self.lock_path is None
+            else Path(self.lock_path)
+        )
+
+        if self._flock_file is not None and not getattr(self._flock_file, "closed", False):
+            try:
+                if Path(self._flock_file.name).resolve() == target_path.resolve():
+                    return True
+            except Exception:
+                pass
+            self._release_posix()
+
+        f: Any = None
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            f = open(target_path, "a+")
+            fcntl_mod: Any = fcntl
+            fcntl_mod.flock(f, fcntl_mod.LOCK_EX | fcntl_mod.LOCK_NB)
+            self._flock_file = f
+            self._is_locked = True
+            return True
+        except (BlockingIOError, OSError):
+            if f is not None:
+                with contextlib.suppress(Exception):
+                    f.close()
+            return False
+
+    def _release_posix(self) -> None:
+        if self._flock_file is not None:
+            with contextlib.suppress(Exception):
+                import fcntl
+
+                fcntl_mod: Any = fcntl
+                fcntl_mod.flock(self._flock_file, fcntl_mod.LOCK_UN)
+            with contextlib.suppress(Exception):
+                self._flock_file.close()
+            self._flock_file = None
+
+    def release(self) -> None:
+        """Releases the single-instance lock."""
+        if self._mutex_handle is not None:
+            if sys.platform == "win32" and _kernel32 is not None:
+                with contextlib.suppress(Exception):
+                    _kernel32.CloseHandle(self._mutex_handle)
+            self._mutex_handle = None
+        self._release_posix()
+        self._is_locked = False
+
+    def __enter__(self) -> SingleInstanceLock:
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.release()
+
+
+_GLOBAL_SINGLE_INSTANCE_LOCK = SingleInstanceLock()
 
 
 def is_already_running(
@@ -89,98 +209,34 @@ def is_already_running(
 ) -> bool:
     """Checks if another instance of Expedition 33 RPC is already running across Windows (Named Mutex) and POSIX (flock)."""
     if sys.platform == "win32":
-        target_name = (
-            mutex_name
-            if mutex_name is not None
-            else os.environ.get("EXPEDITION33_MUTEX_NAME", "Local\\Expedition33_Discord_RPC_Mutex")
-        )
-        global _MUTEX_HANDLE
-        if _kernel32 is None:
-            return False
-        handle = _kernel32.CreateMutexW(None, False, target_name)
-        last_error = ctypes.get_last_error()
-        # ERROR_ALREADY_EXISTS = 183, ERROR_ACCESS_DENIED = 5
-        if last_error in (183, 5):
-            if handle:
-                with contextlib.suppress(Exception):
-                    _kernel32.CloseHandle(handle)
-            return True
-        if _MUTEX_HANDLE is not None and handle != _MUTEX_HANDLE:
-            with contextlib.suppress(Exception):
-                _kernel32.CloseHandle(_MUTEX_HANDLE)
-        _MUTEX_HANDLE = handle
-        return False
+        global _GLOBAL_SINGLE_INSTANCE_LOCK
+        if mutex_name is not None:
+            _GLOBAL_SINGLE_INSTANCE_LOCK.release()
+            _GLOBAL_SINGLE_INSTANCE_LOCK = SingleInstanceLock(mutex_name=mutex_name)
+        return not _GLOBAL_SINGLE_INSTANCE_LOCK.acquire()
 
     return not acquire_posix_file_lock(lock_path=lock_path)
 
 
 def acquire_posix_file_lock(lock_path: Path | str | None = None) -> bool:
     """Acquires an exclusive advisory file lock on POSIX systems (Linux / Steam Deck / macOS)."""
-    global _FLOCK_FILE
+    global _GLOBAL_SINGLE_INSTANCE_LOCK
     if sys.platform == "win32":
         return True
-    try:
-        import fcntl
-    except ImportError:
-        return True
-
-    target_path = (
-        Path(
-            os.environ.get(
-                "EXPEDITION33_LOCK_FILE", Path(tempfile.gettempdir()) / "expedition33_rpc.lock"
-            )
-        )
-        if lock_path is None
-        else Path(lock_path)
-    )
-
-    # If this process already holds this exact lock file, consider it successfully acquired
-    if _FLOCK_FILE is not None and not getattr(_FLOCK_FILE, "closed", False):
-        try:
-            if Path(_FLOCK_FILE.name).resolve() == target_path.resolve():
-                return True
-        except Exception:
-            pass
-        release_posix_file_lock()
-
-    f: Any = None
-    try:
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        f = open(target_path, "a+")
-        fcntl_mod: Any = fcntl
-        fcntl_mod.flock(f, fcntl_mod.LOCK_EX | fcntl_mod.LOCK_NB)
-        _FLOCK_FILE = f
-        return True
-    except (BlockingIOError, OSError):
-        if f is not None:
-            with contextlib.suppress(Exception):
-                f.close()
-        return False
+    if lock_path is not None:
+        _GLOBAL_SINGLE_INSTANCE_LOCK._release_posix()
+        _GLOBAL_SINGLE_INSTANCE_LOCK = SingleInstanceLock(lock_path=lock_path)
+    return _GLOBAL_SINGLE_INSTANCE_LOCK._acquire_posix()
 
 
 def release_posix_file_lock() -> None:
     """Releases the POSIX advisory file lock held by the current process, if any."""
-    global _FLOCK_FILE
-    if _FLOCK_FILE is not None:
-        with contextlib.suppress(Exception):
-            import fcntl
-
-            fcntl_mod: Any = fcntl
-            fcntl_mod.flock(_FLOCK_FILE, fcntl_mod.LOCK_UN)
-        with contextlib.suppress(Exception):
-            _FLOCK_FILE.close()
-        _FLOCK_FILE = None
+    _GLOBAL_SINGLE_INSTANCE_LOCK._release_posix()
 
 
 def release_single_instance_lock() -> None:
     """Releases any single-instance mutex or file lock held by this process."""
-    global _MUTEX_HANDLE
-    if _MUTEX_HANDLE is not None:
-        if sys.platform == "win32" and _kernel32 is not None:
-            with contextlib.suppress(Exception):
-                _kernel32.CloseHandle(_MUTEX_HANDLE)
-        _MUTEX_HANDLE = None
-    release_posix_file_lock()
+    _GLOBAL_SINGLE_INSTANCE_LOCK.release()
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +395,10 @@ def peek_named_pipe_ready(pipe_or_fd: Any, timeout: float = 0.0) -> bool:
             return True
         if time.monotonic() >= deadline:
             return False
-        time.sleep(0.01)
+        # Non-blocking yield: relinquish CPU slice without active sleep
+        # os.sched_yield() is not available on Windows; use a zero-duration sleep
+        # which yields the thread's remaining timeslice to the OS scheduler
+        time.sleep(0)
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +457,7 @@ def prompt_folder_selection(
 
 
 __all__ = [
+    "SingleInstanceLock",
     "acquire_posix_file_lock",
     "is_already_running",
     "peek_named_pipe_ready",

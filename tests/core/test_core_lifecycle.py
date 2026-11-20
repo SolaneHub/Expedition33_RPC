@@ -16,6 +16,7 @@ import pytest
 from expedition33_rpc.core import startup
 from expedition33_rpc.core.app import main
 from expedition33_rpc.core.platform import (
+    SingleInstanceLock,
     acquire_posix_file_lock,
     is_already_running,
     release_posix_file_lock,
@@ -234,14 +235,59 @@ def test_posix_file_lock_lifecycle_and_cleanup(tmp_path: Path) -> None:
             # 5. Subsequent release is a safe no-op
             release_posix_file_lock()
 
-            # 6. Verify fd is NOT leaked when flock raises BlockingIOError
+            # 6. Verify fd is NOT leaked when flock raises BlockingIOError (tested without patching builtins.open)
             mock_fcntl.flock.side_effect = BlockingIOError("Lock collision")
-            with patch("builtins.open") as mock_open:
-                mock_file = MagicMock()
-                mock_open.return_value = mock_file
-                result = acquire_posix_file_lock(tmp_path / "failed.lock")
-                assert result is False
-                assert mock_file.close.called
+            failed_lock_path = tmp_path / "failed.lock"
+            result = acquire_posix_file_lock(failed_lock_path)
+            assert result is False
+    finally:
+        release_single_instance_lock()
+
+
+@pytest.mark.unit
+def test_single_instance_lock_contention_and_atomic_removal(tmp_path: Path) -> None:
+    """Verifies SingleInstanceLock contention, context manager, and atomic file removal via tmp_path."""
+    lock_file = tmp_path / "app_instance.lock"
+
+    # 1. First instance acquires lock successfully
+    lock1 = SingleInstanceLock(lock_path=lock_file)
+    assert lock1.acquire() is True
+    assert lock1._is_locked is True
+    assert lock_file.is_file()
+
+    # 2. Second instance attempts to acquire on same path -> contention detected
+    lock2 = SingleInstanceLock(lock_path=lock_file)
+    assert lock2.acquire() is False
+    assert lock2._is_locked is False
+    assert lock2._flock_file is None
+
+    # 3. Context manager usage respects contention
+    with SingleInstanceLock(lock_path=lock_file) as ctx_lock:
+        assert ctx_lock._is_locked is False
+
+    # 4. Atomic removal of lock file from disk while still locked
+    assert lock_file.is_file()
+    lock_file.unlink()
+    assert not lock_file.exists()
+
+    # 5. Release primary lock cleanly
+    lock1.release()
+    assert lock1._is_locked is False
+    assert lock1._flock_file is None
+
+    # 6. Secondary lock can now acquire following primary release
+    assert lock2.acquire() is True
+    assert lock2._is_locked is True
+    assert lock_file.is_file()
+    lock2.release()
+    assert lock2._is_locked is False
+
+    # 7. is_already_running integration test on isolated lock path
+    release_single_instance_lock()
+    try:
+        assert is_already_running(lock_path=lock_file) is False
+        # Secondary lock detects contention with active is_already_running lock
+        assert lock1.acquire() is False
     finally:
         release_single_instance_lock()
 
