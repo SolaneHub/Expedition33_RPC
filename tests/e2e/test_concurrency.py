@@ -112,11 +112,11 @@ def test_concurrent_settings_mutations(tmp_path: Path) -> None:
     assert errors == []
     assert all(r is True for r in results)
     # Ensure file on disk matches in-memory value
-    in_memory_anti_spoiler = settings_service.anti_spoiler
+    in_memory_anti_spoiler = settings_service.is_anti_spoiler_enabled()
     disk_data = json.loads(settings_file.read_text(encoding="utf-8"))
     assert disk_data.get("anti_spoiler") == in_memory_anti_spoiler
     settings_service.load()
-    assert settings_service.anti_spoiler == in_memory_anti_spoiler
+    assert settings_service.is_anti_spoiler_enabled() == in_memory_anti_spoiler
 
 
 def test_concurrent_telemetry_ticks_and_ui_toggles(tmp_path: Path) -> None:
