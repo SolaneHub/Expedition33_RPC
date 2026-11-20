@@ -4,20 +4,67 @@ import contextlib
 import os
 import shutil
 import zipfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import psutil
 
-from expedition33_rpc.core.platform import winreg, winreg_read_value
+from expedition33_rpc.core.platform import winreg
 from expedition33_rpc.core.resources import get_resource_path
 from expedition33_rpc.detection.game_data import TARGET_PROCESS_NAMES
+from expedition33_rpc.detection.steam_resolver import SteamCompatResolver
+
+if TYPE_CHECKING:
+    from expedition33_rpc.detection.detector import ProcessLike
+
+
+def _find_win64_from_running_processes(
+    target_names: set[str],
+    process_scanner: Callable[[], Iterable[Any]] | None = None,
+) -> str | None:
+    """Scans running processes via process_scanner or psutil to locate the game's Win64 / WinGDK directory."""
+    try:
+        procs = (
+            process_scanner()
+            if process_scanner is not None
+            else psutil.process_iter(["name", "exe"])
+        )
+    except Exception:
+        return None
+
+    for proc in procs:
+        try:
+            name: str | None = None
+            exe_path: str | None = None
+
+            # 1. Check proc.info dict (psutil.process_iter or legacy mock)
+            if hasattr(proc, "info") and isinstance(proc.info, dict):
+                name = proc.info.get("name")
+                exe_path = proc.info.get("exe")
+
+            # 2. Check ProcessLike methods if not found in info
+            if not isinstance(name, str) and callable(getattr(proc, "name", None)):
+                name = proc.name()
+            if not isinstance(exe_path, str) and callable(getattr(proc, "exe", None)):
+                exe_path = proc.exe()
+
+            if name and name.lower() in target_names and exe_path and os.path.exists(exe_path):
+                target_dir = os.path.dirname(os.path.abspath(exe_path))
+                if os.path.basename(target_dir).lower() in ("win64", "wingdk"):
+                    return target_dir
+        except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
+            continue
+    return None
 
 
 def find_game_win64_directory(
     target_process_names: Iterable[str] | str | None = None,
     known_win64_dir: Path | str | None = None,
     known_exe_path: Path | str | None = None,
+    *,
+    process_scanner: Callable[[], Iterable[ProcessLike]] | None = None,
+    steam_resolver: SteamCompatResolver | None = None,
 ) -> str | None:
     """Locates Clair Obscur: Expedition 33 Win64 directory via active processes or Steam libraries."""
     if known_win64_dir and os.path.isdir(known_win64_dir):
@@ -46,82 +93,14 @@ def find_game_win64_directory(
     else:
         target_names.update(TARGET_PROCESS_NAMES)
 
-    # 1. Check running processes
-    for proc in psutil.process_iter(["name", "exe"]):
-        try:
-            name = proc.info.get("name")
-            if name and name.lower() in target_names:
-                exe_path = proc.info.get("exe")
-                if exe_path and os.path.exists(exe_path):
-                    target_dir = os.path.dirname(os.path.abspath(exe_path))
-                    if os.path.basename(target_dir).lower() in ("win64", "wingdk"):
-                        return target_dir
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
+    # 1. Check running processes via ProcessLike / process_scanner protocol
+    proc_dir = _find_win64_from_running_processes(target_names, process_scanner=process_scanner)
+    if proc_dir:
+        return proc_dir
 
-    # 2. Check Steam Registry and Library Folders
-    steam_roots = []
-    if winreg is not None:
-        for hkey, subkey in [
-            (getattr(winreg, "HKEY_CURRENT_USER", None), r"Software\Valve\Steam"),
-            (getattr(winreg, "HKEY_LOCAL_MACHINE", None), r"SOFTWARE\WOW6432Node\Valve\Steam"),
-            (getattr(winreg, "HKEY_LOCAL_MACHINE", None), r"SOFTWARE\Valve\Steam"),
-        ]:
-            val = winreg_read_value(hkey, subkey, "SteamPath", winreg_module=winreg)
-            if val:
-                steam_roots.append(os.path.normpath(val))
-    else:
-        # Non-Windows / Linux / Steam Deck standard Steam roots
-        home = Path.home()
-        for root in [
-            home / ".local" / "share" / "Steam",
-            home / ".steam" / "steam",
-            home / ".steam" / "root",
-            home / ".var" / "app" / "com.valvesoftware.Steam" / ".local" / "share" / "Steam",
-        ]:
-            if root.is_dir():
-                steam_roots.append(os.path.normpath(str(root)))
-
-    libraries = list(steam_roots)
-
-    for root in steam_roots:
-        vdf_path = os.path.join(root, "steamapps", "libraryfolders.vdf")
-        if os.path.exists(vdf_path):
-            try:
-                with open(vdf_path, encoding="utf-8", errors="ignore") as f:
-                    for line in f:
-                        line = line.strip()
-                        if "path" in line.lower():
-                            parts = line.split('"')
-                            if len(parts) >= 4 and parts[3]:
-                                libraries.append(os.path.normpath(parts[3]))
-            except Exception:
-                pass
-
-    checked_dirs = set()
-    for lib in libraries:
-        if not lib or lib in checked_dirs:
-            continue
-        checked_dirs.add(lib)
-
-        win64_candidate = os.path.join(
-            lib,
-            "steamapps",
-            "common",
-            "Expedition 33",
-            "Sandfall",
-            "Binaries",
-            "Win64",
-        )
-        if os.path.isdir(win64_candidate):
-            try:
-                for entry in os.listdir(win64_candidate):
-                    if entry.lower() in target_names:
-                        return win64_candidate
-            except OSError:
-                pass
-
-    return None
+    # 2. Check Steam Registry and Library Folders via unified SteamCompatResolver
+    resolver = steam_resolver or SteamCompatResolver(winreg_module=winreg)
+    return resolver.find_game_install_win64_directory(target_names)
 
 
 def _update_mods_txt_for_install(mods_txt_path: str) -> None:
