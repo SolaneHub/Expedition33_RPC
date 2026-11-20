@@ -79,9 +79,6 @@ class UpdaterProtocol(Protocol):
 class AppOrchestrator:
     """Headless controller coordinating telemetry detection, Discord RPC, auto-updates, and settings."""
 
-    on_state_change: Callable[[GameState, bool], None] | None = None
-    on_update_available: Callable[[UpdateInfo], None] | None = None
-
     def __init__(
         self,
         detector: GameDetector | None = None,
@@ -136,9 +133,14 @@ class AppOrchestrator:
             self.rpc_manager = DiscordRPCManager(is_stopping=self._is_stopping)
 
         self._state_subscribers: list[Callable[[GameState, bool], None]] = []
-        self.on_state_change: Callable[[GameState, bool], None] | None = on_state_change
         self._update_available_subscribers: list[Callable[[UpdateInfo], None]] = []
-        self.on_update_available: Callable[[UpdateInfo], None] | None = on_update_available
+        self._legacy_state_cb: Callable[[GameState, bool], None] | None = None
+        self._legacy_update_cb: Callable[[UpdateInfo], None] | None = None
+
+        if on_state_change is not None:
+            self.on_state_change = on_state_change
+        if on_update_available is not None:
+            self.on_update_available = on_update_available
 
         # Current state - immutable GameState DTO, assignment is atomic
         self.current_state = GameState()
@@ -152,15 +154,45 @@ class AppOrchestrator:
         if self.sync_startup:
             self.startup_service.sync_startup_path()
 
+    @property
+    def on_state_change(self) -> Callable[[GameState, bool], None] | None:
+        return self._legacy_state_cb
+
+    @on_state_change.setter
+    def on_state_change(self, callback: Callable[[GameState, bool], None] | None) -> None:
+        if self._legacy_state_cb is not None and self._legacy_state_cb in self._state_subscribers:
+            self._state_subscribers.remove(self._legacy_state_cb)
+        self._legacy_state_cb = callback
+        if callback is not None and callback not in self._state_subscribers:
+            self._state_subscribers.append(callback)
+
+    @property
+    def on_update_available(self) -> Callable[[UpdateInfo], None] | None:
+        return self._legacy_update_cb
+
+    @on_update_available.setter
+    def on_update_available(self, callback: Callable[[UpdateInfo], None] | None) -> None:
+        if (
+            self._legacy_update_cb is not None
+            and self._legacy_update_cb in self._update_available_subscribers
+        ):
+            self._update_available_subscribers.remove(self._legacy_update_cb)
+        self._legacy_update_cb = callback
+        if callback is not None and callback not in self._update_available_subscribers:
+            self._update_available_subscribers.append(callback)
+
     def subscribe_state_change(
         self, callback: Callable[[GameState, bool], None]
     ) -> Callable[[], None]:
         """Subscribes a listener to game presence state changes and returns an unsubscribe callable."""
-        self._state_subscribers.append(callback)
+        if callback not in self._state_subscribers:
+            self._state_subscribers.append(callback)
 
         def unsubscribe() -> None:
             if callback in self._state_subscribers:
                 self._state_subscribers.remove(callback)
+            if callback is self._legacy_state_cb:
+                self._legacy_state_cb = None
 
         return unsubscribe
 
@@ -168,11 +200,14 @@ class AppOrchestrator:
         self, callback: Callable[[UpdateInfo], None]
     ) -> Callable[[], None]:
         """Subscribes a listener to update available notifications and returns an unsubscribe callable."""
-        self._update_available_subscribers.append(callback)
+        if callback not in self._update_available_subscribers:
+            self._update_available_subscribers.append(callback)
 
         def unsubscribe() -> None:
             if callback in self._update_available_subscribers:
                 self._update_available_subscribers.remove(callback)
+            if callback is self._legacy_update_cb:
+                self._legacy_update_cb = None
 
         return unsubscribe
 
@@ -188,15 +223,6 @@ class AppOrchestrator:
                 subscriber(update_info)
             except Exception as e:
                 logger.error("Update subscriber error: %s", e)
-
-        if (
-            self.on_update_available is not None
-            and self.on_update_available not in self._update_available_subscribers
-        ):
-            try:
-                self.on_update_available(update_info)
-            except Exception as e:
-                logger.error("Update listener error: %s", e)
 
     def install_bridge_to(self, folder: str | Path) -> tuple[bool, str]:
         """Atomically installs the bridge to the specified folder and updates internal state."""
@@ -309,21 +335,13 @@ class AppOrchestrator:
                             target_dir
                         )
 
-            # Notify subscribed listeners and legacy on_state_change
+            # Notify subscribed listeners
             if self._state_subscribers:
                 for sub in list(self._state_subscribers):
                     try:
                         sub(state, anti_spoiler)
                     except Exception as e:
                         logger.error("State subscriber error: %s", e)
-            if (
-                self.on_state_change is not None
-                and self.on_state_change not in self._state_subscribers
-            ):
-                try:
-                    self.on_state_change(state, anti_spoiler)
-                except Exception as e:
-                    logger.error("State change callback error: %s", e)
 
             return state
         except Exception as e:
@@ -378,13 +396,8 @@ class AppOrchestrator:
 
         with contextlib.suppress(Exception):
             self.updater.cancel()
-        if hasattr(self.updater, "join"):
-            with contextlib.suppress(Exception):
-                self.updater.join(timeout=max(0.0, deadline - time.monotonic()))
-        else:
-            updater_thread = getattr(self.updater, "_worker_thread", None)
-            if isinstance(updater_thread, threading.Thread) and updater_thread is not current:
-                updater_thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        with contextlib.suppress(Exception):
+            self.updater.join(timeout=max(0.0, deadline - time.monotonic()))
 
         self.rpc_manager.disconnect()
 

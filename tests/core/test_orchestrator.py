@@ -7,8 +7,6 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 from tests.harness import (
@@ -26,7 +24,31 @@ from expedition33_rpc.core.orchestrator import (
 from expedition33_rpc.core.settings import SettingsService
 from expedition33_rpc.detection.detector import BridgeStateProvider, GameDetector, GameState
 from expedition33_rpc.integrations.discord_rpc import DiscordIPCClient, DiscordRPCManager
-from expedition33_rpc.integrations.updater import AppUpdater, UpdateInfo, UpdateState
+from expedition33_rpc.integrations.updater import UpdateInfo, UpdateState
+
+
+def _make_connected_rpc(
+    pipe: DiscordPipeSimulator | None = None,
+) -> tuple[DiscordRPCManager, DiscordPipeSimulator]:
+    """Helper to instantiate a real DiscordRPCManager backed by DiscordPipeSimulator."""
+    sim_pipe = pipe or DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="test_client", transport=sim_pipe)
+    rpc = DiscordRPCManager(client=client)
+    rpc.connect()
+    sim_pipe.outgoing_bytes.clear()
+    return rpc, sim_pipe
+
+
+def _make_detector_with_procs(
+    procs: list[FakeProcess],
+    bridge_provider: BridgeStateProvider | None = None,
+) -> GameDetector:
+    """Helper to instantiate a real GameDetector scanning specified FakeProcess list."""
+    return GameDetector(
+        bridge_provider=bridge_provider,
+        process_scanner=lambda: procs,
+        save_reader=None,
+    )
 
 
 @pytest.mark.unit
@@ -35,7 +57,7 @@ def test_orchestrator_initialization_defaults(tmp_path: Path) -> None:
     client = DiscordIPCClient(client_id="test", transport=pipe)
     rpc = DiscordRPCManager(client=client)
     settings = SettingsService(custom_path=tmp_path / "settings.json")
-    detector = GameDetector(bridge_provider=None)
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
 
     orchestrator = AppOrchestrator(
         detector=detector,
@@ -88,7 +110,8 @@ def test_orchestrator_step_update_coordinates_subsystems(tmp_path: Path) -> None
         assert result.is_running is True
         assert result.zone_name == "Old Lumière"
 
-        # Assert frame emitted on mock Discord channel
+        # Assert frame emitted on mock Discord channel via wire protocol
+        assert 1 in pipe.sent_opcodes
         frame = pipe.pop_last_frame_payload()
         assert frame is not None
         assert frame["cmd"] == "SET_ACTIVITY"
@@ -105,9 +128,7 @@ def test_orchestrator_step_update_coordinates_subsystems(tmp_path: Path) -> None
 @pytest.mark.unit
 def test_orchestrator_subscribe_state_change_and_unsubscribe(tmp_path: Path) -> None:
     settings = SettingsService(custom_path=tmp_path / "settings.json")
-    pipe = DiscordPipeSimulator()
-    client = DiscordIPCClient(client_id="test", transport=pipe)
-    rpc = DiscordRPCManager(client=client)
+    rpc, _ = _make_connected_rpc()
 
     with GameSessionSimulator(base_dir=tmp_path) as session:
         session.start_game(pid=5555).enter_zone("Level_Main_OldLumiere")
@@ -156,9 +177,7 @@ def test_orchestrator_step_update_error_resilience() -> None:
             )
         ],
     )
-    pipe = DiscordPipeSimulator()
-    client = DiscordIPCClient(client_id="test", transport=pipe)
-    rpc = DiscordRPCManager(client=client)
+    rpc, _ = _make_connected_rpc()
 
     orchestrator = AppOrchestrator(
         detector=detector,
@@ -173,17 +192,15 @@ def test_orchestrator_step_update_error_resilience() -> None:
 
 @pytest.mark.unit
 def test_orchestrator_lifecycle_start_stop() -> None:
-    pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
-    client = DiscordIPCClient(client_id="test", transport=pipe)
-    rpc = DiscordRPCManager(client=client)
-    assert rpc.connect() is True
+    rpc, _ = _make_connected_rpc()
     assert rpc.is_connected is True
 
-    mock_updater = MagicMock(spec=AppUpdater)
+    fake_updater = FakeUpdater()
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
     orchestrator = AppOrchestrator(
-        detector=GameDetector(bridge_provider=None),
+        detector=detector,
         rpc_manager=rpc,
-        updater=mock_updater,
+        updater=fake_updater,
         auto_install_bridge=False,
         sync_startup=False,
         polling_interval=0.01,
@@ -192,7 +209,7 @@ def test_orchestrator_lifecycle_start_stop() -> None:
     orchestrator.start()
     assert orchestrator.running is True
     assert orchestrator.worker_thread is not None
-    mock_updater.check_in_background.assert_called_once()
+    assert len(fake_updater.check_in_background_calls) == 1
 
     # Starting again is idempotent
     orchestrator.start()
@@ -207,19 +224,21 @@ def test_orchestrator_lifecycle_start_stop() -> None:
 
 @pytest.mark.unit
 def test_orchestrator_auto_install_bridge_on_process_detection() -> None:
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_detector.get_game_state.return_value = GameState.create(
-        is_running=True,
-        process_pid=1234,
-        win64_dir=Path("/mock/game/win64"),
-        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
-    )
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    procs = [
+        FakeProcess(
+            pid=1234,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    ]
+    detector = _make_detector_with_procs(procs)
+    rpc, _ = _make_connected_rpc()
     fake_installer = FakeBridgeInstaller(installed=False)
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         bridge_installer=fake_installer,
         auto_install_bridge=True,
         sync_startup=False,
@@ -241,20 +260,22 @@ def test_orchestrator_auto_install_bridge_on_process_detection() -> None:
 @pytest.mark.unit
 def test_orchestrator_event_driven_bridge_check_eliminates_parasitic_io() -> None:
     """Verifies that bridge check runs on initial process detection and NOT on subsequent ticks (no parasitic I/O)."""
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_detector.get_game_state.return_value = GameState.create(
-        is_running=True,
-        process_pid=4242,
-        start_time=1000.0,
-        win64_dir=Path("/mock/game/win64"),
-        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
-    )
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    procs = [
+        FakeProcess(
+            pid=4242,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            create_time=1000.0,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    ]
+    detector = _make_detector_with_procs(procs)
+    rpc, _ = _make_connected_rpc()
     fake_installer = FakeBridgeInstaller(installed=False)
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         bridge_installer=fake_installer,
         auto_install_bridge=True,
         sync_startup=False,
@@ -284,22 +305,32 @@ def test_orchestrator_event_driven_bridge_check_eliminates_parasitic_io() -> Non
 @pytest.mark.unit
 def test_orchestrator_event_driven_bridge_check_triggers_on_process_restart() -> None:
     """Verifies that bridge check re-triggers when game process stops and restarts, or when PID/start_time changes."""
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    active_procs: list[FakeProcess] = []
+    detector = GameDetector(
+        bridge_provider=None,
+        process_scanner=lambda: active_procs,
+        save_reader=None,
+    )
+    rpc, _ = _make_connected_rpc()
     fake_installer = FakeBridgeInstaller(installed=True)
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         bridge_installer=fake_installer,
         auto_install_bridge=False,
         sync_startup=False,
     )
 
     # 1. Process 1001 detected
-    mock_detector.get_game_state.return_value = GameState.create(
-        is_running=True, process_pid=1001, start_time=500.0
+    proc_1001 = FakeProcess(
+        pid=1001,
+        name="sandfall-win64-shipping.exe",
+        is_running=True,
+        create_time=500.0,
+        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
+    active_procs.append(proc_1001)
     orchestrator.step_update()
     assert orchestrator.is_bridge_installed() is True
 
@@ -309,104 +340,79 @@ def test_orchestrator_event_driven_bridge_check_triggers_on_process_restart() ->
     assert orchestrator.is_bridge_installed() is True
 
     # 3. Game closes
-    mock_detector.get_game_state.return_value = GameState(is_running=False)
+    active_procs.clear()
     orchestrator.step_update()
 
     # 4. Game restarts with new PID 2002 -> re-checks observable status
-    mock_detector.get_game_state.return_value = GameState.create(
-        is_running=True, process_pid=2002, process_create_time=600.0, start_time=600.0
+    proc_2002 = FakeProcess(
+        pid=2002,
+        name="sandfall-win64-shipping.exe",
+        is_running=True,
+        create_time=600.0,
+        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
+    active_procs.append(proc_2002)
     orchestrator.step_update()
     assert orchestrator.is_bridge_installed() is False
 
     # 5. Fast restart: PID reused but process_create_time changed without intermediate stopped tick -> re-checks
     fake_installer.installed = True
-    mock_detector.get_game_state.return_value = GameState.create(
-        is_running=True, process_pid=2002, process_create_time=700.0, start_time=700.0
+    proc_2002_restarted = FakeProcess(
+        pid=2002,
+        name="sandfall-win64-shipping.exe",
+        is_running=True,
+        create_time=700.0,
+        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
+    active_procs[0] = proc_2002_restarted
     orchestrator.step_update()
     assert orchestrator.is_bridge_installed() is True
 
 
 @pytest.mark.unit
-def test_orchestrator_eliminates_parasitic_io_on_gameplay_timer_transitions() -> None:
+def test_orchestrator_eliminates_parasitic_io_on_gameplay_timer_transitions(tmp_path: Path) -> None:
     """Anti-regression test: verifies that gameplay zone/combat transitions changing state.start_time
 
     do NOT re-trigger bridge installation or filesystem checks. Bridge check runs exactly once per process.
     """
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    rpc, _ = _make_connected_rpc()
     fake_installer = FakeBridgeInstaller(installed=False, install_success=True)
 
-    orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
-        bridge_installer=fake_installer,
-        auto_install_bridge=True,
-        sync_startup=False,
-    )
+    with GameSessionSimulator(base_dir=tmp_path) as session:
+        session.start_game(pid=4242).enter_zone("Ancient Sanctuary")
 
-    with patch.object(
-        orchestrator,
-        "check_and_auto_install_bridge",
-        wraps=orchestrator.check_and_auto_install_bridge,
-    ) as spy_auto_install:
-        # 1. Game launches: PID=4242, process_create_time=1000.0, start_time=1000.0 (exploration)
-        mock_detector.get_game_state.return_value = GameState.create(
-            is_running=True,
-            process_pid=4242,
-            process_create_time=1000.0,
-            start_time=1000.0,
-            zone_name="Ancient Sanctuary",
-            in_combat=False,
-            win64_dir=Path("/mock/game/win64"),
+        orchestrator = AppOrchestrator(
+            detector=session.detector,
+            rpc_manager=rpc,
+            bridge_installer=fake_installer,
+            auto_install_bridge=True,
+            sync_startup=False,
         )
+
+        # 1. Game launches: PID=4242 (exploration) -> triggers installation
         orchestrator.step_update()
         deadline = time.monotonic() + 1.0
-        while spy_auto_install.call_count == 0 and time.monotonic() < deadline:
+        while fake_installer.install_call_count == 0 and time.monotonic() < deadline:
             time.sleep(0.005)
-        assert spy_auto_install.call_count == 1
+        assert fake_installer.install_call_count == 1
+        assert orchestrator.is_bridge_installed() is True
 
-        # 2. Zone transition: start_time resets to 1050.0, PID and process_create_time unchanged
-        mock_detector.get_game_state.return_value = GameState.create(
-            is_running=True,
-            process_pid=4242,
-            process_create_time=1000.0,
-            start_time=1050.0,
-            zone_name="Crimson Forest",
-            in_combat=False,
-            win64_dir=Path("/mock/game/win64"),
-        )
+        # 2. Zone transition: start_time resets, PID unchanged
+        session.enter_zone("Crimson Forest")
         orchestrator.step_update()
-        # MUST remain 1 (no parasitic I/O)
-        assert spy_auto_install.call_count == 1
+        assert fake_installer.install_call_count == 1
 
-        # 3. Enter combat: start_time resets to 1080.0
-        mock_detector.get_game_state.return_value = GameState.create(
-            is_running=True,
-            process_pid=4242,
-            process_create_time=1000.0,
-            start_time=1080.0,
-            zone_name="Crimson Forest",
-            in_combat=True,
-            enemy_name="Duollistes",
-            win64_dir=Path("/mock/game/win64"),
-        )
+        # 3. Enter combat: start_time resets
+        session.trigger_combat("Duollistes")
         orchestrator.step_update()
-        assert spy_auto_install.call_count == 1
+        assert fake_installer.install_call_count == 1
 
-        # 4. Exit combat: start_time adjusted to 1110.0
-        mock_detector.get_game_state.return_value = GameState.create(
-            is_running=True,
-            process_pid=4242,
-            process_create_time=1000.0,
-            start_time=1110.0,
-            zone_name="Crimson Forest",
-            in_combat=False,
-            win64_dir=Path("/mock/game/win64"),
-        )
+        # 4. Exit combat: start_time adjusted
+        session.leave_combat()
         orchestrator.step_update()
-        assert spy_auto_install.call_count == 1
+        assert fake_installer.install_call_count == 1
+
+        orchestrator.stop()
 
 
 @pytest.mark.unit
@@ -414,22 +420,24 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
     """Verifies that bridge check is NOT attempted on every tick when cooldown is active."""
     current_time = 1000.0
 
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_detector.get_game_state.return_value = GameState.create(
-        is_running=True,
-        process_pid=1234,
-        win64_dir=Path("/mock/game/win64"),
-        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
-    )
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    active_procs = [
+        FakeProcess(
+            pid=1234,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    ]
+    detector = _make_detector_with_procs(active_procs)
+    rpc, _ = _make_connected_rpc()
 
     fake_installer = FakeBridgeInstaller(
         installed=False, install_success=False, install_msg="Failed install"
     )
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         bridge_installer=fake_installer,
         auto_install_bridge=True,
         sync_startup=False,
@@ -448,10 +456,10 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
     current_time = 1010.0
     fake_installer.install_success = True
     fake_installer.install_msg = "Installed"
-    mock_detector.get_game_state.return_value = GameState.create(
+    active_procs[0] = FakeProcess(
+        pid=5678,
+        name="sandfall-win64-shipping.exe",
         is_running=True,
-        process_pid=5678,
-        win64_dir=Path("/mock/game/win64"),
         exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
     orchestrator.step_update()
@@ -462,10 +470,10 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
 
     # Third tick after cooldown expires at t = 1035.0 (35s > 30s)
     current_time = 1035.0
-    mock_detector.get_game_state.return_value = GameState.create(
+    active_procs[0] = FakeProcess(
+        pid=9999,
+        name="sandfall-win64-shipping.exe",
         is_running=True,
-        process_pid=9999,
-        win64_dir=Path("/mock/game/win64"),
         exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
     orchestrator.step_update()
@@ -480,8 +488,8 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
 
 @pytest.mark.unit
 def test_orchestrator_bridge_auto_install_deterministic_cooldown() -> None:
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
 
     fake_installer = FakeBridgeInstaller(
         installed=False,
@@ -490,8 +498,8 @@ def test_orchestrator_bridge_auto_install_deterministic_cooldown() -> None:
     )
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         bridge_installer=fake_installer,
         auto_install_bridge=False,
         sync_startup=False,
@@ -527,8 +535,8 @@ def test_orchestrator_bridge_auto_install_deterministic_cooldown() -> None:
 
 @pytest.mark.unit
 def test_orchestrator_bridge_auto_install_early_boot_and_preinstalled() -> None:
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
 
     fake_installer = FakeBridgeInstaller(
         installed=True,
@@ -537,8 +545,8 @@ def test_orchestrator_bridge_auto_install_early_boot_and_preinstalled() -> None:
     )
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         bridge_installer=fake_installer,
         auto_install_bridge=False,
         sync_startup=False,
@@ -566,9 +574,7 @@ def test_orchestrator_bridge_auto_install_early_boot_and_preinstalled() -> None:
 @pytest.mark.unit
 def test_orchestrator_os_status_queries_and_toggles(tmp_path: Path) -> None:
     settings = SettingsService(custom_path=tmp_path / "settings.json")
-    pipe = DiscordPipeSimulator()
-    client = DiscordIPCClient(client_id="test", transport=pipe)
-    rpc = DiscordRPCManager(client=client)
+    rpc, _ = _make_connected_rpc()
 
     fake_installer = FakeBridgeInstaller(installed=False)
     fake_startup = FakeStartupService(enabled=True)
@@ -620,12 +626,7 @@ def test_orchestrator_os_status_queries_and_toggles(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_orchestrator_session_simulator_telemetry_flow(tmp_path: Path) -> None:
     """Verifies observable telemetry state propagation and wire-level presence frames using GameSessionSimulator."""
-    pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
-    client = DiscordIPCClient(client_id="test_flow", transport=pipe)
-    rpc = DiscordRPCManager(client=client)
-    assert rpc.connect() is True
-    pipe.outgoing_bytes.clear()
-
+    rpc, pipe = _make_connected_rpc()
     settings = SettingsService(custom_path=tmp_path / "settings.json")
 
     with GameSessionSimulator(base_dir=tmp_path) as session:
@@ -699,12 +700,12 @@ def test_orchestrator_update_notification_callback() -> None:
     def on_update(info: UpdateInfo) -> None:
         update_notifications.append(info)
 
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         on_update_available=on_update,
         auto_install_bridge=False,
         sync_startup=False,
@@ -728,9 +729,7 @@ def test_orchestrator_update_notification_callback() -> None:
 @pytest.mark.unit
 def test_orchestrator_callbacks_dispatch(tmp_path: Path) -> None:
     """Verifies that direct callbacks are invoked upon state change and update events."""
-    pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
-    client = DiscordIPCClient(client_id="test_sub", transport=pipe)
-    rpc = DiscordRPCManager(client=client)
+    rpc, pipe = _make_connected_rpc()
 
     with GameSessionSimulator(base_dir=tmp_path) as session:
         session.start_game().enter_zone("Level_Main_OldLumiere")
@@ -761,23 +760,21 @@ def test_orchestrator_callbacks_dispatch(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_orchestrator_facade_methods(tmp_path: Path) -> None:
     """Verifies that AppOrchestrator exposes Demeter-compliant facade queries and actions."""
-    pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
-    client = DiscordIPCClient(client_id="facade_test", transport=pipe)
-    rpc = DiscordRPCManager(client=client)
-    assert rpc.connect() is True
-
+    rpc, _ = _make_connected_rpc()
     settings = SettingsService(custom_path=tmp_path / "settings.json")
     settings.set_anti_spoiler_enabled(True)
 
-    mock_updater = MagicMock(spec=AppUpdater)
-    mock_updater.get_status_text.return_value = "Update: Available (v2.0.0)"
-    mock_updater.state = UpdateState.AVAILABLE
+    fake_updater = FakeUpdater(
+        state=UpdateState.AVAILABLE,
+        status_text="Update: Available (v2.0.0)",
+    )
 
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
     orchestrator = AppOrchestrator(
-        detector=GameDetector(bridge_provider=None),
+        detector=detector,
         rpc_manager=rpc,
         settings_service=settings,
-        updater=mock_updater,
+        updater=fake_updater,
         auto_install_bridge=False,
         sync_startup=False,
     )
@@ -790,18 +787,19 @@ def test_orchestrator_facade_methods(tmp_path: Path) -> None:
 
     # 2. Update action when AVAILABLE
     orchestrator.trigger_update_action()
-    mock_updater.open_release_page.assert_called_once()
-    mock_updater.check_in_background.assert_not_called()
+    assert fake_updater.open_release_page_called is True
+    assert len(fake_updater.check_in_background_calls) == 0
 
     # 3. Update action when UP_TO_DATE
-    mock_updater.open_release_page.reset_mock()
-    mock_updater.state = UpdateState.UP_TO_DATE
+    fake_updater.open_release_page_called = False
+    fake_updater.state = UpdateState.UP_TO_DATE
     assert orchestrator.is_update_available() is False
     orchestrator.trigger_update_action()
-    mock_updater.open_release_page.assert_not_called()
-    mock_updater.check_in_background.assert_called_once_with(
-        delay_seconds=0.0, on_complete=orchestrator.on_update_check_complete
-    )
+    assert fake_updater.open_release_page_called is False
+    assert len(fake_updater.check_in_background_calls) == 1
+    delay, callback = fake_updater.check_in_background_calls[0]
+    assert delay == 0.0
+    assert callback == orchestrator.on_update_check_complete
 
 
 @pytest.mark.unit
@@ -813,10 +811,12 @@ def test_orchestrator_install_bridge_to_success(tmp_path: Path) -> None:
     fake_installer = FakeBridgeInstaller(
         installed=False, install_success=True, install_msg=f"Installed to {target_folder}"
     )
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
 
     orchestrator = AppOrchestrator(
-        detector=MagicMock(spec=GameDetector),
-        rpc_manager=MagicMock(spec=DiscordRPCManager),
+        detector=detector,
+        rpc_manager=rpc,
         bridge_installer=fake_installer,
         auto_install_bridge=False,
         sync_startup=False,
@@ -843,10 +843,12 @@ def test_orchestrator_install_bridge_to_failure(tmp_path: Path) -> None:
     fake_installer = FakeBridgeInstaller(
         installed=False, install_success=False, install_msg="Permission denied"
     )
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
 
     orchestrator = AppOrchestrator(
-        detector=MagicMock(spec=GameDetector),
-        rpc_manager=MagicMock(spec=DiscordRPCManager),
+        detector=detector,
+        rpc_manager=rpc,
         bridge_installer=fake_installer,
         auto_install_bridge=False,
         sync_startup=False,
@@ -867,10 +869,12 @@ def test_orchestrator_install_bridge_to_exception(tmp_path: Path) -> None:
     fake_installer = FakeBridgeInstaller(
         installed=False, raise_on_install=OSError("Access is denied or disk is full")
     )
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
 
     orchestrator = AppOrchestrator(
-        detector=MagicMock(spec=GameDetector),
-        rpc_manager=MagicMock(spec=DiscordRPCManager),
+        detector=detector,
+        rpc_manager=rpc,
         bridge_installer=fake_installer,
         auto_install_bridge=False,
         sync_startup=False,
@@ -891,9 +895,12 @@ def test_orchestrator_update_available_callback() -> None:
     def callback(info: UpdateInfo) -> None:
         received_updates.append(info)
 
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
+
     orchestrator = AppOrchestrator(
-        detector=MagicMock(spec=GameDetector),
-        rpc_manager=MagicMock(spec=DiscordRPCManager),
+        detector=detector,
+        rpc_manager=rpc,
         on_update_available=callback,
         auto_install_bridge=False,
         sync_startup=False,
@@ -921,9 +928,12 @@ def test_orchestrator_update_available_callback() -> None:
 @pytest.mark.unit
 def test_orchestrator_update_available_error_resilience() -> None:
     """Verifies unhandled exceptions in on_update_available callback are handled safely."""
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
+
     orchestrator = AppOrchestrator(
-        detector=MagicMock(spec=GameDetector),
-        rpc_manager=MagicMock(spec=DiscordRPCManager),
+        detector=detector,
+        rpc_manager=rpc,
         auto_install_bridge=False,
         sync_startup=False,
     )
@@ -948,9 +958,12 @@ def test_orchestrator_subscribe_update_available() -> None:
     def legacy_cb(info: UpdateInfo) -> None:
         received_updates.append(info)
 
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
+
     orchestrator = AppOrchestrator(
-        detector=MagicMock(spec=GameDetector),
-        rpc_manager=MagicMock(spec=DiscordRPCManager),
+        detector=detector,
+        rpc_manager=rpc,
         on_update_available=legacy_cb,
         auto_install_bridge=False,
         sync_startup=False,
@@ -985,17 +998,16 @@ def test_orchestrator_subscribe_update_available() -> None:
 @pytest.mark.unit
 def test_orchestrator_state_change_callback_error_resilience() -> None:
     """Verifies that an unhandled exception in on_state_change callback does not crash step_update."""
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_detector.get_game_state.return_value = GameState.create(is_running=False)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
 
     def exploding_callback(state: GameState, anti_spoiler: bool) -> None:
         del state, anti_spoiler
         raise RuntimeError("Callback crashed")
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         on_state_change=exploding_callback,
         auto_install_bridge=False,
         sync_startup=False,
@@ -1010,14 +1022,12 @@ def test_orchestrator_state_change_callback_error_resilience() -> None:
 @pytest.mark.unit
 def test_orchestrator_status_snapshot() -> None:
     """Verifies get_status_snapshot black-box inspection of subsystem states."""
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_detector.get_game_state.return_value = GameState.create(is_running=False)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
-    mock_rpc.is_connected = True
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         auto_install_bridge=False,
         sync_startup=False,
     )
@@ -1037,15 +1047,18 @@ def test_orchestrator_status_snapshot() -> None:
 @pytest.mark.unit
 def test_orchestrator_run_loop_adaptive_idle_backoff() -> None:
     """Verifies that orchestrator uses idle_polling_interval when game is idle and polling_interval when running."""
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    active_procs: list[FakeProcess] = []
+    detector = GameDetector(
+        bridge_provider=None,
+        process_scanner=lambda: active_procs,
+        save_reader=None,
+    )
+    rpc, _ = _make_connected_rpc()
 
     # 1. Idle state: game is not running
-    mock_detector.get_game_state.return_value = GameState.create(is_running=False)
-
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         polling_interval=2.0,
         idle_polling_interval=7.0,
         auto_install_bridge=False,
@@ -1056,7 +1069,14 @@ def test_orchestrator_run_loop_adaptive_idle_backoff() -> None:
     assert orchestrator.current_polling_interval == 7.0
 
     # 2. Active state: game is running with PID
-    mock_detector.get_game_state.return_value = GameState.create(is_running=True, process_pid=9999)
+    active_procs.append(
+        FakeProcess(
+            pid=9999,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    )
     orchestrator.step_update()
     assert orchestrator.current_polling_interval == 2.0
 
@@ -1076,25 +1096,27 @@ def test_orchestrator_async_bridge_install_spawns_daemon_thread_and_prevents_con
             self.installed = True
             return True, "Installed asynchronously"
 
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    procs = [
+        FakeProcess(
+            pid=5555,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    ]
+    detector = _make_detector_with_procs(procs)
+    rpc, _ = _make_connected_rpc()
     installer = BlockingInstaller(installed=False)
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         bridge_installer=installer,
         auto_install_bridge=True,
         sync_startup=False,
     )
 
     # 1. Trigger process detection: must return immediately without blocking
-    mock_detector.get_game_state.return_value = GameState.create(
-        is_running=True,
-        process_pid=5555,
-        win64_dir=Path("/mock/game/win64"),
-        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
-    )
     start_time = time.perf_counter()
     res = orchestrator.step_update()
     step_duration = time.perf_counter() - start_time
@@ -1119,68 +1141,73 @@ def test_orchestrator_async_bridge_install_spawns_daemon_thread_and_prevents_con
 @pytest.mark.unit
 def test_orchestrator_async_bridge_install_catches_exception_safely() -> None:
     """Verifies that an unexpected exception in check_and_auto_install_bridge does not crash the process."""
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
-    fake_installer = FakeBridgeInstaller(installed=False)
+    procs = [
+        FakeProcess(
+            pid=7777,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    ]
+    detector = _make_detector_with_procs(procs)
+    rpc, _ = _make_connected_rpc()
+    fake_installer = FakeBridgeInstaller(
+        installed=False, raise_on_install=RuntimeError("Simulated disk failure")
+    )
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         bridge_installer=fake_installer,
         auto_install_bridge=True,
         sync_startup=False,
     )
 
-    with patch.object(
-        orchestrator,
-        "check_and_auto_install_bridge",
-        side_effect=RuntimeError("Simulated disk failure"),
-    ):
-        mock_detector.get_game_state.return_value = GameState.create(
-            is_running=True,
-            process_pid=7777,
-            win64_dir=Path("/mock/game/win64"),
-        )
-        res = orchestrator.step_update()
-        assert res is not None
-        orchestrator.stop()
-        assert orchestrator.is_bridge_installed() is False
+    res = orchestrator.step_update()
+    assert res is not None
+    orchestrator.stop()
+    assert orchestrator.is_bridge_installed() is False
 
 
 @pytest.mark.unit
 def test_orchestrator_stop_waits_for_bridge_install_thread() -> None:
     """Verifies that orchestrator.stop() waits for the active bridge install worker thread to finish."""
-    thread_finished = False
 
-    def slow_install(*_args: Any, **_kwargs: Any) -> bool:
-        nonlocal thread_finished
-        time.sleep(0.05)
-        thread_finished = True
-        return True
+    class SlowInstaller(FakeBridgeInstaller):
+        def __init__(self) -> None:
+            super().__init__(installed=False)
+            self.finished = False
 
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
-    fake_installer = FakeBridgeInstaller(installed=False)
+        def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            time.sleep(0.05)
+            self.finished = True
+            return super().install_bridge(win64_dir)
+
+    procs = [
+        FakeProcess(
+            pid=8888,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    ]
+    detector = _make_detector_with_procs(procs)
+    rpc, _ = _make_connected_rpc()
+    fake_installer = SlowInstaller()
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         bridge_installer=fake_installer,
         auto_install_bridge=True,
         sync_startup=False,
     )
 
-    with patch.object(orchestrator, "check_and_auto_install_bridge", side_effect=slow_install):
-        mock_detector.get_game_state.return_value = GameState.create(
-            is_running=True,
-            process_pid=8888,
-            win64_dir=Path("/mock/game/win64"),
-        )
-        orchestrator.step_update()
-        assert thread_finished is False
+    orchestrator.step_update()
+    assert fake_installer.finished is False
 
-        orchestrator.stop()
-        assert thread_finished is True
+    orchestrator.stop()
+    assert fake_installer.finished is True
 
 
 @pytest.mark.unit
@@ -1191,9 +1218,7 @@ def test_orchestrator_step_with_real_detector(tmp_path: Path) -> None:
         process_scanner=lambda: [],
         save_reader=None,
     )
-    pipe = DiscordPipeSimulator()
-    client = DiscordIPCClient(client_id="test", transport=pipe)
-    rpc = DiscordRPCManager(client=client)
+    rpc, _ = _make_connected_rpc()
     settings = SettingsService(custom_path=tmp_path / "settings.json")
     fake_installer = FakeBridgeInstaller(installed=False)
 
@@ -1225,14 +1250,13 @@ def test_orchestrator_callbacks_slot_decoupling_prevents_stale_and_duplicate_inv
     def callback_b(state: GameState, _spoiler: bool) -> None:
         calls_b.append(state)
 
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_detector.get_game_state.return_value = GameState.create(is_running=False)
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
 
     # 1. Initialize with callback_a: direct slot must not leak into subscribers
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         on_state_change=callback_a,
         auto_install_bridge=False,
         sync_startup=False,
@@ -1290,22 +1314,27 @@ def test_orchestrator_callbacks_slot_decoupling_prevents_stale_and_duplicate_inv
 def _create_test_orchestrator(
     on_state_change: Callable[[GameState, bool], None] | None = None,
     on_update_available: Callable[[UpdateInfo], None] | None = None,
-) -> tuple[AppOrchestrator, MagicMock]:
-    mock_detector = MagicMock(spec=GameDetector)
-    mock_detector.get_game_state.return_value = GameState.create(
-        is_running=True, process_pid=1234, zone_name="Lumiere"
-    )
-    mock_rpc = MagicMock(spec=DiscordRPCManager)
+) -> tuple[AppOrchestrator, GameDetector]:
+    procs = [
+        FakeProcess(
+            pid=1234,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    ]
+    detector = _make_detector_with_procs(procs)
+    rpc, _ = _make_connected_rpc()
 
     orchestrator = AppOrchestrator(
-        detector=mock_detector,
-        rpc_manager=mock_rpc,
+        detector=detector,
+        rpc_manager=rpc,
         on_state_change=on_state_change,
         on_update_available=on_update_available,
         auto_install_bridge=False,
         sync_startup=False,
     )
-    return orchestrator, mock_detector
+    return orchestrator, detector
 
 
 @pytest.mark.unit
@@ -1400,18 +1429,13 @@ def test_orchestrator_same_function_dual_registration_invoked_exactly_once() -> 
     orchestrator.step_update()
     assert len(call_history) == 2
 
-    # Unsubscribe from subscriber list: callback remains in direct slot on_state_change
+    # Unsubscribe from unified subscriber list: callback is completely disabled
     unsubscribe()
-    assert orchestrator.on_state_change is shared_callback
+    assert orchestrator.on_state_change is None
 
-    # Tick 3: Should STILL be called via on_state_change slot
+    # Tick 3: Callback is unsubscribed, no further invocations
     orchestrator.step_update()
-    assert len(call_history) == 3
-
-    # Now clear direct slot: callback is completely disabled
-    orchestrator.on_state_change = None
-    orchestrator.step_update()
-    assert len(call_history) == 3
+    assert len(call_history) == 2
 
 
 @pytest.mark.unit
@@ -1483,7 +1507,7 @@ def test_orchestrator_subscriber_exception_does_not_break_other_subscribers_or_d
     # Tick execution should catch crashing_sub exception and still call healthy_sub and direct_slot
     state = orchestrator.step_update()
     assert state is not None
-    assert received == ["healthy_sub", "direct_slot"]
+    assert received == ["direct_slot", "healthy_sub"]
 
 
 @pytest.mark.unit
@@ -1499,9 +1523,12 @@ def test_orchestrator_stop_cancels_updater_and_joins_worker_thread() -> None:
     fake_updater.check_in_background()
     assert worker_started.wait(timeout=1.0) is True
 
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
+
     orchestrator = AppOrchestrator(
-        detector=MagicMock(spec=GameDetector),
-        rpc_manager=MagicMock(spec=DiscordRPCManager),
+        detector=detector,
+        rpc_manager=rpc,
         updater=fake_updater,
         auto_install_bridge=False,
         sync_startup=False,
