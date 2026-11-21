@@ -80,7 +80,7 @@ def test_concurrent_set_activity_and_disconnect() -> None:
 
 def test_concurrent_settings_mutations(tmp_path: Path) -> None:
     settings_file = tmp_path / "settings.json"
-    settings_service = SettingsService(custom_path=settings_file)
+    settings_service = SettingsService(path=settings_file)
 
     num_workers = 6
     ops_per_worker = 15
@@ -121,7 +121,7 @@ def test_concurrent_settings_mutations(tmp_path: Path) -> None:
 
 def test_concurrent_telemetry_ticks_and_ui_toggles(tmp_path: Path) -> None:
     settings_file = tmp_path / "settings.json"
-    settings_service = SettingsService(custom_path=settings_file)
+    settings_service = SettingsService(path=settings_file)
 
     pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
     ipc_client = DiscordIPCClient(client_id="123456789", transport=pipe)

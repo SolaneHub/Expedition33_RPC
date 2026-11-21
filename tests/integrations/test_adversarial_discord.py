@@ -320,7 +320,7 @@ def test_area4_discord_128_byte_string_limits_multibyte() -> None:
     assert rpc_manager.connect() is True
     pipe.outgoing_bytes.clear()
 
-    update_ok = rpc_manager.update(payload, pid=9999)
+    update_ok = rpc_manager.update_presence(payload, pid=9999)
     assert update_ok is True
     assert rpc_manager.is_connected is True
 
@@ -340,7 +340,7 @@ def test_area5_dirty_checking_zero_outbound_frames(tmp_path: Path) -> None:
     """Verifies that identical ticks produce ZERO outbound wire frames across all lifecycle phases."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     settings_file = tmp_path / "settings_dirty_check.json"
-    settings = SettingsService(custom_path=settings_file)
+    settings = SettingsService(path=settings_file)
 
     pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
     ipc_client = DiscordIPCClient(client_id="1552405358503272468", transport=pipe)
@@ -470,7 +470,7 @@ def test_area6_flapping_resilience_and_leak_freedom(tmp_path: Path) -> None:
     orchestrator = AppOrchestrator(
         detector=session.detector,
         rpc_manager=rpc_manager,
-        settings_service=SettingsService(custom_path=tmp_path / "settings_flapping.json"),
+        settings_service=SettingsService(path=tmp_path / "settings_flapping.json"),
         auto_install_bridge=False,
         sync_startup=False,
     )
@@ -516,7 +516,7 @@ def test_area6_flapping_resilience_and_leak_freedom(tmp_path: Path) -> None:
         # Attempting to connect or update must return False without crashing
         assert broken_rpc.connect() is False
         assert (
-            broken_rpc.update(
+            broken_rpc.update_presence(
                 PresencePayload(details="Exploring", state="Old Lumière"),
                 pid=8888,
             )
@@ -685,7 +685,6 @@ def test_stress_op_close_mid_session_lifecycle() -> None:
     # 5. Subsequent disconnect() should be safe and idempotent
     manager.disconnect()
     assert manager.is_connected is False
-    assert manager.rpc is client4
 
 
 def test_stress_pid_passed_to_clear_activity() -> None:

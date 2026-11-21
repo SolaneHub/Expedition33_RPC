@@ -64,7 +64,7 @@ def test_full_lifecycle_simulation(session: GameSessionSimulator, simulated_disc
     assert state1.zone_name == "Main Menu"
     assert state1.in_combat is False
 
-    rpc_manager.update(build_presence_payload(state1, anti_spoiler=False))
+    rpc_manager.update_presence(build_presence_payload(state1, anti_spoiler=False))
     frame1 = pipe.pop_last_frame_payload()
     assert frame1 is not None
     activity1 = frame1["args"]["activity"]
@@ -80,7 +80,7 @@ def test_full_lifecycle_simulation(session: GameSessionSimulator, simulated_disc
     assert state2.enemy_name == "Duollistes"
     assert state2.zone_name == "Old Lumière"
 
-    rpc_manager.update(build_presence_payload(state2, anti_spoiler=False))
+    rpc_manager.update_presence(build_presence_payload(state2, anti_spoiler=False))
     frame2 = pipe.pop_last_frame_payload()
     assert frame2 is not None
     activity2 = frame2["args"]["activity"]
@@ -94,7 +94,7 @@ def test_full_lifecycle_simulation(session: GameSessionSimulator, simulated_disc
     assert state3.in_combat is False
     assert state3.checkpoint_name == "Manor Gardens"
 
-    rpc_manager.update(build_presence_payload(state3, anti_spoiler=False))
+    rpc_manager.update_presence(build_presence_payload(state3, anti_spoiler=False))
     frame3 = pipe.pop_last_frame_payload()
     assert frame3 is not None
     activity3 = frame3["args"]["activity"]
@@ -103,7 +103,7 @@ def test_full_lifecycle_simulation(session: GameSessionSimulator, simulated_disc
 
     # 4. Anti-Spoiler Protection Enabled
     rpc_manager.invalidate()  # Force update
-    rpc_manager.update(build_presence_payload(state3, anti_spoiler=True))
+    rpc_manager.update_presence(build_presence_payload(state3, anti_spoiler=True))
     frame4 = pipe.pop_last_frame_payload()
     assert frame4 is not None
     activity4 = frame4["args"]["activity"]
@@ -115,7 +115,7 @@ def test_full_lifecycle_simulation(session: GameSessionSimulator, simulated_disc
     state5 = session.get_game_state()
     assert state5.is_running is False
 
-    rpc_manager.update(None)
+    rpc_manager.update_presence(None)
     frame5 = pipe.pop_last_frame_payload()
     assert frame5 is not None
     assert frame5["args"]["activity"] is None
@@ -132,7 +132,7 @@ def test_timeline_menu_to_combat_and_return_to_menu(
     st1 = session.get_game_state()
     assert st1.is_running is True
     assert "Main Menu" in st1.zone_name
-    rpc_manager.update(build_presence_payload(st1, anti_spoiler=False))
+    rpc_manager.update_presence(build_presence_payload(st1, anti_spoiler=False))
     frame1 = pipe.pop_last_frame_payload()
     assert frame1 is not None
     assert frame1["args"]["activity"]["state"] == "Title Screen"
@@ -142,7 +142,7 @@ def test_timeline_menu_to_combat_and_return_to_menu(
     st2 = session.get_game_state()
     assert st2.zone_name == "Old Lumière"
     assert st2.in_combat is False
-    rpc_manager.update(build_presence_payload(st2, anti_spoiler=False))
+    rpc_manager.update_presence(build_presence_payload(st2, anti_spoiler=False))
     frame2 = pipe.pop_last_frame_payload()
     assert frame2 is not None
     assert frame2["args"]["activity"]["details"] == "Exploring"
@@ -152,7 +152,7 @@ def test_timeline_menu_to_combat_and_return_to_menu(
     st3 = session.get_game_state()
     assert st3.in_combat is True
     assert st3.enemy_name == "Duollistes"
-    rpc_manager.update(build_presence_payload(st3, anti_spoiler=False))
+    rpc_manager.update_presence(build_presence_payload(st3, anti_spoiler=False))
     frame3 = pipe.pop_last_frame_payload()
     assert frame3 is not None
     assert frame3["args"]["activity"]["details"] == "Fighting: Duollistes"
@@ -164,7 +164,7 @@ def test_timeline_menu_to_combat_and_return_to_menu(
     assert st4.in_combat is False
     assert st4.enemy_name == ""
     assert st4.checkpoint_name == ""
-    rpc_manager.update(build_presence_payload(st4, anti_spoiler=False))
+    rpc_manager.update_presence(build_presence_payload(st4, anti_spoiler=False))
     frame4 = pipe.pop_last_frame_payload()
     assert frame4 is not None
     assert frame4["args"]["activity"]["state"] == "Title Screen"
@@ -206,7 +206,7 @@ def test_timeline_discord_ipc_disconnect_and_reconnect_during_gameplay(
     st = session.get_game_state()
 
     # 1. First update succeeds
-    rpc_manager.update(build_presence_payload(st, anti_spoiler=False))
+    rpc_manager.update_presence(build_presence_payload(st, anti_spoiler=False))
     assert pipe.pop_last_frame_payload() is not None
 
     # 2. Simulate Discord pipe broken / disconnect
@@ -215,7 +215,7 @@ def test_timeline_discord_ipc_disconnect_and_reconnect_during_gameplay(
 
     # Graceful handling - should not crash
     rpc_manager.invalidate()
-    rpc_manager.update(build_presence_payload(st, anti_spoiler=False))
+    rpc_manager.update_presence(build_presence_payload(st, anti_spoiler=False))
 
     # 3. Simulate Discord reconnecting with a fresh pipe
     new_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
@@ -226,7 +226,7 @@ def test_timeline_discord_ipc_disconnect_and_reconnect_during_gameplay(
     new_pipe.outgoing_bytes.clear()
 
     rpc_manager.invalidate()
-    rpc_manager.update(build_presence_payload(st, anti_spoiler=False))
+    rpc_manager.update_presence(build_presence_payload(st, anti_spoiler=False))
 
     frame = new_pipe.pop_last_frame_payload()
     assert frame is not None
@@ -277,7 +277,7 @@ def test_unified_orchestrator_e2e_simulation(tmp_path: Path) -> None:
     to an in-process MockDiscordServer via native named pipe/socket wire protocol.
     """
     settings_file = tmp_path / "e2e_settings.json"
-    settings = SettingsService(custom_path=settings_file)
+    settings = SettingsService(path=settings_file)
 
     with MockDiscordServer() as server, GameSessionSimulator() as session:
         ipc_client = DiscordIPCClient(client_id="987654321", custom_pipe_path=server.pipe_path)
@@ -383,7 +383,7 @@ def test_unified_orchestrator_e2e_simulation(tmp_path: Path) -> None:
 def test_bridge_heartbeat_timeout_clears_zombie_combat_presence(tmp_path: Path) -> None:
     """Verifies that stale telemetry (>5s old) expires and does not transmit zombie combat state to Discord."""
     settings_file = tmp_path / "e2e_settings.json"
-    settings = SettingsService(custom_path=settings_file)
+    settings = SettingsService(path=settings_file)
 
     with MockDiscordServer() as server, GameSessionSimulator() as session:
         ipc_client = DiscordIPCClient(client_id="987654321", custom_pipe_path=server.pipe_path)
@@ -445,7 +445,7 @@ def test_async_concurrent_orchestrator_e2e_simulation(tmp_path: Path) -> None:
     assert rpc_manager.connect() is True
     pipe.outgoing_bytes.clear()
 
-    settings = SettingsService(custom_path=tmp_path / "settings_async_e2e.json")
+    settings = SettingsService(path=tmp_path / "settings_async_e2e.json")
     received_frames: list[dict[str, Any]] = []
 
     with GameSessionSimulator(base_dir=tmp_path) as session:
@@ -575,7 +575,7 @@ def test_dry_run_full_lifecycle_with_binary_wire_frame_verification(
     -> Discord Flapping -> Shutdown, strictly verifying binary <II wire frames.
     """
     settings_file = tmp_path / "dry_run_settings.json"
-    settings = SettingsService(custom_path=settings_file)
+    settings = SettingsService(path=settings_file)
 
     pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
     ipc_client = DiscordIPCClient(client_id="1552405358503272468", transport=pipe)
@@ -725,7 +725,7 @@ def test_dry_run_infinite_tower_progression_binary_framing(tmp_path: Path) -> No
         orchestrator = AppOrchestrator(
             detector=session.detector,
             rpc_manager=rpc_manager,
-            settings_service=SettingsService(custom_path=tmp_path / "settings_tower.json"),
+            settings_service=SettingsService(path=tmp_path / "settings_tower.json"),
             auto_install_bridge=False,
             sync_startup=False,
         )

@@ -330,3 +330,115 @@ def test_yagni_contract_no_party_id_or_size() -> None:
     assert not all_violations, "YAGNI violation: party_id / party_size detected:\n" + "\n".join(
         all_violations
     )
+
+
+def test_anti_busy_spin_no_sleep_zero() -> None:
+    """Scansiona l'intero albero src/expedition33_rpc/ e asserisce che non vi siano chiamate a time.sleep(0)."""
+    violations: list[str] = []
+    py_files = list(SRC_DIR.rglob("*.py"))
+    assert py_files, "No python files found in src/expedition33_rpc"
+
+    for py_file in py_files:
+        content = py_file.read_text(encoding="utf-8")
+        tree = ast.parse(content, filename=str(py_file))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                is_sleep = False
+                if (
+                    (
+                        isinstance(func, ast.Attribute)
+                        and func.attr == "sleep"
+                        and isinstance(func.value, ast.Name)
+                        and func.value.id == "time"
+                    )
+                    or isinstance(func, ast.Name)
+                    and func.id == "sleep"
+                ):
+                    is_sleep = True
+
+                if is_sleep and node.args:
+                    first_arg = node.args[0]
+                    if isinstance(first_arg, ast.Constant) and first_arg.value == 0:
+                        rel_path = py_file.relative_to(SRC_DIR)
+                        violations.append(
+                            f"{rel_path}:{node.lineno} calls sleep(0) which causes busy-spinning"
+                        )
+
+    assert not violations, "Anti-busy-spin violation(s) found:\n" + "\n".join(violations)
+
+
+def test_layer_boundary_normalization_purity() -> None:
+    """Asserisce che detection/normalization.py non contenga alcun import (nemmeno locale o condizionale)
+
+    di GameState o di moduli appartenenti a ui o core.
+    """
+    norm_file = SRC_DIR / "detection" / "normalization.py"
+    assert norm_file.exists(), f"File missing: {norm_file}"
+    content = norm_file.read_text(encoding="utf-8")
+    tree = ast.parse(content, filename=str(norm_file))
+
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = alias.name.split(".")
+                if any(p in ("ui", "core") for p in parts):
+                    violations.append(f"Import of {alias.name} at line {node.lineno}")
+                if "GameState" in alias.name:
+                    violations.append(f"Import of GameState in {alias.name} at line {node.lineno}")
+
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            parts = mod.split(".")
+            if any(p in ("ui", "core") for p in parts):
+                violations.append(f"ImportFrom from '{mod}' at line {node.lineno}")
+            for alias in node.names:
+                if alias.name == "GameState":
+                    violations.append(f"ImportFrom GameState from '{mod}' at line {node.lineno}")
+
+    assert not violations, f"Layer boundary violations in {norm_file.name}:\n" + "\n".join(
+        violations
+    )
+
+
+def test_clock_decoupling_bridge_and_rpc_manager() -> None:
+    """Asserisce che in DiscordRPCManager.connect() e BridgeStateProvider tutti i riferimenti orari
+
+    usino i provider iniettati e mai chiamate dirette a time.time() su logiche di intervallo/deadline.
+    """
+    # 1. Check DiscordRPCManager.connect() in integrations/discord_rpc.py
+    discord_file = SRC_DIR / "integrations" / "discord_rpc.py"
+    assert discord_file.exists()
+    discord_tree = ast.parse(discord_file.read_text(encoding="utf-8"), filename=str(discord_file))
+
+    for node in ast.walk(discord_tree):
+        if isinstance(node, ast.ClassDef) and node.name == "DiscordRPCManager":
+            for item in node.body:
+                if (
+                    isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and item.name == "connect"
+                ):
+                    for sub in ast.walk(item):
+                        if isinstance(sub, ast.Call) and _is_time_time(sub.func):
+                            pytest.fail(
+                                f"Direct call to time.time() in DiscordRPCManager.connect() at line {sub.lineno}"
+                            )
+
+    # 2. Check BridgeStateProvider in detection/detector.py
+    detector_file = SRC_DIR / "detection" / "detector.py"
+    assert detector_file.exists()
+    detector_tree = ast.parse(
+        detector_file.read_text(encoding="utf-8"), filename=str(detector_file)
+    )
+
+    for node in ast.walk(detector_tree):
+        if isinstance(node, ast.ClassDef) and node.name == "BridgeStateProvider":
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    # Allow __init__ default value time.time
+                    for sub in ast.walk(item):
+                        if isinstance(sub, ast.Call) and _is_time_time(sub.func):
+                            pytest.fail(
+                                f"Direct call to time.time() inside BridgeStateProvider.{item.name} at line {sub.lineno}"
+                            )

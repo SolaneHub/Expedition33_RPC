@@ -13,6 +13,8 @@ import pytest
 from tests.harness.bridge_contract_verifier import BridgeContractInspector
 from tests.harness.clock_harness import DualClockHarness
 from tests.harness.discord_pipe import DiscordFaultInjector
+from tests.harness.orchestrator_chaos_harness import OrchestratorChaosHarness
+from tests.harness.telemetry_contention_simulator import TelemetryContentionSimulator
 
 from expedition33_rpc.integrations.discord_rpc import (
     OP_FRAME,
@@ -157,3 +159,81 @@ def test_bridge_contract_inspector_verify_contract_with_provider() -> None:
     valid, errors = inspector.verify_contract_with_provider()
     assert valid is True, f"Contract verification failed with errors: {errors}"
     assert len(errors) == 0
+
+
+# ---------------------------------------------------------------------------
+# TelemetryContentionSimulator & OrchestratorChaosHarness Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_telemetry_contention_simulator_partial_writes(tmp_path) -> None:
+    """Verifies that TelemetryContentionSimulator properly tests corrupted and partial file handling."""
+    target_file = tmp_path / "expedition33_status.json"
+    sim = TelemetryContentionSimulator(target_file)
+    from expedition33_rpc.detection.detector import BridgeStateProvider
+
+    provider = BridgeStateProvider(paths=[str(target_file)])
+
+    # 1. Empty write
+    sim.simulate_partial_write("empty")
+    assert provider.read_bridge_status() is None
+
+    # 2. Truncated JSON
+    sim.simulate_partial_write("truncated_json")
+    assert provider.read_bridge_status() is None
+
+    # 3. Broken UTF-8 stream
+    sim.simulate_partial_write("broken_utf8")
+    assert provider.read_bridge_status() is None
+
+    # Invalid mode raises ValueError
+    with pytest.raises(ValueError, match="Unknown partial write mode"):
+        sim.simulate_partial_write("invalid_mode")
+
+
+@pytest.mark.integration
+def test_telemetry_contention_simulator_transient_locks(tmp_path) -> None:
+    """Verifies that BridgeStateProvider cleans up and handles transient PermissionError / SharingViolation retries."""
+    import json
+
+    target_file = tmp_path / "expedition33_status.json"
+    valid_payload = {"raw_zone": "Level_Forest", "in_combat": False}
+    target_file.write_text(json.dumps(valid_payload), encoding="utf-8")
+
+    sim = TelemetryContentionSimulator(target_file)
+    from expedition33_rpc.detection.detector import BridgeStateProvider
+
+    provider = BridgeStateProvider(paths=[str(target_file)])
+
+    # 1..5 retries succeed (provider retries 6 times)
+    for failures in (1, 3, 5):
+        res = sim.verify_bridge_provider_resilience(
+            provider, expected_valid_data=valid_payload, transient_failures=failures
+        )
+        assert res == valid_payload
+
+    # 6 failures causes read_bridge_status to return None without unhandled exception
+    res_none = sim.verify_bridge_provider_resilience(
+        provider, expected_valid_data=None, transient_failures=6
+    )
+    assert res_none is None
+
+
+@pytest.mark.unit
+def test_orchestrator_chaos_harness_lifecycle_smoke(tmp_path) -> None:
+    """Verifies that OrchestratorChaosHarness initializes and tears down cleanly."""
+    with OrchestratorChaosHarness(base_dir=tmp_path) as chaos:
+        assert chaos.orchestrator is not None
+        assert chaos.server is not None
+        assert chaos.session is not None
+        chaos.run_chaos_cycles(cycles=5)
+        chaos.assert_no_orphaned_threads()
+
+
+@pytest.mark.integration
+def test_orchestrator_chaos_harness_full_soak_50_cycles(tmp_path) -> None:
+    """Runs full 50 chaos cycles asserting zero orphaned threads after orchestrator.stop()."""
+    with OrchestratorChaosHarness(base_dir=tmp_path) as chaos:
+        chaos.run_chaos_cycles(cycles=50)
+        chaos.assert_no_orphaned_threads()

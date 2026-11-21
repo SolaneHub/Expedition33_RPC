@@ -56,7 +56,7 @@ def test_orchestrator_initialization_defaults(tmp_path: Path) -> None:
     pipe = DiscordPipeSimulator()
     client = DiscordIPCClient(client_id="test", transport=pipe)
     rpc = DiscordRPCManager(client=client)
-    settings = SettingsService(custom_path=tmp_path / "settings.json")
+    settings = SettingsService(path=tmp_path / "settings.json")
     detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
 
     orchestrator = AppOrchestrator(
@@ -90,7 +90,7 @@ def test_orchestrator_step_update_coordinates_subsystems(tmp_path: Path) -> None
     assert rpc.connect() is True
     pipe.outgoing_bytes.clear()
 
-    settings = SettingsService(custom_path=tmp_path / "settings.json")
+    settings = SettingsService(path=tmp_path / "settings.json")
     state_changed_events: list[tuple[GameState, bool]] = []
 
     with GameSessionSimulator(base_dir=tmp_path) as session:
@@ -99,10 +99,10 @@ def test_orchestrator_step_update_coordinates_subsystems(tmp_path: Path) -> None
             detector=session.detector,
             rpc_manager=rpc,
             settings_service=settings,
-            on_state_change=lambda st, sp: state_changed_events.append((st, sp)),
             auto_install_bridge=False,
             sync_startup=False,
         )
+        orchestrator.subscribe_state_change(lambda st, sp: state_changed_events.append((st, sp)))
 
         result = orchestrator.step_update()
 
@@ -127,7 +127,7 @@ def test_orchestrator_step_update_coordinates_subsystems(tmp_path: Path) -> None
 
 @pytest.mark.unit
 def test_orchestrator_subscribe_state_change_and_unsubscribe(tmp_path: Path) -> None:
-    settings = SettingsService(custom_path=tmp_path / "settings.json")
+    settings = SettingsService(path=tmp_path / "settings.json")
     rpc, _ = _make_connected_rpc()
 
     with GameSessionSimulator(base_dir=tmp_path) as session:
@@ -573,7 +573,7 @@ def test_orchestrator_bridge_auto_install_early_boot_and_preinstalled() -> None:
 
 @pytest.mark.unit
 def test_orchestrator_os_status_queries_and_toggles(tmp_path: Path) -> None:
-    settings = SettingsService(custom_path=tmp_path / "settings.json")
+    settings = SettingsService(path=tmp_path / "settings.json")
     rpc, _ = _make_connected_rpc()
 
     fake_installer = FakeBridgeInstaller(installed=False)
@@ -627,7 +627,7 @@ def test_orchestrator_os_status_queries_and_toggles(tmp_path: Path) -> None:
 def test_orchestrator_session_simulator_telemetry_flow(tmp_path: Path) -> None:
     """Verifies observable telemetry state propagation and wire-level presence frames using GameSessionSimulator."""
     rpc, pipe = _make_connected_rpc()
-    settings = SettingsService(custom_path=tmp_path / "settings.json")
+    settings = SettingsService(path=tmp_path / "settings.json")
 
     with GameSessionSimulator(base_dir=tmp_path) as session:
         orchestrator = AppOrchestrator(
@@ -639,7 +639,7 @@ def test_orchestrator_session_simulator_telemetry_flow(tmp_path: Path) -> None:
         )
 
         observed_states: list[GameState] = []
-        orchestrator.on_state_change = lambda st, _spoiler: observed_states.append(st)
+        orchestrator.subscribe_state_change(lambda st, _spoiler: observed_states.append(st))
 
         # 1. Game not running
         st1 = orchestrator.step_update()
@@ -743,8 +743,8 @@ def test_orchestrator_callbacks_dispatch(tmp_path: Path) -> None:
         state_calls: list[tuple[GameState, bool]] = []
         update_calls: list[UpdateInfo] = []
 
-        orchestrator.on_state_change = lambda st, sp: state_calls.append((st, sp))
-        orchestrator.on_update_available = lambda info: update_calls.append(info)
+        orchestrator.subscribe_state_change(lambda st, sp: state_calls.append((st, sp)))
+        orchestrator.subscribe_update_available(lambda info: update_calls.append(info))
 
         st = orchestrator.step_update()
         assert st is not None
@@ -761,7 +761,7 @@ def test_orchestrator_callbacks_dispatch(tmp_path: Path) -> None:
 def test_orchestrator_facade_methods(tmp_path: Path) -> None:
     """Verifies that AppOrchestrator exposes Demeter-compliant facade queries and actions."""
     rpc, _ = _make_connected_rpc()
-    settings = SettingsService(custom_path=tmp_path / "settings.json")
+    settings = SettingsService(path=tmp_path / "settings.json")
     settings.set_anti_spoiler_enabled(True)
 
     fake_updater = FakeUpdater(
@@ -901,10 +901,10 @@ def test_orchestrator_update_available_callback() -> None:
     orchestrator = AppOrchestrator(
         detector=detector,
         rpc_manager=rpc,
-        on_update_available=callback,
         auto_install_bridge=False,
         sync_startup=False,
     )
+    unsub = orchestrator.subscribe_update_available(callback)
 
     # Calling with None should be a safe no-op
     orchestrator.on_update_check_complete(None)
@@ -916,8 +916,8 @@ def test_orchestrator_update_available_callback() -> None:
     assert len(received_updates) == 1
     assert received_updates[0].tag_name == "v1.0.0"
 
-    # Unsetting callback stops notifications
-    orchestrator.on_update_available = None
+    # Unsubscribing stops notifications
+    unsub()
 
     update_v2 = UpdateInfo(tag_name="v2.0.0", version_tuple=(2, 0, 0), html_url="https://...")
     orchestrator.on_update_check_complete(update_v2)
@@ -942,7 +942,7 @@ def test_orchestrator_update_available_error_resilience() -> None:
         del info
         raise RuntimeError("Subscriber explosion")
 
-    orchestrator.on_update_available = failing_cb
+    orchestrator.subscribe_update_available(failing_cb)
 
     update_v1 = UpdateInfo(tag_name="v1.0.0", version_tuple=(1, 0, 0), html_url="https://...")
     # Does not raise even if callback fails
@@ -997,7 +997,7 @@ def test_orchestrator_subscribe_update_available() -> None:
 
 @pytest.mark.unit
 def test_orchestrator_state_change_callback_error_resilience() -> None:
-    """Verifies that an unhandled exception in on_state_change callback does not crash step_update."""
+    """Verifies that an unhandled exception in state change callback does not crash step_update."""
     detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
     rpc, _ = _make_connected_rpc()
 
@@ -1008,10 +1008,10 @@ def test_orchestrator_state_change_callback_error_resilience() -> None:
     orchestrator = AppOrchestrator(
         detector=detector,
         rpc_manager=rpc,
-        on_state_change=exploding_callback,
         auto_install_bridge=False,
         sync_startup=False,
     )
+    orchestrator.subscribe_state_change(exploding_callback)
 
     # step_update must handle the callback exception gracefully and return the valid state
     st = orchestrator.step_update()
@@ -1219,7 +1219,7 @@ def test_orchestrator_step_with_real_detector(tmp_path: Path) -> None:
         save_reader=None,
     )
     rpc, _ = _make_connected_rpc()
-    settings = SettingsService(custom_path=tmp_path / "settings.json")
+    settings = SettingsService(path=tmp_path / "settings.json")
     fake_installer = FakeBridgeInstaller(installed=False)
 
     orchestrator = AppOrchestrator(
@@ -1239,71 +1239,56 @@ def test_orchestrator_step_with_real_detector(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_orchestrator_callbacks_slot_decoupling_prevents_stale_and_duplicate_invocation() -> None:
-    """Verifies that direct callbacks are isolated from subscribers, preventing stale or duplicate invocations."""
-    calls_a: list[GameState] = []
-    calls_b: list[GameState] = []
+def test_orchestrator_subscribe_state_change_lifecycle() -> None:
+    """Verifies that state change subscribers receive updates and unsubscription works cleanly."""
+    calls: list[GameState] = []
 
-    def callback_a(state: GameState, _spoiler: bool) -> None:
-        calls_a.append(state)
-
-    def callback_b(state: GameState, _spoiler: bool) -> None:
-        calls_b.append(state)
+    def callback(state: GameState, _spoiler: bool) -> None:
+        calls.append(state)
 
     detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
     rpc, _ = _make_connected_rpc()
 
-    # 1. Initialize with callback_a: direct slot must not leak into subscribers
     orchestrator = AppOrchestrator(
         detector=detector,
         rpc_manager=rpc,
-        on_state_change=callback_a,
         auto_install_bridge=False,
         sync_startup=False,
     )
 
-    assert orchestrator.on_state_change is callback_a
+    unsub = orchestrator.subscribe_state_change(callback)
+    orchestrator.step_update()
+    assert len(calls) == 1
+
+    # Unsubscribe stops further dispatches
+    unsub()
+    orchestrator.step_update()
+    assert len(calls) == 1
+
+
+@pytest.mark.unit
+def test_orchestrator_subscribe_state_change_duplicate_prevention() -> None:
+    """Verifies that subscribing the same callable multiple times only invokes it once per tick."""
+    calls: list[GameState] = []
+
+    def callback(state: GameState, _spoiler: bool) -> None:
+        calls.append(state)
+
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [])
+    rpc, _ = _make_connected_rpc()
+
+    orchestrator = AppOrchestrator(
+        detector=detector,
+        rpc_manager=rpc,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    orchestrator.subscribe_state_change(callback)
+    orchestrator.subscribe_state_change(callback)
 
     orchestrator.step_update()
-    assert len(calls_a) == 1
-    assert len(calls_b) == 0
-
-    # 2. Reassigning on_state_change: callback_a is not stale-invoked
-    orchestrator.on_state_change = callback_b
-    orchestrator.step_update()
-    assert len(calls_a) == 1
-    assert len(calls_b) == 1
-
-    # 3. Clearing on_state_change: neither callback invoked
-    orchestrator.on_state_change = None
-    orchestrator.step_update()
-    assert len(calls_a) == 1
-    assert len(calls_b) == 1
-
-    # 4. Duplicate prevention for state subscribers when registered both ways
-    calls_sub: list[GameState] = []
-
-    def callback_sub(state: GameState, _spoiler: bool) -> None:
-        calls_sub.append(state)
-
-    orchestrator.subscribe_state_change(callback_sub)
-    orchestrator.on_state_change = callback_sub
-
-    orchestrator.step_update()
-    assert len(calls_sub) == 1
-
-    # 5. Duplicate prevention for update check subscribers when registered both ways
-    update_calls: list[UpdateInfo] = []
-
-    def update_listener(info: UpdateInfo) -> None:
-        update_calls.append(info)
-
-    orchestrator.subscribe_update_available(update_listener)
-    orchestrator.on_update_available = update_listener
-
-    sample_info = UpdateInfo(tag_name="v3.0.0", version_tuple=(3, 0, 0), html_url="")
-    orchestrator.on_update_check_complete(sample_info)
-    assert len(update_calls) == 1
+    assert len(calls) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1338,35 +1323,10 @@ def _create_test_orchestrator(
 
 
 @pytest.mark.unit
-def test_orchestrator_on_state_change_cleared_to_none_prevents_invocation() -> None:
-    """Verifies that setting orchestrator.on_state_change = None completely suppresses callback invocations."""
-    calls: list[GameState] = []
-
-    def callback(state: GameState, _spoiler: bool) -> None:
-        calls.append(state)
-
-    orchestrator, _ = _create_test_orchestrator(on_state_change=callback)
-
-    # Initial tick: callback invoked once
-    orchestrator.step_update()
-    assert len(calls) == 1
-
-    # Setting on_state_change to None
-    orchestrator.on_state_change = None
-
-    # Subsequent ticks: no invocation occurs
-    for _ in range(5):
-        orchestrator.step_update()
-    assert len(calls) == 1
-
-
-@pytest.mark.unit
-def test_orchestrator_on_state_change_repeated_reassignment() -> None:
-    """Reassigns on_state_change through multiple distinct callables.
-
-    Guarantees that stale callbacks are NEVER invoked, and only the active callback receives dispatches.
-    """
-    call_counts: dict[str, int] = {f"cb_{i}": 0 for i in range(10)}
+def test_orchestrator_subscribe_state_change_multiple_subscribers() -> None:
+    """Registers multiple distinct subscribers and verifies independent notification and unsubscription."""
+    call_counts: dict[str, int] = {f"cb_{i}": 0 for i in range(5)}
+    unsub_fns: dict[str, Callable[[], None]] = {}
 
     def make_cb(name: str) -> Callable[[GameState, bool], None]:
         def _cb(state: GameState, _spoiler: bool) -> None:
@@ -1377,105 +1337,42 @@ def test_orchestrator_on_state_change_repeated_reassignment() -> None:
 
     orchestrator, _ = _create_test_orchestrator()
 
-    # Repeatedly assign and execute step_update
-    for i in range(10):
+    for i in range(5):
         cb_name = f"cb_{i}"
-        orchestrator.on_state_change = make_cb(cb_name)
+        unsub_fns[cb_name] = orchestrator.subscribe_state_change(make_cb(cb_name))
 
-        # Execute 2 ticks per callback
-        orchestrator.step_update()
-        orchestrator.step_update()
-
-        # Only the current callback should have incremented (by 2)
-        assert call_counts[cb_name] == 2
-        for other_name, count in call_counts.items():
-            if other_name != cb_name:
-                assert count == (2 if int(other_name.split("_")[1]) < i else 0)
-
-    # Re-assign back to cb_0
-    orchestrator.on_state_change = make_cb("cb_0")
     orchestrator.step_update()
-    assert call_counts["cb_0"] == 3
-    # Others must not have changed
-    for i in range(1, 10):
+    for i in range(5):
+        assert call_counts[f"cb_{i}"] == 1
+
+    # Unsubscribe cb_0
+    unsub_fns["cb_0"]()
+    orchestrator.step_update()
+
+    assert call_counts["cb_0"] == 1
+    for i in range(1, 5):
         assert call_counts[f"cb_{i}"] == 2
 
 
 @pytest.mark.unit
-def test_orchestrator_same_function_dual_registration_invoked_exactly_once() -> None:
-    """Verifies that registering the exact same function both via subscribe_state_change
-
-    and as on_state_change results in exactly ONE invocation per step_update().
-    Also verifies unsubscription dynamics and clearing.
-    """
-    call_history: list[int | None] = []
-
-    def shared_callback(state: GameState, _spoiler: bool) -> None:
-        call_history.append(state.process_pid)
-
-    orchestrator, _ = _create_test_orchestrator()
-
-    # Register in both slots
-    unsubscribe = orchestrator.subscribe_state_change(shared_callback)
-    orchestrator.on_state_change = shared_callback
-
-    assert orchestrator.on_state_change is shared_callback
-
-    # Tick 1: Must be called exactly once despite being in both slots
-    orchestrator.step_update()
-    assert len(call_history) == 1
-
-    # Tick 2: Still called exactly once
-    orchestrator.step_update()
-    assert len(call_history) == 2
-
-    # Unsubscribe from unified subscriber list: callback is completely disabled
-    unsubscribe()
-    assert orchestrator.on_state_change is None
-
-    # Tick 3: Callback is unsubscribed, no further invocations
-    orchestrator.step_update()
-    assert len(call_history) == 2
-
-
-@pytest.mark.unit
-def test_orchestrator_update_available_decoupling_and_dual_registration() -> None:
-    """Verifies slot decoupling, clearing, reassignment, and duplicate suppression
-
-    for update available listeners (on_update_available and subscribe_update_available).
-    """
+def test_orchestrator_update_available_duplicate_and_unsubscription() -> None:
+    """Verifies that subscribing the same update listener twice only invokes it once, and unsubscription works."""
     calls: list[str] = []
 
-    def listener_a(info: UpdateInfo) -> None:
-        calls.append(f"A:{info.tag_name}")
+    def listener(info: UpdateInfo) -> None:
+        calls.append(info.tag_name)
 
-    def listener_b(info: UpdateInfo) -> None:
-        calls.append(f"B:{info.tag_name}")
+    orchestrator, _ = _create_test_orchestrator()
+    unsub1 = orchestrator.subscribe_update_available(listener)
+    orchestrator.subscribe_update_available(listener)
 
-    orchestrator, _ = _create_test_orchestrator(on_update_available=listener_a)
     sample_info = UpdateInfo(tag_name="v3.1.0", version_tuple=(3, 1, 0), html_url="")
-
-    # 1. Initial direct callback
     orchestrator.on_update_check_complete(sample_info)
-    assert calls == ["A:v3.1.0"]
+    assert calls == ["v3.1.0"]
 
-    # 2. Reassignment to listener_b
-    orchestrator.on_update_available = listener_b
+    unsub1()
     orchestrator.on_update_check_complete(sample_info)
-    assert calls == ["A:v3.1.0", "B:v3.1.0"]
-
-    # 3. Dual registration of listener_b
-    unsubscribe = orchestrator.subscribe_update_available(listener_b)
-    orchestrator.on_update_check_complete(sample_info)
-    # listener_b must only be called ONCE in this tick
-    assert calls == ["A:v3.1.0", "B:v3.1.0", "B:v3.1.0"]
-
-    # 4. Unsubscribe and clearing
-    unsubscribe()
-    orchestrator.on_update_available = None
-    orchestrator.on_update_check_complete(sample_info)
-    # No new calls
-    assert calls == ["A:v3.1.0", "B:v3.1.0", "B:v3.1.0"]
+    assert calls == ["v3.1.0"]
 
 
 @pytest.mark.unit

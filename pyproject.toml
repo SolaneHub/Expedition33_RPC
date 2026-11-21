@@ -82,7 +82,7 @@ ignore = [
 known-first-party = ["expedition33_rpc"]
 
 [tool.pyright]
-include = ["src", "main.py", "build_exe.py", "tests", "tools", ".github/scripts"]
+include = ["src", "build_exe.py", "tests", "tools", ".github/scripts"]
 
 extraPaths = [".", "src", ".github/scripts"]
 exclude = [
@@ -99,8 +99,15 @@ typeCheckingMode = "standard"
 reportMissingImports = true
 reportMissingTypeStubs = false
 reportUnknownMemberType = false
-reportUnknownArgumentType = false
-reportUnknownVariableType = false
+reportUnknownArgumentType = true
+reportUnknownVariableType = true
+
+executionEnvironments = [
+  { root = "src" },
+  { root = "tests", reportUnknownArgumentType = false, reportUnknownVariableType = false },
+  { root = "tools", reportUnknownArgumentType = false, reportUnknownVariableType = false },
+  { root = ".github/scripts", reportUnknownArgumentType = false, reportUnknownVariableType = false },
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -96,22 +96,22 @@ def test_discord_rpc_manager_end_to_end_with_native_client() -> None:
         large_text="Clair Obscur: Expedition 33",
     )
 
-    manager.update(payload, pid=5432)
+    manager.update_presence(payload, pid=5432)
     assert manager.last_update_state is not None
     assert "Flying Manor" in manager.last_update_state
 
     written_len_1 = len(mock_pipe.written_data)
-    manager.update(payload, pid=5432)
+    manager.update_presence(payload, pid=5432)
     assert len(mock_pipe.written_data) == written_len_1
 
     # Invalidate forces re-transmission
     manager.invalidate()
-    manager.update(payload, pid=5432)
+    manager.update_presence(payload, pid=5432)
     assert len(mock_pipe.written_data) > written_len_1
 
     # force=True forces re-transmission directly
     written_len_2 = len(mock_pipe.written_data)
-    manager.update(payload, pid=5432, force=True)
+    manager.update_presence(payload, pid=5432, force=True)
     assert len(mock_pipe.written_data) > written_len_2
 
 
@@ -194,13 +194,13 @@ def test_discord_rpc_manager_loopback_lifecycle_and_backoff() -> None:
             large_text="Clair Obscur: Expedition 33",
         )
 
-        manager.update(payload, pid=5432)
+        manager.update_presence(payload, pid=5432)
         assert manager.is_connected is True
         assert manager.last_update_state is not None
 
         # Redundant update does not write extra frames
         frames_count = len(server.get_frames())
-        manager.update(payload, pid=5432)
+        manager.update_presence(payload, pid=5432)
         assert len(server.get_frames()) == frames_count
 
         # Disconnect
@@ -296,14 +296,12 @@ def test_discord_rpc_manager_injected_client_retention() -> None:
     manager.disconnect()
     assert manager.is_connected is False
     assert manager.client is custom_client
-    assert manager.rpc is custom_client
 
     # Bypass backoff and reconnect
     manager.last_retry_time = 0.0
     # Injected client is re-used by manager.connect()
     assert manager.connect() is True
     assert manager.is_connected is True
-    assert manager.rpc is custom_client
 
 
 @pytest.mark.integration
@@ -343,7 +341,7 @@ def test_discord_ipc_client_and_orchestrator_freeze_chaos() -> None:
         assert orchestrator.is_rpc_connected() is True
 
         payload1 = PresencePayload(details="SafeZone", state="Exploring")
-        orchestrator.rpc_manager.update(payload1)
+        orchestrator.rpc_manager.update_presence(payload1)
         assert orchestrator.is_rpc_connected() is True
         safe_fingerprint = orchestrator.rpc_manager.last_update_state
         assert safe_fingerprint is not None
@@ -353,7 +351,7 @@ def test_discord_ipc_client_and_orchestrator_freeze_chaos() -> None:
 
         payload2 = PresencePayload(details="DeadlockZone", state="Exploring")
         t0 = time.perf_counter()
-        orchestrator.rpc_manager.update(payload2)
+        orchestrator.rpc_manager.update_presence(payload2)
         freeze_duration = time.perf_counter() - t0
 
         assert freeze_duration < 1.0  # Finished within timeout budget
@@ -523,7 +521,7 @@ def test_discord_rpc_manager_exponential_backoff_and_reset(monkeypatch: pytest.M
     assert manager.last_retry_time == 0.0
 
     # 5. Unexpected connection drop allows immediate reconnection attempt at next tick before backoff
-    success_client.is_connected = False
+    success_client.close()
     simulated_now = 151.0  # Only 1.0s elapsed after last connection, but retry_failures is 0
     # Simulate a failing reconnection on this immediate attempt
     manager.client = client

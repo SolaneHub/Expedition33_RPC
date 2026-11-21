@@ -21,7 +21,7 @@ from expedition33_rpc.core.settings import SettingsService
 @pytest.fixture
 def settings_service(tmp_path: Path) -> SettingsService:
     """Provides a fresh isolated SettingsService writing to a temporary directory."""
-    return SettingsService(custom_path=tmp_path / "settings.json")
+    return SettingsService(path=tmp_path / "settings.json")
 
 
 @pytest.fixture
