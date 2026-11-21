@@ -22,6 +22,7 @@ def check_target_lock(target_path: str) -> None:
 
 
 def build() -> None:
+    root_dir = os.path.dirname(os.path.abspath(__file__))
     expected_exe = (
         "dist/Expedition33_RPC.exe" if sys.platform == "win32" else "dist/Expedition33_RPC"
     )
@@ -37,13 +38,13 @@ def build() -> None:
         "--name",
         "Expedition33_RPC",
         "--icon",
-        "src/expedition33_rpc/assets/icon.ico",
+        os.path.join(root_dir, "src/expedition33_rpc/assets/icon.ico"),
         "--add-data",
-        f"src/expedition33_rpc/assets/icon.png{os.pathsep}expedition33_rpc/assets",
+        f"{os.path.join(root_dir, 'src/expedition33_rpc/assets/icon.png')}{os.pathsep}expedition33_rpc/assets",
         "--add-data",
-        f"src/expedition33_rpc/assets/bridge.zip{os.pathsep}expedition33_rpc/assets",
+        f"{os.path.join(root_dir, 'src/expedition33_rpc/assets/bridge.zip')}{os.pathsep}expedition33_rpc/assets",
         "--add-data",
-        f"src/expedition33_rpc/assets/game_data.json{os.pathsep}expedition33_rpc/assets",
+        f"{os.path.join(root_dir, 'src/expedition33_rpc/assets/game_data.json')}{os.pathsep}expedition33_rpc/assets",
         "--hidden-import",
         "expedition33_rpc.core.platform",
         "--hidden-import",
@@ -61,11 +62,11 @@ def build() -> None:
         "--exclude-module",
         "_tkinter",
         "--paths",
-        "src",
+        os.path.join(root_dir, "src"),
         "--specpath",
         "build",
         "--clean",
-        "src/expedition33_rpc/__main__.py",
+        os.path.join(root_dir, "src/expedition33_rpc/__main__.py"),
     ]
     print("Command:", " ".join(cmd))
     res = subprocess.run(cmd, stdin=subprocess.DEVNULL)
