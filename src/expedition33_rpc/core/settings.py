@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 def get_default_settings_dir() -> Path:
@@ -27,16 +27,9 @@ class SettingsService:
 
     def __init__(
         self,
-        config_path: str | Path | None = None,
-        *,
-        custom_path: str | Path | None = None,
+        path: str | Path | None = None,
     ) -> None:
-        target_path = custom_path if custom_path is not None else config_path
-        self.path = (
-            Path(target_path)
-            if target_path is not None
-            else get_default_settings_dir() / "settings.json"
-        )
+        self.path = Path(path) if path is not None else get_default_settings_dir() / "settings.json"
         self._anti_spoiler: bool = False
         self._raw_data: dict[str, Any] = {}
         self._lock = threading.RLock()
@@ -49,10 +42,12 @@ class SettingsService:
         with self._lock:
             if self.path.is_file():
                 try:
-                    data = json.loads(self.path.read_text(encoding="utf-8"))
-                    if isinstance(data, dict):
-                        self._raw_data = dict(data)
-                        self._anti_spoiler = bool(data.get("anti_spoiler", False))
+                    raw_loaded = cast(
+                        dict[str, Any], json.loads(self.path.read_text(encoding="utf-8"))
+                    )
+                    if isinstance(raw_loaded, dict):
+                        self._raw_data = dict(raw_loaded)
+                        self._anti_spoiler = bool(raw_loaded.get("anti_spoiler", False))
                         return self._anti_spoiler
                 except Exception:
                     pass

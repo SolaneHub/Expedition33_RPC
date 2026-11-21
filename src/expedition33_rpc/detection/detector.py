@@ -6,16 +6,11 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 import psutil
 
 from expedition33_rpc.core.platform import read_file_shared_text as _read_file_shared_text
-from expedition33_rpc.detection.compat_paths import (
-    get_game_user_settings_path,
-    get_telemetry_file_path,
-    get_telemetry_file_paths,
-)
 from expedition33_rpc.detection.game_data import ENDLESS_TOWER_TRIALS, TARGET_PROCESS_NAMES
 from expedition33_rpc.detection.normalization import (
     format_checkpoint_tag,
@@ -25,6 +20,7 @@ from expedition33_rpc.detection.normalization import (
     is_menu_zone,
     resolve_tower_trial,
 )
+from expedition33_rpc.detection.steam_resolver import SteamCompatResolver
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
 
 type TowerTrial = tuple[int, int] | str
@@ -217,7 +213,7 @@ class BridgeStateProvider:
         if paths is not None:
             self.paths = list(paths)
         else:
-            self.paths = get_telemetry_file_paths()
+            self.paths = SteamCompatResolver().resolve_telemetry_candidates()
         self.grace_period = grace_period
         self.time_provider = time_provider
         self.monotonic_provider = (
@@ -240,7 +236,7 @@ class BridgeStateProvider:
                 try:
                     content = _read_file_shared_text(p).strip()
                     if content:
-                        data = json.loads(content)
+                        data = cast(dict[str, Any], json.loads(content))
                         if isinstance(data, dict):
                             return data
                 except FileNotFoundError:
@@ -290,13 +286,17 @@ class BridgeStateProvider:
 
                 raw_enemies = bridge.get("enemies")
                 enemies_list: list[str] = (
-                    [str(e) for e in raw_enemies if e] if isinstance(raw_enemies, list) else []
+                    [str(e) for e in cast(list[object], raw_enemies) if e]
+                    if isinstance(raw_enemies, list)
+                    else []
                 )
 
                 raw_trial = bridge.get("tower_trial")
                 tower_trial: TowerTrial | None = None
-                if isinstance(raw_trial, list) and len(raw_trial) == 2:
-                    tower_trial = (int(raw_trial[0]), int(raw_trial[1]))
+                if isinstance(raw_trial, list):
+                    trial_items = cast(list[Any], raw_trial)
+                    if len(trial_items) == 2:
+                        tower_trial = (int(trial_items[0]), int(trial_items[1]))
                 elif isinstance(raw_trial, str) and raw_trial:
                     tower_trial = raw_trial
 
@@ -342,6 +342,7 @@ class GameDetector:
         game_user_settings_path: Path | str | None = None,
         idle_poll_interval: float = 5.0,
         time_provider: Callable[[], float] | None = None,
+        epoch_provider: Callable[[], float] | None = None,
         save_reader: SaveReaderProtocol | None = None,
     ):
         self.cached_pid: int | None = None
@@ -362,6 +363,9 @@ class GameDetector:
         self.idle_poll_interval: float = idle_poll_interval
         self.time_provider: Callable[[], float] = (
             time_provider if time_provider is not None else time.monotonic
+        )
+        self.epoch_provider: Callable[[], float] = (
+            epoch_provider if epoch_provider is not None else time.time
         )
         self._last_process_scan_time: float = -float("inf")
         resolved_names: list[str] = []
@@ -484,7 +488,11 @@ class GameDetector:
             return self._cached_language
 
         self._last_language_check_time = current_time
-        target_ini = ini_path or self._game_user_settings_path or get_game_user_settings_path()
+        target_ini = (
+            ini_path
+            or self._game_user_settings_path
+            or SteamCompatResolver().resolve_game_user_settings_path()
+        )
         if target_ini is None:
             target_ini = os.path.expandvars(
                 r"%LOCALAPPDATA%\Sandfall\Saved\Config\Windows\GameUserSettings.ini"
@@ -515,7 +523,6 @@ class GameDetector:
 
     def get_game_state(
         self,
-        now: float | None = None,
         now_monotonic: float | None = None,
         now_epoch: float | None = None,
         force: bool = False,
@@ -523,17 +530,12 @@ class GameDetector:
         """Executes a full detection cycle returning an immutable GameState snapshot.
 
         Args:
-            now: Legacy parameter for backward compatibility. When provided alone,
-                 it is interpreted as epoch time for timer_tracker and start_time.
-                 Prefer explicit now_monotonic / now_epoch for clock-correct usage.
             now_monotonic: Monotonic clock value for process scan backoff and language interval.
             now_epoch: Epoch wall-clock value for timer_tracker.update() and outbound start_time.
             force: When True, bypasses idle backoff for process scanning.
         """
-        # Resolve explicit dual-clock or legacy single-clock parameter
-        effective_monotonic = now_monotonic
-        effective_epoch = now_epoch if now_epoch is not None else now
-        proc = self.find_game_process(now=effective_monotonic, force=force)
+        current_monotonic = self.time_provider() if now_monotonic is None else now_monotonic
+        proc = self.find_game_process(now=current_monotonic, force=force)
 
         if not proc:
             self.cached_pid = None
@@ -551,7 +553,7 @@ class GameDetector:
             self.timer_tracker.reset()
             return GameState(is_running=False, game_language=self._cached_language)
 
-        lang = self.get_game_language(force=force, now=effective_monotonic)
+        lang = self.get_game_language(force=force, now=current_monotonic)
 
         # Extract process creation time safely only for the matched process
         proc_create_time: float | None = None
@@ -650,11 +652,15 @@ class GameDetector:
             bridge_trial = data.get("tower_trial") if data else None
             if bridge_trial:
                 normalized_trial: tuple[int, int] | str
-                if isinstance(bridge_trial, (list, tuple)) and len(bridge_trial) == 2:
-                    normalized_trial = (
-                        int(bridge_trial[0]),
-                        int(bridge_trial[1]),
-                    )
+                if isinstance(bridge_trial, (list, tuple)):
+                    trial_seq = cast(tuple[Any, Any] | list[Any], bridge_trial)
+                    if len(trial_seq) == 2:
+                        normalized_trial = (
+                            int(trial_seq[0]),
+                            int(trial_seq[1]),
+                        )
+                    else:
+                        normalized_trial = str(trial_seq)
                 else:
                     normalized_trial = str(bridge_trial)
                 self.current_tower_trial = normalized_trial
@@ -693,10 +699,8 @@ class GameDetector:
             ):
                 zone_key = self.timer_tracker.current_zone_id
 
-        current_epoch = time.time() if effective_epoch is None else effective_epoch
-        current_monotonic = (
-            self.time_provider() if effective_monotonic is None else effective_monotonic
-        )
+        current_epoch = self.epoch_provider() if now_epoch is None else now_epoch
+        current_monotonic = self.time_provider() if now_monotonic is None else now_monotonic
         effective_start = self.timer_tracker.update(
             zone_key=zone_key,
             in_combat=in_combat,
@@ -740,6 +744,4 @@ __all__ = [
     "BridgeStateProvider",
     "GameDetector",
     "TARGET_PROCESS_NAMES",
-    "get_telemetry_file_path",
-    "get_telemetry_file_paths",
 ]

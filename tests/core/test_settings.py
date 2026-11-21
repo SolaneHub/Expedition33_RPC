@@ -24,7 +24,7 @@ def test_settings_service_default_path() -> None:
 @pytest.mark.unit
 def test_settings_service_load_nonexistent_file(tmp_path: Path) -> None:
     custom_path = tmp_path / "nonexistent" / "settings.json"
-    service = SettingsService(custom_path=custom_path)
+    service = SettingsService(path=custom_path)
 
     assert service.is_anti_spoiler_enabled() is False
     assert not custom_path.exists()
@@ -35,7 +35,7 @@ def test_settings_service_load_corrupt_json(tmp_path: Path) -> None:
     custom_path = tmp_path / "corrupted.json"
     custom_path.write_text("{ not valid json !!!", encoding="utf-8")
 
-    service = SettingsService(custom_path=custom_path)
+    service = SettingsService(path=custom_path)
     assert service.is_anti_spoiler_enabled() is False
     assert service.load() is False
 
@@ -43,7 +43,7 @@ def test_settings_service_load_corrupt_json(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_settings_service_save_and_load(tmp_path: Path) -> None:
     custom_path = tmp_path / "settings.json"
-    service = SettingsService(custom_path=custom_path)
+    service = SettingsService(path=custom_path)
 
     assert service.set_anti_spoiler_enabled(True) is True
     assert custom_path.is_file()
@@ -53,14 +53,14 @@ def test_settings_service_save_and_load(tmp_path: Path) -> None:
     assert '  "anti_spoiler": true' in raw_content
 
     # Load back with fresh service
-    fresh_service = SettingsService(custom_path=custom_path)
+    fresh_service = SettingsService(path=custom_path)
     assert fresh_service.is_anti_spoiler_enabled() is True
 
 
 @pytest.mark.unit
 def test_settings_service_sequential_updates(tmp_path: Path) -> None:
     custom_path = tmp_path / "update_settings.json"
-    service = SettingsService(custom_path=custom_path)
+    service = SettingsService(path=custom_path)
 
     assert service.set_anti_spoiler_enabled(True) is True
     assert service.is_anti_spoiler_enabled() is True
@@ -83,7 +83,7 @@ def test_settings_service_preserves_external_keys(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    service = SettingsService(custom_path=custom_path)
+    service = SettingsService(path=custom_path)
     assert service.set_anti_spoiler_enabled(True) is True
 
     data = json.loads(custom_path.read_text(encoding="utf-8"))
@@ -94,7 +94,7 @@ def test_settings_service_preserves_external_keys(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_settings_service_toggle_anti_spoiler(tmp_path: Path) -> None:
     custom_path = tmp_path / "toggle_settings.json"
-    service = SettingsService(custom_path=custom_path)
+    service = SettingsService(path=custom_path)
 
     assert service.toggle_anti_spoiler() is True
     assert service.is_anti_spoiler_enabled() is True
@@ -106,7 +106,7 @@ def test_settings_service_toggle_anti_spoiler(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_settings_service_save_oserror_handling(tmp_path: Path) -> None:
     custom_path = tmp_path / "locked_settings.json"
-    service = SettingsService(custom_path=custom_path)
+    service = SettingsService(path=custom_path)
     assert service.set_anti_spoiler_enabled(False) is True
 
     with patch("pathlib.Path.replace", side_effect=PermissionError("Locked")):
@@ -121,7 +121,7 @@ def test_settings_service_concurrent_updates(tmp_path: Path) -> None:
     import concurrent.futures
 
     custom_path = tmp_path / "concurrent_settings.json"
-    service = SettingsService(custom_path=custom_path)
+    service = SettingsService(path=custom_path)
 
     def worker(i: int) -> bool:
         return service.set_anti_spoiler_enabled(i % 2 == 0)
@@ -138,7 +138,7 @@ def test_settings_service_concurrent_updates(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_settings_service_in_memory_caching_and_atomic_update(tmp_path: Path) -> None:
     custom_json = tmp_path / "cached_settings.json"
-    service = SettingsService(custom_path=custom_json)
+    service = SettingsService(path=custom_json)
 
     # Initial query returns default without requiring a file on disk
     assert not custom_json.exists()
@@ -162,7 +162,7 @@ def test_settings_service_in_memory_caching_and_atomic_update(tmp_path: Path) ->
     assert custom_json.is_file()
 
     # Verify persistence by reading from a fresh service instance
-    fresh_service = SettingsService(custom_path=custom_json)
+    fresh_service = SettingsService(path=custom_json)
     assert fresh_service.is_anti_spoiler_enabled() is False
 
 
@@ -172,7 +172,7 @@ def test_settings_service_nested_directory_creation_and_recovery(tmp_path: Path)
     nested_json = tmp_path / "deep" / "nested" / "dir" / "settings.json"
     assert not nested_json.parent.exists()
 
-    service = SettingsService(custom_path=nested_json)
+    service = SettingsService(path=nested_json)
     assert nested_json.parent.is_dir()
     assert not nested_json.exists()
 
@@ -197,7 +197,7 @@ def test_settings_service_nested_directory_creation_and_recovery(tmp_path: Path)
 def test_settings_service_detects_external_file_modifications(tmp_path: Path) -> None:
     """Verifies that external modifications to settings.json are detected and merged."""
     custom_json = tmp_path / "external_settings.json"
-    service = SettingsService(custom_path=custom_json)
+    service = SettingsService(path=custom_json)
     service.set_anti_spoiler_enabled(False)
 
     # External program updates settings.json with extra fields

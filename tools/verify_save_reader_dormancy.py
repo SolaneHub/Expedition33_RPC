@@ -267,7 +267,9 @@ def run_dormancy_test(audit: FilesystemActivityAudit, tmp_path: Path) -> None:
 
     # Execute 500 detection cycles under active bridge telemetry with checkpoint
     for tick in range(500):
-        state: GameState = detector.get_game_state(now=1000.0 + tick)
+        state: GameState = detector.get_game_state(
+            now_monotonic=1000.0 + tick, now_epoch=1000.0 + tick
+        )
         assert state.is_running is True
         assert state.raw_checkpoint == "Level.SpawnPoint.VersosDraft.CandyLand"
 
@@ -305,7 +307,7 @@ def run_fallback_test(audit: FilesystemActivityAudit, tmp_path: Path) -> None:
     mock_bridge.read_game_data.return_value = None
 
     audit.clear()
-    state = detector.get_game_state(now=2000.0)
+    state = detector.get_game_state(now_monotonic=2000.0, now_epoch=2000.0)
 
     assert state.is_running is True
     assert state.raw_checkpoint == "Level.SpawnPoint.VersosDraft.CandyLand", (
@@ -322,7 +324,7 @@ def run_fallback_test(audit: FilesystemActivityAudit, tmp_path: Path) -> None:
     detector.last_raw_zone = ""
     mock_bridge.read_game_data.return_value = None
     audit.clear()
-    state_empty = detector.get_game_state(now=2001.0)
+    state_empty = detector.get_game_state(now_monotonic=2001.0, now_epoch=2001.0)
     assert state_empty.raw_checkpoint == ""
     assert len(audit.save_reader_fs_calls) == 0, (
         "SaveFileReader must not be called when zone_to_check is empty!"
@@ -352,7 +354,9 @@ def run_fallback_test(audit: FilesystemActivityAudit, tmp_path: Path) -> None:
     detector_with_real_bridge.last_raw_zone = "Level_Side_VersosDraft"
 
     audit.clear()
-    state_stale = detector_with_real_bridge.get_game_state(now=current_time)
+    state_stale = detector_with_real_bridge.get_game_state(
+        now_monotonic=current_time, now_epoch=current_time
+    )
     assert state_stale.raw_checkpoint == "Level.SpawnPoint.VersosDraft.CandyLand", (
         f"Expected fallback under real stale bridge, got {state_stale.raw_checkpoint}"
     )
@@ -465,7 +469,7 @@ def run_rapid_toggling_stress_test(audit: FilesystemActivityAudit, tmp_path: Pat
             restarts += 1
 
         audit.clear()
-        state = detector.get_game_state(now=1000.0 + tick)
+        state = detector.get_game_state(now_monotonic=1000.0 + tick, now_epoch=1000.0 + tick)
 
         # Integrity check: state is always immutable and has valid types
         assert isinstance(state, GameState)
@@ -518,7 +522,7 @@ def run_concurrency_stress_test(audit: FilesystemActivityAudit, tmp_path: Path) 
     def worker_loop() -> None:
         try:
             for i in range(200):
-                st = detector.get_game_state(now=1000.0 + i)
+                st = detector.get_game_state(now_monotonic=1000.0 + i, now_epoch=1000.0 + i)
                 assert st.is_running is True
                 assert st.raw_checkpoint == "Level.SpawnPoint.VersosDraft.CandyLand"
         except Exception as e:
@@ -572,7 +576,7 @@ def run_malformed_telemetry_test(audit: FilesystemActivityAudit, tmp_path: Path)
     for idx, payload in enumerate(malformed_payloads):
         mock_bridge.read_game_data.return_value = payload
         audit.clear()
-        st = detector.get_game_state(now=3000.0 + idx)
+        st = detector.get_game_state(now_monotonic=3000.0 + idx, now_epoch=3000.0 + idx)
         assert isinstance(st, GameState)
         assert len(audit.save_reader_fs_calls) == 0, f"Payload {idx} leaked filesystem calls!"
 
@@ -603,7 +607,7 @@ def run_corrupted_save_file_test(audit: FilesystemActivityAudit, tmp_path: Path)
     detector.last_raw_zone = "Level_Side_VersosDraft"
 
     audit.clear()
-    st = detector.get_game_state(now=4000.0)
+    st = detector.get_game_state(now_monotonic=4000.0, now_epoch=4000.0)
     assert st.is_running is True
     # Does not crash, cleanly returns empty checkpoint
     assert st.raw_checkpoint == ""

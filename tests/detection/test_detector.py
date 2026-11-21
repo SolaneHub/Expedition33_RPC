@@ -769,7 +769,7 @@ def test_cleas_workshop_is_not_detected_as_tower() -> None:
         process_scanner=lambda: [mock_proc],
     )
 
-    state = detector.get_game_state(now=1000.0)
+    state = detector.get_game_state(now_monotonic=1000.0, now_epoch=1000.0)
     assert state.is_running is True
     assert state.raw_zone == "Level_Side_CleasWorkshop"
     assert state.zone_name == "Painting Workshop"
@@ -791,7 +791,7 @@ def test_get_game_state_propagates_now_timestamp() -> None:
     )
 
     fixed_now = 1700000000.0
-    state = detector.get_game_state(now=fixed_now)
+    state = detector.get_game_state(now_monotonic=fixed_now, now_epoch=fixed_now)
 
     assert state.start_time == fixed_now
     mock_timer_tracker.update.assert_called_once()
@@ -848,14 +848,14 @@ def test_detector_fallback_to_save_reader_when_provided() -> None:
         "checkpoint": "BridgeCheckpoint",
         "timestamp": 1000.0,
     }
-    st1 = detector.get_game_state(now=1000.0)
+    st1 = detector.get_game_state(now_monotonic=1000.0, now_epoch=1000.0)
     assert st1.is_running is True
     assert st1.raw_zone == "Level_Side_VersosDraft"
     assert st1.raw_checkpoint == "BridgeCheckpoint"
 
     # Tick 2: Bridge telemetry drops (returns None) -> Clean fallback to save reader
     bridge_provider.read_game_data.return_value = None
-    st2 = detector.get_game_state(now=1002.0)
+    st2 = detector.get_game_state(now_monotonic=1002.0, now_epoch=1002.0)
     assert st2.is_running is True
     assert st2.raw_checkpoint == "SpawnPoint_VersosDraft"
     assert st2.checkpoint_name == "Spawn Point_Versos Draft"
@@ -881,7 +881,7 @@ def test_tower_trial_cleared_when_leaving_tower_combat() -> None:
         "tower_trial": (1, 2),
         "timestamp": 1000.0,
     }
-    st1 = detector.get_game_state(now=1000.0)
+    st1 = detector.get_game_state(now_monotonic=1000.0, now_epoch=1000.0)
     assert st1.tower_stage_trial == (1, 2)
 
     # Tick 2: Player warps to non-tower zone while still in combat -> trial must clear
@@ -893,7 +893,7 @@ def test_tower_trial_cleared_when_leaving_tower_combat() -> None:
         "tower_trial": None,
         "timestamp": 1002.0,
     }
-    st2 = detector.get_game_state(now=1002.0)
+    st2 = detector.get_game_state(now_monotonic=1002.0, now_epoch=1002.0)
     assert st2.tower_stage_trial is None
 
     # Tick 3: Back to tower but out of combat -> trial must remain None
@@ -905,7 +905,7 @@ def test_tower_trial_cleared_when_leaving_tower_combat() -> None:
         "tower_trial": None,
         "timestamp": 1004.0,
     }
-    st3 = detector.get_game_state(now=1004.0)
+    st3 = detector.get_game_state(now_monotonic=1004.0, now_epoch=1004.0)
     assert st3.tower_stage_trial is None
 
 
@@ -930,7 +930,7 @@ def test_detector_save_reader_strictly_dormant_when_bridge_fresh() -> None:
         save_reader=mock_save_reader,
     )
 
-    state = detector.get_game_state(now=1000.0)
+    state = detector.get_game_state(now_monotonic=1000.0, now_epoch=1000.0)
     assert state.is_running is True
     assert state.raw_checkpoint == "Level.SpawnPoint.VersosDraft.CandyLand"
     mock_save_reader.resolve_checkpoint_for_zone.assert_not_called()
@@ -958,13 +958,13 @@ def test_detector_save_reader_resolves_checkpoint_when_bridge_checkpoint_empty()
     )
 
     # First tick: resolves checkpoint from save reader and caches
-    st1 = detector.get_game_state(now=1000.0)
+    st1 = detector.get_game_state(now_monotonic=1000.0, now_epoch=1000.0)
     assert st1.raw_checkpoint == "SpawnPoint_VersosDraft"
     mock_save_reader.resolve_checkpoint_for_zone.assert_called_once_with("Level_Side_VersosDraft")
 
     # Second tick: player fast travels to new checkpoint in same zone; detector queries save reader and updates
     mock_save_reader.resolve_checkpoint_for_zone.return_value = "SpawnPoint_VersosDraft_NewCamp"
-    st2 = detector.get_game_state(now=1002.0)
+    st2 = detector.get_game_state(now_monotonic=1002.0, now_epoch=1002.0)
     assert st2.raw_checkpoint == "SpawnPoint_VersosDraft_NewCamp"
     assert mock_save_reader.resolve_checkpoint_for_zone.call_count == 2
 
@@ -987,7 +987,7 @@ def test_detector_no_save_reader_fallback_when_none() -> None:
         save_reader=None,
     )
 
-    state = detector.get_game_state(now=1000.0)
+    state = detector.get_game_state(now_monotonic=1000.0, now_epoch=1000.0)
     assert state.is_running is True
     assert state.raw_checkpoint == ""
 
@@ -1018,7 +1018,9 @@ def test_detector_is_starting_consecutive_ticks_without_telemetry() -> None:
     )
 
     for tick in range(1, 5):
-        state = detector.get_game_state(now=1700000000.0 + tick)
+        state = detector.get_game_state(
+            now_monotonic=1700000000.0 + tick, now_epoch=1700000000.0 + tick
+        )
         assert state.is_running is True
         assert state.is_starting is True, f"Failed on tick {tick}"
         assert state.raw_zone == "Starting"
@@ -1048,7 +1050,7 @@ def test_detector_endless_tower_canonical_boss_override() -> None:
         process_scanner=lambda: [mock_proc],
     )
 
-    state = detector.get_game_state(now=1000.0)
+    state = detector.get_game_state(now_monotonic=1000.0, now_epoch=1000.0)
     assert state.is_running is True
     assert state.in_combat is True
     assert state.enemy_name == "Painted Love"
@@ -1068,7 +1070,7 @@ def test_detector_clock_epoch_does_not_corrupt_monotonic_scan_backoff() -> None:
 
     # Initial call with epoch timestamp (e.g. year 2026 / 1.7e9)
     epoch_now = 1770000000.0
-    state = detector.get_game_state(now=epoch_now)
+    state = detector.get_game_state(now_monotonic=epoch_now, now_epoch=epoch_now)
     assert state.is_running is True
 
     # Idle backoff must remain responsive under monotonic time provider, not corrupted by epoch_now
@@ -1102,7 +1104,7 @@ def test_game_detector_resets_on_pid_reuse_with_different_create_time() -> None:
     )
 
     # 1. First tick with create_time=1000.0
-    state1 = detector.get_game_state(now=1000.0)
+    state1 = detector.get_game_state(now_monotonic=1000.0, now_epoch=1000.0)
     assert state1.is_running is True
     assert detector.has_received_telemetry is True
     assert detector.last_raw_zone == "Level_EndlessTower"
@@ -1114,7 +1116,7 @@ def test_game_detector_resets_on_pid_reuse_with_different_create_time() -> None:
     # Telemetry not yet received for new process
     bridge_provider.read_game_data.return_value = None
 
-    state2 = detector.get_game_state(now=2000.0)
+    state2 = detector.get_game_state(now_monotonic=2000.0, now_epoch=2000.0)
     assert state2.is_running is True
     assert state2.is_starting is True
     assert detector.has_received_telemetry is False
@@ -1148,7 +1150,7 @@ def test_game_detector_normalizes_list_tower_trial() -> None:
     )
 
     # First tick
-    state1 = detector.get_game_state(now=1000.0)
+    state1 = detector.get_game_state(now_monotonic=1000.0, now_epoch=1000.0)
     assert state1.is_running is True
     assert detector.current_tower_trial == (10, 2)
     assert isinstance(detector.current_tower_trial, tuple)
@@ -1161,6 +1163,6 @@ def test_game_detector_normalizes_list_tower_trial() -> None:
         "tower_trial": [10, 2],
         "timestamp": 1005.0,
     }
-    state2 = detector.get_game_state(now=1005.0)
+    state2 = detector.get_game_state(now_monotonic=1005.0, now_epoch=1005.0)
     assert state2.start_time == start_t1
     assert detector.current_tower_trial == (10, 2)

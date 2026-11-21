@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 import json
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     TARGET_PROCESS_NAMES: tuple[str, ...]
@@ -95,7 +95,8 @@ def get_target_process_names() -> tuple[str, ...]:
     data = get_game_data()
     custom = data.get("target_process_names")
     if isinstance(custom, list) and custom:
-        names = tuple(str(p).strip().lower() for p in custom if str(p).strip())
+        custom_list = cast(list[object], custom)
+        names = tuple(str(p).strip().lower() for p in custom_list if str(p).strip())
         if names:
             return names
     return DEFAULT_TARGET_PROCESS_NAMES
@@ -106,7 +107,8 @@ def get_main_menu_tokens() -> frozenset[str]:
     data = get_game_data()
     custom = data.get("main_menu_tokens")
     if isinstance(custom, list) and custom:
-        tokens = frozenset(str(tok).strip().lower() for tok in custom if str(tok).strip())
+        custom_list = cast(list[object], custom)
+        tokens = frozenset(str(tok).strip().lower() for tok in custom_list if str(tok).strip())
         if tokens:
             return tokens
     return frozenset(DEFAULT_MAIN_MENU_TOKENS)
