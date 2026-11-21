@@ -106,79 +106,88 @@ class ExpeditionTrayApp:
         # Controlled fallback: 64x64 solid golden icon without binary blobs
         return Image.new("RGBA", (64, 64), color=(212, 175, 55, 255))
 
-    def menu_game_status(self, *_) -> str:
+    def menu_game_status(self, *_args: object) -> str:
         if self.orchestrator.current_state.is_running:
             return f"Game: Running (PID: {self.orchestrator.current_state.process_pid})"
         return "Game: Not running"
 
-    def menu_zone_status(self, *_) -> str:
+    def menu_zone_status(self, *_args: object) -> str:
         return format_tray_zone_status(
             self.orchestrator.current_state,
             anti_spoiler=self.orchestrator.is_anti_spoiler_enabled(),
         )
 
-    def menu_combat_status(self, *_) -> str:
+    def menu_combat_status(self, *_args: object) -> str:
         return format_tray_combat_status(
             self.orchestrator.current_state,
             anti_spoiler=self.orchestrator.is_anti_spoiler_enabled(),
         )
 
-    def menu_discord_status(self, *_) -> str:
+    def menu_discord_status(self, *_args: object) -> str:
         if self.orchestrator.is_rpc_connected():
             return "Discord: Connected"
         return "Discord: Standby (Listening)"
 
-    def menu_anti_spoiler_toggle(self, *_) -> str:
+    def menu_anti_spoiler_toggle(self, *_args: object) -> str:
         if self.orchestrator.is_anti_spoiler_enabled():
             return "Anti-Spoiler Mode  [Enabled]"
         return "Anti-Spoiler Mode  [Disabled]"
 
-    def action_toggle_anti_spoiler(self, *_):
+    def action_toggle_anti_spoiler(self, *_args: object) -> None:
         self.orchestrator.toggle_anti_spoiler()
         self._safe_update_menu()
 
-    def menu_bridge_toggle(self, *_) -> str:
+    def menu_bridge_toggle(self, *_args: object) -> str:
         if self.orchestrator.is_bridge_installed():
             return "Combat Bridge  [Installed]"
         return "Combat Bridge  [Install Now]"
 
-    def action_toggle_bridge(self, *_):
-        self.orchestrator.toggle_bridge()
-        self._safe_update_menu()
+    def action_toggle_bridge(self, *_args: object) -> None:
+        def _async_toggle() -> None:
+            self.orchestrator.toggle_bridge()
+            self._safe_update_menu()
 
-    def action_select_game_folder(self, *_):
+        threading.Thread(target=_async_toggle, name="TrayToggleBridgeWorker", daemon=True).start()
+
+    def action_select_game_folder(self, *_args: object) -> None:
         folder = self.prompt_folder_selection()
         if folder:
-            success, msg = self.orchestrator.install_bridge_to(folder)
-            if self.icon is not None:
-                with contextlib.suppress(Exception):
-                    self.icon.notify(
-                        "Combat Bridge installed successfully!"
-                        if success
-                        else f"Installation failed: {msg}",
-                        "Expedition 33 RPC",
-                    )
-            self._safe_update_menu()
+
+            def _async_install() -> None:
+                success, msg = self.orchestrator.install_bridge_to(folder)
+                if self.icon is not None:
+                    with contextlib.suppress(Exception):
+                        self.icon.notify(
+                            "Combat Bridge installed successfully!"
+                            if success
+                            else f"Installation failed: {msg}",
+                            "Expedition 33 RPC",
+                        )
+                self._safe_update_menu()
+
+            threading.Thread(
+                target=_async_install, name="TrayInstallBridgeWorker", daemon=True
+            ).start()
 
     def prompt_folder_selection(self) -> str | None:
         return prompt_folder_selection()
 
-    def menu_startup_toggle(self, *_) -> str:
+    def menu_startup_toggle(self, *_args: object) -> str:
         if self.orchestrator.is_startup_enabled():
             return "Start with Windows  [X]"
         return "Start with Windows  [ ]"
 
-    def action_toggle_startup(self, *_):
+    def action_toggle_startup(self, *_args: object) -> None:
         self.orchestrator.toggle_startup()
         self._safe_update_menu()
 
-    def menu_update_status(self, *_) -> str:
+    def menu_update_status(self, *_args: object) -> str:
         return self.orchestrator.get_updater_status_text()
 
-    def action_update_click(self, *_):
+    def action_update_click(self, *_args: object) -> None:
         self.orchestrator.trigger_update_action()
 
-    def action_exit(self, *_):
+    def action_exit(self, *_args: object) -> None:
         if self._unsubscribe_state is not None:
             self._unsubscribe_state()
             self._unsubscribe_state = None
@@ -190,13 +199,16 @@ class ExpeditionTrayApp:
             self.icon.stop()
 
     def create_menu(self) -> Menu:
+        def _noop(*_args: object) -> None:
+            pass
+
         return Menu(
-            MenuItem("Clair Obscur: Expedition 33 RPC", lambda *_: None, enabled=False),
+            MenuItem("Clair Obscur: Expedition 33 RPC", _noop, enabled=False),
             Menu.SEPARATOR,
-            MenuItem(self.menu_game_status, lambda *_: None, enabled=False),
-            MenuItem(self.menu_zone_status, lambda *_: None, enabled=False),
-            MenuItem(self.menu_combat_status, lambda *_: None, enabled=False),
-            MenuItem(self.menu_discord_status, lambda *_: None, enabled=False),
+            MenuItem(self.menu_game_status, _noop, enabled=False),
+            MenuItem(self.menu_zone_status, _noop, enabled=False),
+            MenuItem(self.menu_combat_status, _noop, enabled=False),
+            MenuItem(self.menu_discord_status, _noop, enabled=False),
             Menu.SEPARATOR,
             MenuItem(self.menu_anti_spoiler_toggle, self.action_toggle_anti_spoiler),
             MenuItem(self.menu_bridge_toggle, self.action_toggle_bridge),

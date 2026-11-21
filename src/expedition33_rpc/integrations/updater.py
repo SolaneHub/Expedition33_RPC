@@ -43,7 +43,7 @@ def parse_version(v_str: str) -> tuple[int, ...]:
     """Parses a version string into a comparable tuple of integers."""
     clean = v_str.strip().lstrip("vV")
     numeric_part = clean.split("-")[0]
-    nums = []
+    nums: list[int] = []
     for part in numeric_part.split("."):
         try:
             nums.append(int(part))
@@ -93,13 +93,16 @@ class AppUpdater:
 
     def check_for_updates(self) -> UpdateInfo | None:
         """Queries GitHub Releases API for the latest release."""
-        self._set_state(UpdateState.CHECKING)
+        with self._lock:
+            already_checking = self.state == UpdateState.CHECKING
+        if not already_checking:
+            self._set_state(UpdateState.CHECKING)
         logger.info("Checking for updates against %s...", self.api_url)
 
         try:
             req = urllib.request.Request(
                 self.api_url,
-                headers={"User-Agent": USER_AGENT},
+                headers={"User-Agent": f"Expedition33-RPC-Updater/{self.current_version}"},
             )
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))

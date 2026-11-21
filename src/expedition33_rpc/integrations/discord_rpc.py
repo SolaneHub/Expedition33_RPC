@@ -273,7 +273,7 @@ class DiscordIPCClient:
         if start_timestamp:
             activity["timestamps"] = {"start": start_timestamp}
 
-        payload = {
+        payload: dict[str, Any] = {
             "cmd": "SET_ACTIVITY",
             "args": {
                 "pid": pid,
@@ -292,7 +292,7 @@ class DiscordIPCClient:
 
     def clear_activity(self, pid: int) -> bool:
         """Clears the currently displayed Rich Presence activity atomically."""
-        payload = {
+        payload: dict[str, Any] = {
             "cmd": "SET_ACTIVITY",
             "args": {
                 "pid": pid,
@@ -319,11 +319,19 @@ class DiscordRPCManager:
         self,
         client: DiscordIPCClient | None = None,
         is_stopping: Callable[[], bool] | None = None,
+        time_provider: Callable[[], float] | None = None,
+        epoch_provider: Callable[[], float] | None = None,
     ) -> None:
         self.client_id: str = EMBEDDED_CLIENT_ID
         self._is_injected_client: bool = client is not None
         self._client: DiscordIPCClient = (
             client if client is not None else DiscordIPCClient(self.client_id)
+        )
+        self.time_provider: Callable[[], float] = (
+            time_provider if time_provider is not None else time.monotonic
+        )
+        self.epoch_provider: Callable[[], float] = (
+            epoch_provider if epoch_provider is not None else time.time
         )
         self.last_update_state: str | None = None
         self.last_retry_time: float = 0.0
@@ -362,16 +370,8 @@ class DiscordRPCManager:
             self._client = DiscordIPCClient(self.client_id)
 
     @property
-    def rpc(self) -> DiscordIPCClient:
-        return self._client
-
-    @property
     def is_connected(self) -> bool:
         return self._client.is_connected
-
-    @is_connected.setter
-    def is_connected(self, value: bool) -> None:
-        self._client.is_connected = value
 
     def connect(self) -> bool:
         if self.is_stopping is not None and self.is_stopping():
@@ -380,7 +380,7 @@ class DiscordRPCManager:
         if self.is_connected:
             return True
 
-        now = time.monotonic()
+        now = self.time_provider()
         if self._retry_failures > 0 and self.last_retry_time != 0.0:
             delay = min(30.0, self.base_retry_interval * (2 ** max(0, self._retry_failures - 1)))
             if self._retry_failures > 1:
@@ -459,17 +459,19 @@ class DiscordRPCManager:
                         self._last_target_pid = target_pid
                         return True
                     else:
-                        self.is_connected = False
+                        self._client.is_connected = False
                         return False
                 except Exception:
-                    self.is_connected = False
+                    self._client.is_connected = False
                     return False
             return True
 
         details_text = truncate_presence_field(payload.details) if payload.details else None
         state_text = truncate_presence_field(payload.state) if payload.state else None
         start_timestamp = (
-            payload.start_timestamp if payload.start_timestamp is not None else int(time.time())
+            payload.start_timestamp
+            if payload.start_timestamp is not None
+            else int(self.epoch_provider())
         )
         large_image = payload.large_image or "logo"
         large_text = payload.large_text or "Clair Obscur: Expedition 33"
@@ -501,21 +503,12 @@ class DiscordRPCManager:
                 logger.info("Status updated: %s - %s", details_text, state_text)
                 return True
             else:
-                self.is_connected = False
+                self._client.is_connected = False
                 return False
         except Exception as e:
             logger.error("RPC update error: %s", e)
-            self.is_connected = False
+            self._client.is_connected = False
             return False
-
-    def update(
-        self,
-        payload: PresencePayload | None,
-        pid: int | None = None,
-        force: bool = False,
-    ) -> bool:
-        """Alias for update_presence accepting PresencePayload."""
-        return self.update_presence(payload, pid=pid, force=force)
 
 
 __all__ = [

@@ -132,15 +132,15 @@ class AppOrchestrator:
         else:
             self.rpc_manager = DiscordRPCManager(is_stopping=self._is_stopping)
 
+        self._subscribers_lock = threading.Lock()
+        self._bridge_lock = threading.Lock()
         self._state_subscribers: list[Callable[[GameState, bool], None]] = []
         self._update_available_subscribers: list[Callable[[UpdateInfo], None]] = []
-        self._legacy_state_cb: Callable[[GameState, bool], None] | None = None
-        self._legacy_update_cb: Callable[[UpdateInfo], None] | None = None
 
         if on_state_change is not None:
-            self.on_state_change = on_state_change
+            self.subscribe_state_change(on_state_change)
         if on_update_available is not None:
-            self.on_update_available = on_update_available
+            self.subscribe_update_available(on_update_available)
 
         # Current state - immutable GameState DTO, assignment is atomic
         self.current_state = GameState()
@@ -154,45 +154,18 @@ class AppOrchestrator:
         if self.sync_startup:
             self.startup_service.sync_startup_path()
 
-    @property
-    def on_state_change(self) -> Callable[[GameState, bool], None] | None:
-        return self._legacy_state_cb
-
-    @on_state_change.setter
-    def on_state_change(self, callback: Callable[[GameState, bool], None] | None) -> None:
-        if self._legacy_state_cb is not None and self._legacy_state_cb in self._state_subscribers:
-            self._state_subscribers.remove(self._legacy_state_cb)
-        self._legacy_state_cb = callback
-        if callback is not None and callback not in self._state_subscribers:
-            self._state_subscribers.append(callback)
-
-    @property
-    def on_update_available(self) -> Callable[[UpdateInfo], None] | None:
-        return self._legacy_update_cb
-
-    @on_update_available.setter
-    def on_update_available(self, callback: Callable[[UpdateInfo], None] | None) -> None:
-        if (
-            self._legacy_update_cb is not None
-            and self._legacy_update_cb in self._update_available_subscribers
-        ):
-            self._update_available_subscribers.remove(self._legacy_update_cb)
-        self._legacy_update_cb = callback
-        if callback is not None and callback not in self._update_available_subscribers:
-            self._update_available_subscribers.append(callback)
-
     def subscribe_state_change(
         self, callback: Callable[[GameState, bool], None]
     ) -> Callable[[], None]:
         """Subscribes a listener to game presence state changes and returns an unsubscribe callable."""
-        if callback not in self._state_subscribers:
-            self._state_subscribers.append(callback)
+        with self._subscribers_lock:
+            if callback not in self._state_subscribers:
+                self._state_subscribers.append(callback)
 
         def unsubscribe() -> None:
-            if callback in self._state_subscribers:
-                self._state_subscribers.remove(callback)
-            if callback is self._legacy_state_cb:
-                self._legacy_state_cb = None
+            with self._subscribers_lock:
+                if callback in self._state_subscribers:
+                    self._state_subscribers.remove(callback)
 
         return unsubscribe
 
@@ -200,14 +173,14 @@ class AppOrchestrator:
         self, callback: Callable[[UpdateInfo], None]
     ) -> Callable[[], None]:
         """Subscribes a listener to update available notifications and returns an unsubscribe callable."""
-        if callback not in self._update_available_subscribers:
-            self._update_available_subscribers.append(callback)
+        with self._subscribers_lock:
+            if callback not in self._update_available_subscribers:
+                self._update_available_subscribers.append(callback)
 
         def unsubscribe() -> None:
-            if callback in self._update_available_subscribers:
-                self._update_available_subscribers.remove(callback)
-            if callback is self._legacy_update_cb:
-                self._legacy_update_cb = None
+            with self._subscribers_lock:
+                if callback in self._update_available_subscribers:
+                    self._update_available_subscribers.remove(callback)
 
         return unsubscribe
 
@@ -218,7 +191,10 @@ class AppOrchestrator:
         if update_info is None:
             return
 
-        for subscriber in list(self._update_available_subscribers):
+        with self._subscribers_lock:
+            subs = list(self._update_available_subscribers)
+
+        for subscriber in subs:
             try:
                 subscriber(update_info)
             except Exception as e:
@@ -230,7 +206,8 @@ class AppOrchestrator:
             target_path = Path(folder) if isinstance(folder, str) else folder
             success, msg = self.bridge_installer.install_bridge(target_path)
             if success:
-                self._bridge_installed = True
+                with self._bridge_lock:
+                    self._bridge_installed = True
             return success, msg
         except Exception as e:
             return False, f"Bridge installation error: {e}"
@@ -243,10 +220,11 @@ class AppOrchestrator:
     ) -> bool:
         """Checks game installation directory and automatically deploys the bridge mod with deterministic cooldown."""
         current_time = self.time_provider() if now is None else now
-        if current_time - self.last_bridge_install_attempt < self.bridge_install_cooldown:
-            return False
+        with self._bridge_lock:
+            if current_time - self.last_bridge_install_attempt < self.bridge_install_cooldown:
+                return False
+            self.last_bridge_install_attempt = current_time
 
-        self.last_bridge_install_attempt = current_time
         try:
             target_dir = known_win64_dir or (
                 str(self.current_state.win64_dir) if self.current_state.win64_dir else None
@@ -257,12 +235,14 @@ class AppOrchestrator:
             )
             if game_dir:
                 if self.bridge_installer.is_bridge_installed(game_dir):
-                    self._bridge_installed = True
+                    with self._bridge_lock:
+                        self._bridge_installed = True
                     return True
 
                 success, msg = self.bridge_installer.install_bridge(game_dir)
                 if success:
-                    self._bridge_installed = True
+                    with self._bridge_lock:
+                        self._bridge_installed = True
                     logger.info("Automatically deployed Combat Bridge to: %s", game_dir)
                     return True
                 else:
@@ -286,9 +266,9 @@ class AppOrchestrator:
 
             if state.is_running:
                 payload = build_presence_payload(state, anti_spoiler=anti_spoiler)
-                self.rpc_manager.update(payload, pid=state.process_pid)
+                self.rpc_manager.update_presence(payload, pid=state.process_pid)
             else:
-                self.rpc_manager.update(None, pid=state.process_pid)
+                self.rpc_manager.update_presence(None, pid=state.process_pid)
 
             # Event-driven bridge check on game process detection
             is_new_process = state.is_running and (
@@ -330,18 +310,20 @@ class AppOrchestrator:
                         self._bridge_install_thread = install_thread
                         install_thread.start()
                 else:
-                    with contextlib.suppress(Exception):
+                    with contextlib.suppress(Exception), self._bridge_lock:
                         self._bridge_installed = self.bridge_installer.is_bridge_installed(
                             target_dir
                         )
 
-            # Notify subscribed listeners
-            if self._state_subscribers:
-                for sub in list(self._state_subscribers):
-                    try:
-                        sub(state, anti_spoiler)
-                    except Exception as e:
-                        logger.error("State subscriber error: %s", e)
+            # Notify subscribed listeners under lock snapshot
+            with self._subscribers_lock:
+                subs = list(self._state_subscribers)
+
+            for sub in subs:
+                try:
+                    sub(state, anti_spoiler)
+                except Exception as e:
+                    logger.error("State subscriber error: %s", e)
 
             return state
         except Exception as e:
@@ -411,10 +393,11 @@ class AppOrchestrator:
         """Checks if the UE4SS Lua bridge mod is installed from in-memory cache in O(1)."""
         if force_probe:
             with contextlib.suppress(Exception):
-                self._bridge_installed = self.bridge_installer.is_bridge_installed(
-                    self.current_state.win64_dir
-                )
-        return self._bridge_installed
+                installed = self.bridge_installer.is_bridge_installed(self.current_state.win64_dir)
+                with self._bridge_lock:
+                    self._bridge_installed = installed
+        with self._bridge_lock:
+            return self._bridge_installed
 
     def is_startup_enabled(self) -> bool:
         """Checks if Windows autostart is enabled."""
@@ -422,16 +405,19 @@ class AppOrchestrator:
 
     def toggle_bridge(self) -> bool:
         """Installs or uninstalls the UE4SS Lua bridge mod."""
-        self.last_bridge_install_attempt = -float("inf")
+        with self._bridge_lock:
+            self.last_bridge_install_attempt = -float("inf")
         target_dir = self.current_state.win64_dir
         if self.is_bridge_installed():
             self.bridge_installer.uninstall_bridge(target_dir)
-            self._bridge_installed = False
+            with self._bridge_lock:
+                self._bridge_installed = False
             return False
         else:
             success, _msg = self.bridge_installer.install_bridge(target_dir)
             if success:
-                self._bridge_installed = True
+                with self._bridge_lock:
+                    self._bridge_installed = True
             return success
 
     def toggle_startup(self) -> bool:
