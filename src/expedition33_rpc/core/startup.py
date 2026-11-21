@@ -1,7 +1,6 @@
 import logging
 import os
 import sys
-from pathlib import Path
 
 from expedition33_rpc.core.platform import (
     winreg,
@@ -20,14 +19,11 @@ def get_current_executable_command() -> str:
     """Returns the formatted command to execute this application on startup."""
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}"'
-    root_main = Path(__file__).resolve().parents[3] / "main.py"
-    if root_main.exists():
-        # On non-frozen Windows, prefer pythonw.exe if available to avoid opening a console window
-        py_exe = sys.executable
-        pyw_candidate = os.path.join(os.path.dirname(py_exe), "pythonw.exe")
-        target_py = pyw_candidate if os.path.exists(pyw_candidate) else py_exe
-        return f'"{target_py}" "{root_main}"'
-    return f'"{sys.executable}"'
+    # On non-frozen Windows, prefer pythonw.exe if available to avoid opening a console window
+    py_exe = sys.executable
+    pyw_candidate = os.path.join(os.path.dirname(py_exe), "pythonw.exe")
+    target_py = pyw_candidate if os.path.exists(pyw_candidate) else py_exe
+    return f'"{target_py}" -m expedition33_rpc'
 
 
 def is_startup_enabled() -> bool:

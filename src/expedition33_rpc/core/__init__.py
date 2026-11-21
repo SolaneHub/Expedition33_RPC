@@ -1,7 +1,7 @@
 """Core application engine, settings, and lifecycle."""
 
-from expedition33_rpc.core.app import is_already_running, main
-from expedition33_rpc.core.platform import release_single_instance_lock
+from expedition33_rpc.core.app import main
+from expedition33_rpc.core.platform import is_already_running, release_single_instance_lock
 from expedition33_rpc.core.resources import get_resource_path
 from expedition33_rpc.core.settings import SettingsService
 from expedition33_rpc.core.startup import (

@@ -37,7 +37,7 @@ def test_settings_save_atomic_failure_preserves_ram_and_disk_consistency(tmp_pat
     from expedition33_rpc.integrations.discord_rpc import DiscordRPCManager
 
     custom_json = tmp_path / "locked_settings.json"
-    service = SettingsService(custom_path=custom_json)
+    service = SettingsService(path=custom_json)
 
     # 1. Initial save: anti_spoiler = False
     assert service.set_anti_spoiler_enabled(False) is True
@@ -90,10 +90,76 @@ def test_settings_save_atomic_failure_preserves_ram_and_disk_consistency(tmp_pat
 
 @pytest.mark.unit
 def test_get_current_executable_command() -> None:
-    cmd = startup.get_current_executable_command()
-    assert isinstance(cmd, str)
-    assert cmd.startswith('"')
-    assert cmd.endswith('"')
+    # 1. Non-frozen mode
+    with patch.object(sys, "frozen", False, create=True):
+        cmd = startup.get_current_executable_command()
+        assert isinstance(cmd, str)
+        assert cmd.startswith('"')
+        assert "-m expedition33_rpc" in cmd
+        assert cmd.endswith("-m expedition33_rpc")
+
+    # 2. Frozen mode (compiled binary)
+    fake_exe = r"C:\Games\Expedition33_RPC\Expedition33_RPC.exe"
+    with (
+        patch.object(sys, "frozen", True, create=True),
+        patch.object(sys, "executable", fake_exe),
+    ):
+        frozen_cmd = startup.get_current_executable_command()
+        assert frozen_cmd == f'"{fake_exe}"'
+
+
+@pytest.mark.unit
+def test_is_startup_enabled_command_validation(tmp_path: Path) -> None:
+    """Verifies that is_startup_enabled correctly extracts the binary path from both frozen and module commands."""
+
+    class FakeWinregKey:
+        def __init__(self, store: dict[str, str]) -> None:
+            self.store = store
+
+        def __enter__(self) -> FakeWinregKey:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
+    class FakeWinreg:
+        HKEY_CURRENT_USER = 0x80000001
+        KEY_SET_VALUE = 0x0002
+        KEY_READ = 0x20019
+        REG_SZ = 1
+
+        def __init__(self, val: str) -> None:
+            self.store: dict[str, str] = {startup.APP_NAME: val}
+
+        def OpenKey(
+            self, _root: Any, _subkey: str, _res: int = 0, _access: int = 0
+        ) -> FakeWinregKey:
+            return FakeWinregKey(self.store)
+
+        def QueryValueEx(self, key: FakeWinregKey, name: str) -> tuple[str, int]:
+            if name in key.store:
+                return key.store[name], self.REG_SZ
+            raise FileNotFoundError(name)
+
+    fake_py = tmp_path / "python.exe"
+    fake_py.touch()
+
+    # Module command format: "path/to/python.exe" -m expedition33_rpc
+    module_cmd = f'"{fake_py}" -m expedition33_rpc'
+    with patch("expedition33_rpc.core.startup.winreg", FakeWinreg(module_cmd)):
+        assert startup.is_startup_enabled() is True
+
+    # Frozen command format: "path/to/Expedition33_RPC.exe"
+    fake_exe = tmp_path / "Expedition33_RPC.exe"
+    fake_exe.touch()
+    frozen_cmd = f'"{fake_exe}"'
+    with patch("expedition33_rpc.core.startup.winreg", FakeWinreg(frozen_cmd)):
+        assert startup.is_startup_enabled() is True
+
+    # Missing binary returns False
+    missing_cmd = f'"{tmp_path / "nonexistent.exe"}"'
+    with patch("expedition33_rpc.core.startup.winreg", FakeWinreg(missing_cmd)):
+        assert startup.is_startup_enabled() is False
 
 
 @pytest.mark.unit

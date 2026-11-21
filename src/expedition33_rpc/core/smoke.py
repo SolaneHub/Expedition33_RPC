@@ -17,7 +17,12 @@ def run_smoke_test() -> None:
     from expedition33_rpc.detection.detector import GameDetector
     from expedition33_rpc.ui.tray_app import ExpeditionTrayApp
 
-    assets = (get_resource_path("icon.png"), get_resource_path("bridge.zip"))
+    assets = (
+        get_resource_path("icon.png"),
+        get_resource_path("icon.ico"),
+        get_resource_path("bridge.zip"),
+        get_resource_path("game_data.json"),
+    )
     if not all(os.path.isfile(a) for a in assets):
         sys.exit(1)
 

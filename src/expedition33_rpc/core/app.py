@@ -29,7 +29,3 @@ def main() -> None:
         app.run()
     finally:
         release_single_instance_lock()
-
-
-if __name__ == "__main__":
-    main()

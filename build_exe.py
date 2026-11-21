@@ -1,3 +1,10 @@
+"""Build script for Expedition33_RPC packaging with PyInstaller.
+
+Single Source of Truth (SSOT) for PyInstaller executable compilation.
+Manual .spec file generation is formally deprecated; configuration and build options
+must be maintained directly within this script.
+"""
+
 import os
 import subprocess
 import sys
@@ -55,8 +62,10 @@ def build() -> None:
         "_tkinter",
         "--paths",
         "src",
+        "--specpath",
+        "build",
         "--clean",
-        "main.py",
+        "src/expedition33_rpc/__main__.py",
     ]
     print("Command:", " ".join(cmd))
     res = subprocess.run(cmd, stdin=subprocess.DEVNULL)
