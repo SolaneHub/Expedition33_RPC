@@ -60,7 +60,9 @@ def format_location_name(game_state: GameState) -> str:
             return f"{zone_display} ({floor_label})"
         return zone_display
 
-    if game_state.checkpoint_name and not is_continent_zone(game_state):
+    if game_state.checkpoint_name and not is_continent_zone(
+        game_state.raw_zone, game_state.zone_name
+    ):
         return f"{zone_display} ({game_state.checkpoint_name})"
 
     return zone_display
@@ -76,8 +78,10 @@ def format_presence(game_state: GameState, anti_spoiler: bool = False) -> tuple[
         state = strings.get("loading", "Loading...")
         return truncate_presence_field(details), truncate_presence_field(state)
 
-    if is_menu_zone(game_state):
-        substate = resolve_menu_substate(game_state)
+    if is_menu_zone(game_state.raw_zone, game_state.zone_name):
+        substate = resolve_menu_substate(
+            game_state.raw_zone, game_state.zone_name, is_starting=game_state.is_starting
+        )
         details = strings["in_menu"]
         state = strings.get(substate, strings["title_screen"])
         return truncate_presence_field(details), truncate_presence_field(state)
@@ -116,10 +120,12 @@ def format_tray_title(game_state: GameState | None, anti_spoiler: bool = False) 
         canon = normalize_language_code(game_state.game_language)
         strings = get_presentation_strings(canon)
         title = f"Expedition 33: {strings.get('starting', 'Starting...')}"
-    elif is_menu_zone(game_state):
+    elif is_menu_zone(game_state.raw_zone, game_state.zone_name):
         canon = normalize_language_code(game_state.game_language)
         strings = get_presentation_strings(canon)
-        substate = resolve_menu_substate(game_state)
+        substate = resolve_menu_substate(
+            game_state.raw_zone, game_state.zone_name, is_starting=game_state.is_starting
+        )
         if substate == "main_menu":
             title = f"Expedition 33: {strings['in_menu']}"
         else:
@@ -153,7 +159,7 @@ def format_tray_zone_status(game_state: GameState, anti_spoiler: bool = False) -
     strings = get_presentation_strings(canon)
     if game_state.is_starting:
         return f"Location: {strings.get('starting', 'Starting...')}"
-    if is_menu_zone(game_state):
+    if is_menu_zone(game_state.raw_zone, game_state.zone_name):
         return f"Location: {strings['in_menu']}"
     if anti_spoiler:
         return "Location: [Hidden - Anti-Spoiler]"
@@ -169,8 +175,10 @@ def format_tray_combat_status(game_state: GameState, anti_spoiler: bool = False)
     strings = get_presentation_strings(canon)
     if game_state.is_starting:
         return f"Status: {strings.get('loading', 'Loading...')}"
-    if is_menu_zone(game_state):
-        substate = resolve_menu_substate(game_state)
+    if is_menu_zone(game_state.raw_zone, game_state.zone_name):
+        substate = resolve_menu_substate(
+            game_state.raw_zone, game_state.zone_name, is_starting=game_state.is_starting
+        )
         sub_text = strings.get(substate, strings["main_menu"])
         return f"Status: {sub_text}"
     if game_state.in_combat:

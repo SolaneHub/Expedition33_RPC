@@ -9,7 +9,9 @@ from expedition33_rpc.detection.normalization import (
     format_checkpoint_tag,
     format_enemy_name,
     format_zone_name,
+    is_menu_zone,
     normalize_language_code,
+    resolve_menu_substate,
     resolve_tower_trial,
 )
 
@@ -66,6 +68,26 @@ def test_normalization_basic_helpers() -> None:
     assert format_enemy_name("Duollistes T1") == "Duollistes (Tier 1)"
     assert format_zone_name("") == "Exploring"
     assert format_checkpoint_tag("UnknownCheckpoint") == "Unknown Checkpoint"
+
+
+@pytest.mark.unit
+def test_menu_zone_and_substate_string_signatures() -> None:
+    """Verifies that is_menu_zone and resolve_menu_substate correctly process pure string inputs."""
+    # is_menu_zone with pure string kwargs / positional
+    assert is_menu_zone("Level_MainMenu") is True
+    assert is_menu_zone("WBP_MM_MainMenu") is True
+    assert is_menu_zone(zone_name="Main Menu") is True
+    assert is_menu_zone(zone_name="Nel menu principale") is True
+    assert is_menu_zone("Level_Forest", zone_name="Forest") is False
+    assert is_menu_zone("", "") is False
+
+    # resolve_menu_substate with pure string kwargs / positional
+    assert resolve_menu_substate("WBP_MM_Bootstrap") == "initial_screen"
+    assert resolve_menu_substate("WBP_MM_Settings") == "in_settings"
+    assert resolve_menu_substate("WBP_MM_NewGame") == "new_game"
+    assert resolve_menu_substate("WBP_MM_SaveScreen") == "loading_save"
+    assert resolve_menu_substate("WBP_MM_MainMenu") == "main_menu"
+    assert resolve_menu_substate("", "") == "starting"
 
 
 @pytest.mark.unit

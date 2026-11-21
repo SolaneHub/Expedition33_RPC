@@ -36,19 +36,19 @@ pytestmark = pytest.mark.unit
 
 
 def test_is_menu_zone() -> None:
-    assert is_menu_zone(GameState.create(raw_zone="Level_MainMenu")) is True
-    assert is_menu_zone(GameState.create(raw_zone="WBP_MM_MainMenu")) is True
-    assert is_menu_zone(GameState.create(raw_zone="WBP_MM_TitleScreen")) is True
-    assert is_menu_zone(GameState.create(zone_name="Main Menu")) is True
-    assert is_menu_zone(GameState.create(zone_name="Nel menu principale")) is True
-    assert is_menu_zone(GameState.create(raw_zone="Level_Forest", zone_name="Forest")) is False
+    assert is_menu_zone("Level_MainMenu") is True
+    assert is_menu_zone("WBP_MM_MainMenu") is True
+    assert is_menu_zone("WBP_MM_TitleScreen") is True
+    assert is_menu_zone(zone_name="Main Menu") is True
+    assert is_menu_zone(zone_name="Nel menu principale") is True
+    assert is_menu_zone("Level_Forest", zone_name="Forest") is False
 
 
 def test_is_continent_zone() -> None:
-    assert is_continent_zone(GameState.create(zone_name="Continent")) is True
-    assert is_continent_zone(GameState.create(zone_name="Continente")) is True
-    assert is_continent_zone(GameState.create(raw_zone="WorldMap_Sub")) is True
-    assert is_continent_zone(GameState.create(zone_name="Flying Waters")) is False
+    assert is_continent_zone(zone_name="Continent") is True
+    assert is_continent_zone(zone_name="Continente") is True
+    assert is_continent_zone(raw_zone="WorldMap_Sub") is True
+    assert is_continent_zone(zone_name="Flying Waters") is False
 
 
 def test_format_location_name() -> None:
@@ -446,7 +446,7 @@ def test_menu_lifecycle_substates_presentation_en_and_it() -> None:
 @pytest.fixture
 def tray_test_app(tmp_path: Path):
     settings_file = tmp_path / "settings.json"
-    settings_svc = SettingsService(custom_path=settings_file)
+    settings_svc = SettingsService(path=settings_file)
 
     mock_detector = MagicMock(spec=GameDetector)
     mock_rpc = MagicMock()
@@ -479,7 +479,7 @@ def test_step_update_reads_state_and_calls_rpc(tray_test_app) -> None:
     assert app.orchestrator.current_state == running_state
     assert result == running_state
     expected_payload = build_presence_payload(running_state, anti_spoiler=False)
-    mock_rpc.update.assert_called_once_with(expected_payload, pid=9999)
+    mock_rpc.update_presence.assert_called_once_with(expected_payload, pid=9999)
     mock_icon.update_menu.assert_called_once()
     assert "Old Lumiere" in mock_icon.title
 
@@ -750,7 +750,7 @@ def test_tray_app_on_orchestrator_state_change_suppresses_various_exceptions(
     without crashing the orchestrator loop or breaking menu updates.
     """
     settings_file = tmp_path / "settings.json"
-    settings_svc = SettingsService(custom_path=settings_file)
+    settings_svc = SettingsService(path=settings_file)
     mock_detector = MagicMock(spec=GameDetector)
     mock_rpc = MagicMock()
     orchestrator = AppOrchestrator(
@@ -798,7 +798,7 @@ def test_tray_app_on_orchestrator_state_change_suppresses_various_exceptions(
 def test_tray_app_handles_none_icon_gracefully(tmp_path: Path) -> None:
     """Verifies that TrayApp handles state change when icon is None without raising."""
     settings_file = tmp_path / "settings.json"
-    settings_svc = SettingsService(custom_path=settings_file)
+    settings_svc = SettingsService(path=settings_file)
     mock_detector = MagicMock(spec=GameDetector)
     mock_rpc = MagicMock()
     orchestrator = AppOrchestrator(
