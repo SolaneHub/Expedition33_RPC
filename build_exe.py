@@ -40,6 +40,8 @@ def build() -> None:
         "--icon",
         os.path.join(root_dir, "src/expedition33_rpc/assets/icon.ico"),
         "--add-data",
+        f"{os.path.join(root_dir, 'src/expedition33_rpc/assets/icon.ico')}{os.pathsep}expedition33_rpc/assets",
+        "--add-data",
         f"{os.path.join(root_dir, 'src/expedition33_rpc/assets/icon.png')}{os.pathsep}expedition33_rpc/assets",
         "--add-data",
         f"{os.path.join(root_dir, 'src/expedition33_rpc/assets/bridge.zip')}{os.pathsep}expedition33_rpc/assets",
