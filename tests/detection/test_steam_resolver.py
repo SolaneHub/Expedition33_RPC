@@ -112,11 +112,12 @@ def test_steam_resolver_candidates(tmp_path: Path) -> None:
     assert any("SaveGames" in p for p in saves)
 
 
-def test_steam_resolver_classmethods() -> None:
-    pfx_list = SteamCompatResolver.get_proton_prefix_paths("1903340")
+def test_steam_resolver_instance_methods() -> None:
+    resolver = SteamCompatResolver(app_id="1903340")
+    pfx_list = resolver.get_proton_prefixes()
     assert isinstance(pfx_list, list)
 
-    candidates = SteamCompatResolver.get_telemetry_file_candidates("1903340")
+    candidates = resolver.resolve_telemetry_candidates()
     assert isinstance(candidates, list)
     assert len(candidates) > 0
 
@@ -196,7 +197,7 @@ def test_steam_resolver_permission_error_handling(tmp_path: Path) -> None:
             libs = SteamCompatResolver.parse_libraryfolders_vdf(locked_vdf)
             assert libs == []
 
-            dirs = resolver.get_game_installation_directories()
+            dirs = resolver.get_steam_libraries()
             assert dirs == []
     finally:
         if chmod_supported:

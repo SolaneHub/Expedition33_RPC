@@ -262,6 +262,40 @@ class SteamCompatResolver:
                 unique.append(norm)
         return unique
 
+    def resolve_telemetry_file_path(self, custom_path: str | None = None) -> str:
+        """Finds the first existing telemetry file, or returns the most likely candidate path."""
+        if custom_path:
+            return custom_path
+        candidates = self.resolve_telemetry_candidates()
+        for p in candidates:
+            if os.path.exists(p):
+                return p
+        return candidates[0] if candidates else "/tmp/expedition33_status.json"
+
+    def resolve_game_user_settings_path(self, custom_path: str | None = None) -> str | None:
+        """Finds the first existing GameUserSettings.ini file, or returns the most likely candidate path."""
+        if custom_path:
+            return custom_path
+        candidates = self.resolve_config_candidates()
+        for p in candidates:
+            if os.path.isfile(p):
+                return p
+        return candidates[0] if candidates else None
+
+    def resolve_user_data_path(self, custom_path: str | None = None) -> str:
+        """Finds the first existing user data / save directory, or returns the most likely candidate path."""
+        if custom_path:
+            return custom_path
+        candidates = self.resolve_save_games_candidates()
+        for p in candidates:
+            if os.path.isdir(p):
+                return p
+        return (
+            candidates[0]
+            if candidates
+            else os.path.expandvars(r"%LOCALAPPDATA%\Sandfall\Saved\SaveGames")
+        )
+
     def find_game_install_win64_directory(self, target_names: set[str] | None = None) -> str | None:
         """Scans all discovered Steam libraries for the game's Win64 binary directory containing a target binary."""
         targets = (
@@ -297,55 +331,6 @@ class SteamCompatResolver:
                     pass
 
         return None
-
-    @staticmethod
-    def get_steam_installation_path() -> Path | None:
-        """Returns the first detected active Steam installation root path, if any."""
-        roots = SteamCompatResolver().get_steam_roots(existing_only=True)
-        for r in roots:
-            if os.path.isdir(r):
-                return r
-        return None
-
-    @staticmethod
-    def get_steam_library_folders(steam_path: Path | None = None) -> list[Path]:
-        """Discovers all Steam library paths, optionally from a specified Steam root."""
-        if steam_path is not None:
-            vdf_path = Path(steam_path) / "steamapps" / "libraryfolders.vdf"
-            libs = SteamCompatResolver.parse_libraryfolders_vdf(vdf_path)
-            all_libs = [Path(steam_path)] + libs
-            seen: set[str] = set()
-            res: list[Path] = []
-            for lib in all_libs:
-                norm = os.path.normpath(str(lib))
-                if norm not in seen:
-                    seen.add(norm)
-                    res.append(Path(norm))
-            return res
-        return SteamCompatResolver().get_steam_libraries()
-
-    @classmethod
-    def get_game_installation_directories(
-        cls, app_id: str = DEFAULT_APP_ID, folder_name: str = "Expedition 33"
-    ) -> list[Path]:
-        """Finds game installation directories across all discovered Steam libraries."""
-        resolver = cls(app_id=app_id)
-        candidates: list[Path] = []
-        for lib in resolver.get_steam_libraries():
-            candidate = lib / "steamapps" / "common" / folder_name
-            if os.path.isdir(candidate):
-                candidates.append(candidate)
-        return candidates
-
-    @classmethod
-    def get_proton_prefix_paths(cls, app_id: str = DEFAULT_APP_ID) -> list[Path]:
-        """Resolves Proton / Wine prefix directories for the given app_id."""
-        return cls(app_id=app_id).get_proton_prefixes()
-
-    @classmethod
-    def get_telemetry_file_candidates(cls, app_id: str = DEFAULT_APP_ID) -> list[str]:
-        """Resolves candidate telemetry status files for the given app_id."""
-        return cls(app_id=app_id).resolve_telemetry_candidates()
 
 
 __all__ = [

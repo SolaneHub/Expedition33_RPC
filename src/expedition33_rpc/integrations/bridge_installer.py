@@ -6,7 +6,7 @@ import shutil
 import zipfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import psutil
 
@@ -40,8 +40,13 @@ def _find_win64_from_running_processes(
 
             # 1. Check proc.info dict (psutil.process_iter or legacy mock)
             if hasattr(proc, "info") and isinstance(proc.info, dict):
-                name = proc.info.get("name")
-                exe_path = proc.info.get("exe")
+                proc_info = cast(dict[str, Any], proc.info)
+                info_name: Any = proc_info.get("name")
+                info_exe: Any = proc_info.get("exe")
+                if isinstance(info_name, str):
+                    name = info_name
+                if isinstance(info_exe, str):
+                    exe_path = info_exe
 
             # 2. Check ProcessLike methods if not found in info
             if not isinstance(name, str) and callable(getattr(proc, "name", None)):
@@ -112,7 +117,7 @@ def _update_mods_txt_for_install(mods_txt_path: str) -> None:
                 lines = f.readlines()
 
             found = False
-            new_lines = []
+            new_lines: list[str] = []
             for line in lines:
                 parts = line.split(":", 1)
                 if parts and parts[0].strip().lower() == target_mod.lower():
@@ -145,7 +150,7 @@ def _update_mods_txt_for_uninstall(mods_txt_path: str) -> bool:
     try:
         with open(mods_txt_path, encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
-        new_lines = []
+        new_lines: list[str] = []
         for line in lines:
             parts = line.split(":", 1)
             name = parts[0].strip()

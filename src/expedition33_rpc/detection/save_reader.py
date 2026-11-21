@@ -8,13 +8,13 @@ import re
 import stat
 from pathlib import Path
 
-from expedition33_rpc.detection.compat_paths import resolve_user_data_path
 from expedition33_rpc.detection.normalization import (
     format_zone_name,
     is_continent_zone,
     is_menu_zone,
     strip_accents,
 )
+from expedition33_rpc.detection.steam_resolver import SteamCompatResolver
 
 type SemanticAlias = dict[str, frozenset[str]]
 
@@ -77,7 +77,9 @@ class SaveFileReader:
 
     def __init__(self, base_save_dir: str | Path | None = None) -> None:
         self.base_save_dir = str(
-            base_save_dir if base_save_dir is not None else resolve_user_data_path()
+            base_save_dir
+            if base_save_dir is not None
+            else SteamCompatResolver().resolve_user_data_path()
         )
         self._checkpoint_cache: dict[str, tuple[float, int, tuple[str | None, str | None]]] = {}
         self._latest_dir_cache: tuple[float, str | None] | None = None
