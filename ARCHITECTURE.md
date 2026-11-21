@@ -39,7 +39,6 @@ src/expedition33_rpc/
 │   └── startup.py            # Windows autostart (HKCU Run key) manager
 │
 ├── detection/                # Game telemetry ingestion, detection & normalization
-│   ├── compat_paths.py       # Cross-platform IPC paths (Windows, Linux, Steam Deck Proton)
 │   ├── detector.py           # GameDetector, BridgeStateProvider & immutable GameState
 │   ├── game_data.py          # SSOT catalog accessors, regexes & Endless Tower matchers
 │   ├── normalization.py      # Pure normalization routines for levels, checkpoints, and bosses
@@ -130,7 +129,7 @@ The application runtime maintains resilient execution across host process faults
      * Deterministic testability: In unit and integration test suites, `FakeUpdater(UpdaterProtocol)` simulates all update lifecycle states offline without making external HTTP requests.
 10. **Unified Callback Lifecycle in `AppOrchestrator`**:
     - `AppOrchestrator` acts as the single central hub dispatching state updates across the headless core, system tray, and tests:
-      * Unified observer registration via `subscribe_state(callback)` / `unsubscribe_state(callback)` alongside the `on_state_change` and `on_update_available` hooks.
+      * Unified observer registration via `subscribe_state_change(callback)` / `unsubscribe_state(callback)` alongside the `on_state_change` and `on_update_available` hooks.
       * State transitions (`step_update()`) cleanly separate state derivation, presence dirty-checking, and listener notification.
       * Listeners are invoked with `(game_state: GameState, is_active: bool)` synchronously within the worker tick or test harness, ensuring deterministic notification without intermediate thread race conditions or dropped frames.
 11. **Unified Cross-Platform Resolution via `SteamCompatResolver`**:
@@ -139,7 +138,7 @@ The application runtime maintains resilient execution across host process faults
       * **Linux & Steam Deck**: Scans canonical Steam roots (`~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, and Flatpak `~/.var/app/com.valvesoftware.Steam/.local/share/Steam`).
       * **VDF Parser**: Efficiently parses Valve Data Format (`libraryfolders.vdf`) to discover external and secondary Steam libraries without external dependencies.
       * **Proton / Wine Prefix Resolution**: Locates App ID `1903340` compat data prefix (`compatdata/1903340/pfx`), resolving emulated Windows paths (`drive_c/users/steamuser/AppData/Local/...`) into native POSIX host paths.
-      * Integrates seamlessly with `compat_paths.py` to transparently map `%TEMP%\expedition33_status.json` and save directories across all platforms.
+      * Serves as the sole unified resolver mapping `%TEMP%\expedition33_status.json` and save directories across all platforms.
 
 ---
 
@@ -204,6 +203,10 @@ Startup persistence is registered under `HKEY_CURRENT_USER` (requiring zero admi
 | **Payload Value** | `"C:\Path\To\Expedition33_RPC.exe"` *(points to `pythonw.exe` in development)* |
 In development mode, points to `pythonw.exe` to suppress console allocation.
 
+### 4.5. Standalone Packaging SSOT (`build_exe.py`)
+`build_exe.py` serves as the exclusive Single Source of Truth generator for building the standalone production executable via PyInstaller.
+Manual `.spec` file generation is formally deprecated and eliminated; all compilation flags, bundle metadata, and static asset inclusions (`icon.ico`, `icon.png`, `bridge.zip`, `game_data.json`) are programmatically declared and enforced in `build_exe.py` with parity verified by `tests/ci/test_build_packaging_parity.py`.
+
 ---
 
 ## 5. Dry-Run Test Harness & 3-Tier Testing Architecture
@@ -214,6 +217,10 @@ The codebase decouples domain logic from OS system calls and external sockets th
 - **`GameSessionSimulator`**: Injects synthetic telemetry payloads, manages game state lifecycle, and triggers edge-case timings (e.g. stale timestamps, corrupt JSON, missing keys).
 - **`DiscordPipeSimulator & MockDiscordServer`**: Act as loopback Discord Named Pipe servers in-memory, asserting opcode sequences, verifying `<II` packet parsing, and simulating pipe dropouts or invalid responses.
 - **`HeadlessTrayHarness`**: Simulates the system tray graphical lifecycle, menu callbacks, and state updates headless without an OS windowing server.
+- **`TelemetryContentionSimulator`**: Simulates file locks, partial writes, corrupted JSON, and transient Win32 sharing violations during telemetry ingestion.
+- **`OrchestratorChaosHarness`**: Context manager orchestrating end-to-end chaos testing, process restarts, Discord pipe drops, and thread leak verification.
+- **`DualClockHarness`**: Controls independent monotonic and epoch time domains to deterministically test timeouts, TTL freshness, and clock decoupling invariants.
+- **`SaveFileBuilder`**: Programmatically generates synthetic binary UE5 `.sav` files for save reader mmap and checkpoint parsing validation.
 - **`FakeUpdater`, `FakeBridgeInstaller` & `FakeStartupService`**: Unified test doubles in `tests/harness/fake_services.py` simulating GitHub release checks, update flow, autostart registry, and UE4SS bridge deployments without disk or network operations.
 
 ### The 3-Tier Test Pyramid
