@@ -399,10 +399,8 @@ def peek_named_pipe_ready(pipe_or_fd: Any, timeout: float = 0.0) -> bool:
             return True
         if time.monotonic() >= deadline:
             return False
-        # Non-blocking yield: relinquish CPU slice without active sleep
-        # os.sched_yield() is not available on Windows; use a zero-duration sleep
-        # which yields the thread's remaining timeslice to the OS scheduler
-        time.sleep(0)
+        # Sleep a minimal non-zero duration to avoid busy-spin
+        time.sleep(0.001)
 
 
 # ---------------------------------------------------------------------------
