@@ -3,6 +3,6 @@
 from expedition33_rpc.core.app import main
 from expedition33_rpc.detection.detector import GameDetector, GameState
 
-__version__ = "2.4.0"
+__version__ = "2.5.0"
 
 __all__ = ["GameDetector", "GameState", "__version__", "main"]

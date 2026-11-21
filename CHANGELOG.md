@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.5.0] - 2026-11-21
+
+### Packaging SSOT & Entrypoint Consolidation
+- **Packaging & Entrypoint Unification (`build_exe.py`, `core.app`, `core.startup`, `.gitattributes`)**:
+  - Consolidated single canonical application entrypoint into `src/expedition33_rpc/__main__.py`.
+  - Definitively eliminated legacy root `main.py` and deprecated manual PyInstaller `.spec` file.
+  - Added `--specpath build` flag to `build_exe.py` to isolate build artifacts and prevent repository root pollution.
+  - Updated non-frozen Windows autostart registry command string to `"{target_py}" -m expedition33_rpc`, guaranteeing robust execution in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+
+### Core Concurrency & Hot-Path Hardening
+- **Hot-Path Polling & State Dispatch (`core.platform`, `core.orchestrator`, `ui.tray_app`, `integrations.updater`)**:
+  - Replaced busy-spin polling loop with `time.sleep(0.001)` in Windows IPC `peek_named_pipe_ready` to prevent CPU contention.
+  - Introduced granular synchronization with `_subscribers_lock` and `_bridge_lock` in `AppOrchestrator` for thread-safe listener mutations and concurrent dispatch.
+  - Offloaded blocking bridge installation and uninstallation tasks from system tray UI event loop into dedicated daemon worker threads (`TrayToggleBridgeWorker`, `TrayInstallBridgeWorker`).
+  - Implemented event deduplication for `UpdateState.CHECKING` notifications and dynamically configured `User-Agent` headers in `GitHubReleaseUpdater`.
+
+### Radical Feature Parsimony & Legacy Shim Pruning
+- **Domain Purity & API Streamlining (`detection.normalization`, `detection.steam_resolver`, `detection.detector`, `integrations.discord_rpc`, `core.settings`)**:
+  - Refactored `normalization.py` to operate strictly on pure string predicates (`raw_zone`, `zone_name`), removing dynamic duck typing and cyclic `GameState` import dependencies.
+  - Established canonical instance methods on `SteamCompatResolver` while converting `detection.compat_paths` into a backward-compatible thin delegator.
+  - Pruned legacy parameter `now` from `detector.get_game_state` in favor of decoupled `now_monotonic` and `now_epoch` time domains with explicit `epoch_provider` injection.
+  - Pruned deprecated `rpc`, `is_connected.setter`, and `update()` shims from `DiscordRPCManager`, and unified `SettingsService.__init__(path=...)` constructor contract.
+
+### Strict Type Safety, AST Gates & Chaos Test Harness
+- **Type Safety & Static CI Invariants (`pyproject.toml`, `tests.ci`, `tests.harness`)**:
+  - Enforced zero unknown types with Pyright by activating unconditional `reportUnknownArgumentType = true` and `reportUnknownVariableType = true` on `src`.
+  - Expanded AST static analysis CI gates verifying anti-busy spin compliance, normalization purity, strict monotonic/epoch clock decoupling, and packaging parity.
+  - Introduced `telemetry_contention_simulator.py` and `orchestrator_chaos_harness.py` into test harness to deterministically stress-test telemetry ingestion contention and orchestrator thread-safety.
+
 ## [v2.4.0] - 2026-11-20
 
 ### New Features & Cross-Platform Architecture
