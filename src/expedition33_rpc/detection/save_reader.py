@@ -11,7 +11,7 @@ from pathlib import Path
 from expedition33_rpc.detection.normalization import (
     format_zone_name,
     is_continent_zone,
-    is_menu_zone,
+    is_main_menu,
     strip_accents,
 )
 from expedition33_rpc.detection.steam_resolver import SteamCompatResolver
@@ -205,7 +205,7 @@ class SaveFileReader:
         if not level_name and not cp_tag:
             return False
 
-        if is_menu_zone(raw_zone, zone_display) or is_continent_zone(raw_zone, zone_display):
+        if is_main_menu(raw_zone, zone_display) or is_continent_zone(raw_zone, zone_display):
             return False
 
         raw_clean = strip_accents(raw_zone).lower()

@@ -11,19 +11,22 @@ from typing import Any, Protocol, cast, runtime_checkable
 import psutil
 
 from expedition33_rpc.core.platform import read_file_shared_text as _read_file_shared_text
-from expedition33_rpc.detection.game_data import ENDLESS_TOWER_TRIALS, TARGET_PROCESS_NAMES
+from expedition33_rpc.detection.game_data import (
+    ENDLESS_TOWER_TRIALS,
+    TARGET_PROCESS_NAMES,
+    TowerTrial,
+)
 from expedition33_rpc.detection.normalization import (
     format_checkpoint_tag,
     format_enemy_name,
     format_zone_name,
     is_continent_zone,
-    is_menu_zone,
+    is_main_menu,
     resolve_tower_trial,
 )
 from expedition33_rpc.detection.steam_resolver import SteamCompatResolver
 from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
 
-type TowerTrial = tuple[int, int] | str
 type RawGameData = dict[str, Any]
 
 
@@ -137,7 +140,7 @@ class GameState:
             resolved_cp = checkpoint_name
         else:
             resolved_cp = ""
-            is_menu = is_menu_zone(raw_zone, resolved_zone)
+            is_menu = is_main_menu(raw_zone, resolved_zone)
             is_continent = is_continent_zone(raw_zone, resolved_zone)
             if not is_menu and not is_continent and raw_checkpoint:
                 resolved_cp = format_checkpoint_tag(
@@ -207,7 +210,7 @@ class BridgeStateProvider:
         self,
         paths: list[str] | None = None,
         grace_period: float = 2.5,
-        time_provider: Callable[[], float] = time.time,
+        epoch_provider: Callable[[], float] | None = None,
         monotonic_provider: Callable[[], float] | None = None,
     ):
         if paths is not None:
@@ -215,11 +218,9 @@ class BridgeStateProvider:
         else:
             self.paths = SteamCompatResolver().resolve_telemetry_candidates()
         self.grace_period = grace_period
-        self.time_provider = time_provider
+        self.epoch_provider = epoch_provider if epoch_provider is not None else time.time
         self.monotonic_provider = (
-            monotonic_provider
-            if monotonic_provider is not None
-            else (time_provider if time_provider is not time.time else time.monotonic)
+            monotonic_provider if monotonic_provider is not None else time.monotonic
         )
         self._last_valid_data: RawGameData | None = None
         self._last_valid_monotonic: float = 0.0
@@ -252,7 +253,7 @@ class BridgeStateProvider:
         if bridge:
             bridge_ts = bridge.get("timestamp")
             is_fresh = True
-            now_epoch = self.time_provider()
+            now_epoch = self.epoch_provider()
             if bridge_ts is not None:
                 try:
                     ts_val = float(bridge_ts)
@@ -341,7 +342,7 @@ class GameDetector:
         target_process_names: Iterable[str] | str | None = None,
         game_user_settings_path: Path | str | None = None,
         idle_poll_interval: float = 5.0,
-        time_provider: Callable[[], float] | None = None,
+        monotonic_provider: Callable[[], float] | None = None,
         epoch_provider: Callable[[], float] | None = None,
         save_reader: SaveReaderProtocol | None = None,
     ):
@@ -361,8 +362,8 @@ class GameDetector:
             Path(game_user_settings_path) if game_user_settings_path is not None else None
         )
         self.idle_poll_interval: float = idle_poll_interval
-        self.time_provider: Callable[[], float] = (
-            time_provider if time_provider is not None else time.monotonic
+        self.monotonic_provider: Callable[[], float] = (
+            monotonic_provider if monotonic_provider is not None else time.monotonic
         )
         self.epoch_provider: Callable[[], float] = (
             epoch_provider if epoch_provider is not None else time.time
@@ -443,7 +444,7 @@ class GameDetector:
             self.has_received_telemetry = False
 
         # 2. Optimized global enumeration with adaptive idle backoff
-        current_time = self.time_provider() if now is None else now
+        current_time = self.monotonic_provider() if now is None else now
         if (
             self.cached_pid is None
             and self.process_scanner is None
@@ -483,7 +484,7 @@ class GameDetector:
         now: float | None = None,
     ) -> str:
         """Extracts configured UI language from GameUserSettings.ini with mtime caching and interval throttling."""
-        current_time = self.time_provider() if now is None else now
+        current_time = self.monotonic_provider() if now is None else now
         if not force and ini_path is None and (current_time - self._last_language_check_time < 5.0):
             return self._cached_language
 
@@ -534,7 +535,7 @@ class GameDetector:
             now_epoch: Epoch wall-clock value for timer_tracker.update() and outbound start_time.
             force: When True, bypasses idle backoff for process scanning.
         """
-        current_monotonic = self.time_provider() if now_monotonic is None else now_monotonic
+        current_monotonic = self.monotonic_provider() if now_monotonic is None else now_monotonic
         proc = self.find_game_process(now=current_monotonic, force=force)
 
         if not proc:
@@ -610,7 +611,7 @@ class GameDetector:
                 raw_zone = self.last_raw_zone
 
         raw_lower = raw_zone.lower()
-        is_menu = is_menu_zone(raw_zone)
+        is_menu = is_main_menu(raw_zone)
         is_continent = is_continent_zone(raw_zone)
         is_tower = (
             "endlesstower" in raw_lower or "torreinfinita" in raw_lower or "tower" in raw_lower
@@ -700,7 +701,6 @@ class GameDetector:
                 zone_key = self.timer_tracker.current_zone_id
 
         current_epoch = self.epoch_provider() if now_epoch is None else now_epoch
-        current_monotonic = self.time_provider() if now_monotonic is None else now_monotonic
         effective_start = self.timer_tracker.update(
             zone_key=zone_key,
             in_combat=in_combat,

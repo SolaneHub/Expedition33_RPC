@@ -10,7 +10,6 @@ import pytest
 from tests.harness.fake_process import FakeProcess
 
 from expedition33_rpc.detection.steam_resolver import (
-    DEFAULT_APP_ID,
     DEFAULT_STEAM_APP_ID,
     STANDARD_LINUX_STEAM_ROOTS,
     STEAM_REGISTRY_SUBKEYS,
@@ -22,9 +21,8 @@ pytestmark = pytest.mark.unit
 
 
 def test_steam_resolver_defaults() -> None:
-    assert DEFAULT_APP_ID == "1903340"
     assert DEFAULT_STEAM_APP_ID == "1903340"
-    assert SteamCompatResolver.DEFAULT_APP_ID == "1903340"
+    assert SteamCompatResolver.DEFAULT_STEAM_APP_ID == "1903340"
     assert len(STANDARD_LINUX_STEAM_ROOTS) == 4
     assert len(STEAM_REGISTRY_SUBKEYS) == 3
 

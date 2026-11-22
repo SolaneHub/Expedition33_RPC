@@ -343,7 +343,7 @@ def run_fallback_test(audit: FilesystemActivityAudit, tmp_path: Path) -> None:
     current_time = 1010.0
     real_bridge = BridgeStateProvider(
         paths=[str(status_file)],
-        time_provider=lambda: current_time,
+        epoch_provider=lambda: current_time,
     )
     detector_with_real_bridge = GameDetector(
         bridge_provider=real_bridge,

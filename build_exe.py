@@ -52,8 +52,6 @@ def build() -> None:
         "--hidden-import",
         "expedition33_rpc.core.presence",
         "--hidden-import",
-        "expedition33_rpc.detection.compat_paths",
-        "--hidden-import",
         "expedition33_rpc.detection.game_data",
         "--hidden-import",
         "expedition33_rpc.core.smoke",

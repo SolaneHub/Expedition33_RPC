@@ -7,6 +7,7 @@ from tests.harness import SaveFileBuilder
 
 from expedition33_rpc.detection.detector import SaveReaderProtocol
 from expedition33_rpc.detection.save_reader import SaveFileReader
+from expedition33_rpc.detection.steam_resolver import SteamCompatResolver
 
 
 @pytest.mark.unit
@@ -100,9 +101,7 @@ def test_save_reader_linux_cross_platform_path(tmp_path: Path) -> None:
     )
     save_dir.mkdir(parents=True)
 
-    from expedition33_rpc.detection.compat_paths import resolve_user_data_path
-
-    resolved = resolve_user_data_path(is_windows=False, home_dir=fake_home)
+    resolved = SteamCompatResolver(is_windows=False, home_dir=fake_home).resolve_user_data_path()
     assert Path(resolved).resolve() == save_dir.resolve()
 
 

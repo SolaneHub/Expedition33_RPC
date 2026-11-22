@@ -14,7 +14,6 @@ from expedition33_rpc.core.platform import winreg_read_value
 from expedition33_rpc.detection.game_data import TARGET_PROCESS_NAMES
 
 DEFAULT_STEAM_APP_ID: str = "1903340"
-DEFAULT_APP_ID: str = "1903340"
 
 STANDARD_LINUX_STEAM_ROOTS: tuple[str, ...] = (
     ".local/share/Steam",
@@ -33,12 +32,11 @@ STEAM_REGISTRY_SUBKEYS: tuple[tuple[str, str], ...] = (
 class SteamCompatResolver:
     """Pure, testable single-source-of-truth resolver for Steam, Proton, Wine prefixes, and library folders."""
 
-    DEFAULT_APP_ID: str = DEFAULT_APP_ID
     DEFAULT_STEAM_APP_ID: str = DEFAULT_STEAM_APP_ID
 
     def __init__(
         self,
-        app_id: str = DEFAULT_APP_ID,
+        app_id: str = DEFAULT_STEAM_APP_ID,
         *,
         is_windows: bool | None = None,
         home_dir: Path | None = None,
@@ -334,7 +332,6 @@ class SteamCompatResolver:
 
 
 __all__ = [
-    "DEFAULT_APP_ID",
     "DEFAULT_STEAM_APP_ID",
     "STANDARD_LINUX_STEAM_ROOTS",
     "STEAM_REGISTRY_SUBKEYS",

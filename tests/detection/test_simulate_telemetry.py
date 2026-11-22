@@ -349,7 +349,10 @@ def test_bridge_provider_resilience_to_corrupt_and_truncated_ipc(tmp_path: Path)
     status_file.write_text(json.dumps(payload), encoding="utf-8")
 
     provider = BridgeStateProvider(
-        paths=[str(status_file)], grace_period=2.5, time_provider=mock_time
+        paths=[str(status_file)],
+        grace_period=2.5,
+        epoch_provider=mock_time,
+        monotonic_provider=mock_time,
     )
     assert str(status_file) in provider.paths
 
@@ -370,12 +373,12 @@ def test_bridge_provider_resilience_to_corrupt_and_truncated_ipc(tmp_path: Path)
     detector = GameDetector(
         bridge_provider=provider,
         process_scanner=lambda: [mock_proc],
-        time_provider=mock_time,
+        monotonic_provider=mock_time,
     )
     orchestrator = AppOrchestrator(
         detector=detector,
         rpc_manager=mock_rpc,
-        time_provider=mock_time,
+        monotonic_provider=mock_time,
         auto_install_bridge=False,
         sync_startup=False,
     )

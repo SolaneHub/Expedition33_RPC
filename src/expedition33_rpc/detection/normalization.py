@@ -11,8 +11,7 @@ import unicodedata
 from typing import Literal, cast
 
 import expedition33_rpc.detection.game_data as game_data
-
-type TowerTrial = tuple[int, int] | str
+from expedition33_rpc.detection.game_data import TowerTrial
 
 type MenuSubstate = Literal[
     "starting",
@@ -109,7 +108,7 @@ def get_main_menu_displays() -> frozenset[str]:
     )
 
 
-def is_main_menu(raw_zone: str | None, zone_display: str | None = None) -> bool:
+def is_main_menu(raw_zone: str | None = None, zone_display: str | None = None) -> bool:
     """Returns True if the zone identifier or display string indicates a main menu or title screen."""
     if not raw_zone and not zone_display:
         return False
@@ -168,14 +167,6 @@ def resolve_menu_substate(
     return "main_menu"
 
 
-def is_menu_zone(
-    raw_zone: str | None = None,
-    zone_name: str | None = None,
-) -> bool:
-    """Detects if raw_zone or zone_name indicates a main menu or title screen."""
-    return is_main_menu(raw_zone, zone_name)
-
-
 def is_continent_zone(
     raw_zone: str | None = None,
     zone_name: str | None = None,
@@ -202,6 +193,19 @@ def format_enemy_name(enemy_name: str) -> str:
     formatted = re.sub(r"\bCromatic[oaie]\b", "Alpha", formatted, flags=re.IGNORECASE)
 
     return formatted.strip()
+
+
+@functools.cache
+def _get_pre_normalized_tower_trials() -> list[tuple[TowerTrial, str | None, list[list[str]]]]:
+    """Pre-normalizes trial variant tokens once at module runtime to avoid regex work in the hot-path."""
+    pre_normalized: list[tuple[TowerTrial, str | None, list[list[str]]]] = []
+    for stage_info, boss_name, enemy_groups in game_data.ENDLESS_TOWER_TRIALS:
+        norm_groups: list[list[str]] = []
+        for group in enemy_groups:
+            norm_group = [re.sub(r"[^a-z0-9]", "", variant.lower()) for variant in group]
+            norm_groups.append([v for v in norm_group if v])
+        pre_normalized.append((stage_info, boss_name, norm_groups))
+    return pre_normalized
 
 
 def resolve_tower_trial(
@@ -232,9 +236,11 @@ def resolve_tower_trial(
 
     normalized_single = format_enemy_name(single_name) if single_name else ""
 
-    # 1. Primary path: Match against structured enemy names if available
+    # Build token sets for matching: structured tokens take priority if present, else fallback from single_name
+    candidate_token_sets: list[set[str]] = []
+
     if structured:
-        cleaned_tokens = {
+        structured_tokens = {
             re.sub(
                 r"[^a-z0-9]",
                 "",
@@ -243,31 +249,13 @@ def resolve_tower_trial(
             for e in structured
             if e
         }
-        cleaned_tokens = {tok for tok in cleaned_tokens if tok}
-        if cleaned_tokens:
-            for stage_info, boss_name, enemy_groups in game_data.ENDLESS_TOWER_TRIALS:
-                if not enemy_groups:
-                    continue
-                all_groups_matched = True
-                for group in enemy_groups:
-                    group_matched = False
-                    for variant in group:
-                        norm_variant = re.sub(r"[^a-z0-9]", "", variant.lower())
-                        if norm_variant in cleaned_tokens:
-                            group_matched = True
-                            break
-                    if not group_matched:
-                        all_groups_matched = False
-                        break
-                if all_groups_matched:
-                    final_enemy = boss_name if boss_name else normalized_single
-                    return stage_info, final_enemy
+        structured_tokens = {tok for tok in structured_tokens if tok}
+        if structured_tokens:
+            candidate_token_sets.append(structured_tokens)
 
-    # 2. Fallback path: Match against exact single/summary string
     if normalized_single:
         cleaned_single = re.sub(r"\(Tier \d+\)", "", normalized_single, flags=re.IGNORECASE)
         cleaned_single = re.sub(r"\bT\d+\b", "", cleaned_single, flags=re.IGNORECASE)
-        # Split by comma for multi-enemy strings, and also consider full stripped token
         tokens_from_single = {
             re.sub(r"[^a-z0-9]", "", part.lower())
             for part in cleaned_single.split(",")
@@ -275,19 +263,17 @@ def resolve_tower_trial(
         }
         tokens_from_single.add(re.sub(r"[^a-z0-9]", "", cleaned_single.lower()))
         tokens_from_single = {tok for tok in tokens_from_single if tok}
+        if tokens_from_single:
+            candidate_token_sets.append(tokens_from_single)
 
-        for stage_info, boss_name, enemy_groups in game_data.ENDLESS_TOWER_TRIALS:
-            if not enemy_groups:
+    trials = _get_pre_normalized_tower_trials()
+    for tokens in candidate_token_sets:
+        for stage_info, boss_name, norm_groups in trials:
+            if not norm_groups:
                 continue
             all_groups_matched = True
-            for group in enemy_groups:
-                group_matched = False
-                for variant in group:
-                    norm_variant = re.sub(r"[^a-z0-9]", "", variant.lower())
-                    if norm_variant in tokens_from_single:
-                        group_matched = True
-                        break
-                if not group_matched:
+            for group in norm_groups:
+                if not any(variant in tokens for variant in group):
                     all_groups_matched = False
                     break
             if all_groups_matched:
@@ -480,7 +466,6 @@ __all__ = [
     "get_main_menu_displays",
     "is_continent_zone",
     "is_main_menu",
-    "is_menu_zone",
     "normalize_language_code",
     "resolve_menu_substate",
     "resolve_tower_trial",

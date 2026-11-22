@@ -331,7 +331,7 @@ def test_bridge_provider_wall_clock_timeout_rejects_stale_data(tmp_path: Path) -
     provider = BridgeStateProvider(
         paths=[str(bridge_path)],
         grace_period=0.0,
-        time_provider=lambda: simulated_now,
+        epoch_provider=lambda: simulated_now,
     )
 
     # Stale timestamp (>5s difference) is marked invalid
@@ -440,7 +440,8 @@ def test_detector_bridge_grace_period_prevents_telemetry_jitter(tmp_path: Path) 
     bridge_provider = BridgeStateProvider(
         paths=[str(status_file)],
         grace_period=2.5,
-        time_provider=lambda: current_clock,
+        epoch_provider=lambda: current_clock,
+        monotonic_provider=lambda: current_clock,
     )
     detector = GameDetector(
         bridge_provider=bridge_provider,
@@ -701,13 +702,13 @@ def test_game_detector_get_game_language_with_now_propagation(tmp_path: Path) ->
         time_calls += 1
         return 50.0
 
-    detector = GameDetector(game_user_settings_path=ini, time_provider=mock_time)
+    detector = GameDetector(game_user_settings_path=ini, monotonic_provider=mock_time)
     lang = detector.get_game_language(now=100.0)
     assert lang == "it"
-    # time_provider should not be called because now was provided
+    # monotonic_provider should not be called because now was provided
     assert time_calls == 0
 
-    # Within 5s window from now=100.0, passing now=102.0 should return cached language without calling time_provider or checking mtime
+    # Within 5s window from now=100.0, passing now=102.0 should return cached language without calling monotonic_provider or checking mtime
     assert detector.get_game_language(now=102.0) == "it"
     assert time_calls == 0
 
@@ -1065,7 +1066,7 @@ def test_detector_clock_epoch_does_not_corrupt_monotonic_scan_backoff() -> None:
     detector = GameDetector(
         process_scanner=lambda: [mock_proc],
         bridge_provider=None,
-        time_provider=mock_clock,
+        monotonic_provider=mock_clock,
     )
 
     # Initial call with epoch timestamp (e.g. year 2026 / 1.7e9)
