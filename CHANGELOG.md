@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.6.0] - 2026-11-22
+
+### 6-Tier Acyclic Architecture & Domain Decoupling
+- **Architectural Layering & Pure Domain Decoupling (`_version.py`, `core.presence`, `ui.presentation`, `detection.game_data`)**:
+  - Formally established the 6-Tier Acyclic Dependency Architecture (Tier 0: Primitives/Platform Leaves, Tier 1: Static Data, Tier 2: Normalization/Resolvers, Tier 3: Telemetry/State, Tier 4: Wire Presence/Protocols, Tier 5: Orchestration/App Shell).
+  - Extracted `src/expedition33_rpc/_version.py` into Tier 0 as the single source of truth (SSOT) for `__version__`.
+  - Relocated Discord Rich Presence formatters (`format_presence`, `build_presence_payload`, `format_location_name`, `get_presentation_strings`) from `ui.presentation` to `core.presence` (Tier 4), strictly prohibiting inward Core-to-UI layer dependencies.
+  - Introduced typed module proxy `_GameDataModule(types.ModuleType)` in `detection.game_data` backed by memoized getters (`functools.cache`) for zero-overhead static asset introspection.
+
+### Radical Feature Parsimony & Legacy Shim Elimination
+- **Legacy Pruning & Clock Parameter Uniformity (`detection.compat_paths`, `detection.steam_resolver`, `detection.normalization`, `detection.detector`, `core.orchestrator`, `integrations.discord_rpc`)**:
+  - Definitively deleted legacy compatibility module `src/expedition33_rpc/detection/compat_paths.py` and its legacy test suite.
+  - Removed deprecated `DEFAULT_APP_ID` alias in `detection.steam_resolver` in favor of canonical `DEFAULT_STEAM_APP_ID`.
+  - Removed legacy shim `is_menu_zone` in favor of canonical `is_main_menu` in `detection.normalization`.
+  - Enforced uniform naming conventions for time domain injection across all core classes (`BridgeStateProvider`, `GameDetector`, `AppOrchestrator`, `DiscordRPCManager`), replacing ambiguous `time_provider` with explicit `monotonic_provider` and `epoch_provider`.
+
+### Concurrency Hardening & Thread-Safe State Dispatch
+- **Thread Synchronization & State Snapshot Isolation (`integrations.discord_rpc`, `ui.tray_app`, `integrations.updater`, `core.orchestrator`)**:
+  - Introduced reentrant lock `_state_lock` in `DiscordRPCManager` to serialize concurrent IPC mutations and state queries.
+  - Introduced `_tray_workers_lock` in `ExpeditionTrayApp` with deterministic worker thread joining (`timeout=0.5s`) during application shutdown.
+  - Decoupled subscriber callback invocations in `AppUpdater` outside the lock critical section to eliminate reentrancy deadlocks.
+  - Introduced slotted immutable `OrchestratorStatus` dataclass providing thread-safe, structured state snapshots.
+
+### Strict Type Safety & Static AST Quality Gates
+- **Automated Architectural Invariant Enforcement (`tests.ci.test_architectural_invariants`)**:
+  - Activated 5 strict AST static analysis gates in `tests/ci/test_architectural_invariants.py`: full acyclic dependency graph verification, strict layer boundary isolation (no Core-to-UI imports), zero zombie shims or root `.spec` files, uniform clock provider parameter naming, and complete `time.monotonic()` decoupling in `AppOrchestrator.stop()`.
+
 ## [v2.5.0] - 2026-11-21
 
 ### Packaging SSOT & Entrypoint Consolidation
