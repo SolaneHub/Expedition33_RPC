@@ -62,7 +62,8 @@ class OrchestratorChaosHarness:
         )
         self.rpc_manager = DiscordRPCManager(
             client=self.ipc_client,
-            time_provider=self.clock.monotonic_clock,
+            monotonic_provider=self.clock.monotonic_clock,
+            epoch_provider=self.clock.epoch_clock,
         )
 
         # Settings & Fake services
@@ -83,7 +84,8 @@ class OrchestratorChaosHarness:
             sync_startup=False,
             polling_interval=0.01,
             idle_polling_interval=0.02,
-            time_provider=self.clock.monotonic_clock,
+            monotonic_provider=self.clock.monotonic_clock,
+            epoch_provider=self.clock.epoch_clock,
         )
 
         # Headless Tray App
@@ -163,12 +165,17 @@ class OrchestratorChaosHarness:
             if initial_threads is not None:
                 new_active = [t for t in active_threads if t not in initial_threads]
             else:
+                target_thread_names = (
+                    "OrchestratorWorkerThread",
+                    "BridgeAutoInstallerThread",
+                    "TrayToggleBridgeWorker",
+                    "TrayInstallBridgeWorker",
+                    "AppUpdaterWorkerThread",
+                )
                 new_active = [
                     t
                     for t in active_threads
-                    if "OrchestratorWorker" in t.name
-                    or "BridgeInstall" in t.name
-                    or "AppUpdater" in t.name
+                    if any(target in t.name for target in target_thread_names)
                 ]
             if not new_active:
                 return

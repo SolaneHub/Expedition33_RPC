@@ -338,11 +338,11 @@ def test_discord_ipc_client_and_orchestrator_freeze_chaos() -> None:
         )
 
         assert orchestrator.rpc_manager.connect() is True
-        assert orchestrator.is_rpc_connected() is True
+        assert orchestrator.rpc_manager.is_connected is True
 
         payload1 = PresencePayload(details="SafeZone", state="Exploring")
         orchestrator.rpc_manager.update_presence(payload1)
-        assert orchestrator.is_rpc_connected() is True
+        assert orchestrator.rpc_manager.is_connected is True
         safe_fingerprint = orchestrator.rpc_manager.last_update_state
         assert safe_fingerprint is not None
 
@@ -355,7 +355,7 @@ def test_discord_ipc_client_and_orchestrator_freeze_chaos() -> None:
         freeze_duration = time.perf_counter() - t0
 
         assert freeze_duration < 1.0  # Finished within timeout budget
-        assert orchestrator.is_rpc_connected() is False
+        assert orchestrator.rpc_manager.is_connected is False
         assert orchestrator.rpc_manager.is_connected is False
         # Must not falsely register the failed state2 as successfully updated
         assert orchestrator.rpc_manager.last_update_state == safe_fingerprint

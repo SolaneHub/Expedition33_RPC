@@ -22,17 +22,16 @@ from expedition33_rpc.ui.tray_app import ExpeditionTrayApp
 
 @pytest.fixture
 def tray_fixture():
-    mock_orchestrator = MagicMock(spec=AppOrchestrator)
+    mock_orchestrator = MagicMock()
     mock_orchestrator.current_state = GameState(
         is_running=True,
         process_pid=4242,
         zone_name="Ancient Sanctuary",
         in_combat=False,
     )
-    mock_orchestrator.is_anti_spoiler_enabled.return_value = False
-    mock_orchestrator.is_rpc_connected.return_value = True
-    mock_orchestrator.get_updater_status_text.return_value = "Update: Up to date (v1.6.0)"
-    mock_orchestrator.is_update_available.return_value = False
+    mock_orchestrator.rpc_manager.is_connected = True
+    mock_orchestrator.settings_service.is_anti_spoiler_enabled.return_value = False
+    mock_orchestrator.updater.get_status_text.return_value = "Update: Up to date (v1.6.0)"
     mock_orchestrator.is_bridge_installed.return_value = False
     mock_orchestrator.is_startup_enabled.return_value = False
 
@@ -230,7 +229,7 @@ def test_tray_menu_actions_responsiveness_benchmark(tmp_path: Path) -> None:
     assert anti_spoiler_duration_ms < 10.0, (
         f"Anti-spoiler action took {anti_spoiler_duration_ms:.2f}ms (>10ms)"
     )
-    assert real_orchestrator.is_anti_spoiler_enabled() is True
+    assert real_orchestrator.settings_service.is_anti_spoiler_enabled() is True
 
     # 3. Benchmark Combat Bridge toggle action
     t0 = time.perf_counter()

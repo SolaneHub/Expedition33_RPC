@@ -120,7 +120,7 @@ def test_bridge_lua_write_status_schema_contract_with_state_provider(tmp_path: P
     status_file = tmp_path / "expedition33_status.json"
     status_file.write_text(json.dumps(simulated_lua_output), encoding="utf-8")
 
-    provider = BridgeStateProvider(paths=[str(status_file)], time_provider=lambda: now)
+    provider = BridgeStateProvider(paths=[str(status_file)], epoch_provider=lambda: now)
     parsed_data = provider.read_game_data(min_valid_timestamp=now - 5.0)
 
     assert parsed_data is not None

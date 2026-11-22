@@ -20,6 +20,7 @@ from tests.harness.game_session import GameSessionSimulator
 
 from expedition33_rpc.core.orchestrator import (
     AppOrchestrator,
+    OrchestratorStatus,
 )
 from expedition33_rpc.core.settings import SettingsService
 from expedition33_rpc.detection.detector import BridgeStateProvider, GameDetector, GameState
@@ -441,7 +442,7 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
         bridge_installer=fake_installer,
         auto_install_bridge=True,
         sync_startup=False,
-        time_provider=lambda: current_time,
+        monotonic_provider=lambda: current_time,
     )
 
     # First attempt fails at t = 1000.0, backoff cooldown activated
@@ -608,17 +609,17 @@ def test_orchestrator_os_status_queries_and_toggles(tmp_path: Path) -> None:
     assert orchestrator.is_startup_enabled() is False
 
     # 3. Anti-Spoiler persisted to disk and invalidating presence
-    assert orchestrator.is_anti_spoiler_enabled() is False
+    assert orchestrator.settings_service.is_anti_spoiler_enabled() is False
     res_anti_spoiler = orchestrator.toggle_anti_spoiler()
     assert res_anti_spoiler is True
-    assert orchestrator.is_anti_spoiler_enabled() is True
+    assert orchestrator.settings_service.is_anti_spoiler_enabled() is True
     saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert saved["anti_spoiler"] is True
     assert rpc.last_update_state is None  # Fingerprint invalidated
 
     res_off = orchestrator.toggle_anti_spoiler()
     assert res_off is False
-    assert orchestrator.is_anti_spoiler_enabled() is False
+    assert orchestrator.settings_service.is_anti_spoiler_enabled() is False
     saved_off = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert saved_off["anti_spoiler"] is False
 
@@ -780,10 +781,10 @@ def test_orchestrator_facade_methods(tmp_path: Path) -> None:
     )
 
     # 1. State queries
-    assert orchestrator.is_rpc_connected() is True
-    assert orchestrator.is_anti_spoiler_enabled() is True
-    assert orchestrator.get_updater_status_text() == "Update: Available (v2.0.0)"
-    assert orchestrator.is_update_available() is True
+    assert orchestrator.rpc_manager.is_connected is True
+    assert orchestrator.settings_service.is_anti_spoiler_enabled() is True
+    assert orchestrator.updater.get_status_text() == "Update: Available (v2.0.0)"
+    assert orchestrator.updater.state == UpdateState.AVAILABLE
 
     # 2. Update action when AVAILABLE
     orchestrator.trigger_update_action()
@@ -793,7 +794,7 @@ def test_orchestrator_facade_methods(tmp_path: Path) -> None:
     # 3. Update action when UP_TO_DATE
     fake_updater.open_release_page_called = False
     fake_updater.state = UpdateState.UP_TO_DATE
-    assert orchestrator.is_update_available() is False
+    assert orchestrator.updater.state != UpdateState.AVAILABLE
     orchestrator.trigger_update_action()
     assert fake_updater.open_release_page_called is False
     assert len(fake_updater.check_in_background_calls) == 1
@@ -1033,15 +1034,15 @@ def test_orchestrator_status_snapshot() -> None:
     )
 
     snapshot = orchestrator.get_status_snapshot()
-    assert isinstance(snapshot, dict)
-    assert snapshot["running"] is False
-    assert snapshot["rpc_connected"] is True
-    assert snapshot["anti_spoiler"] is False
-    assert isinstance(snapshot["game_state"], GameState)
-    assert "bridge_installed" in snapshot
-    assert "startup_enabled" in snapshot
-    assert "update_available" in snapshot
-    assert "updater_status" in snapshot
+    assert isinstance(snapshot, OrchestratorStatus)
+    assert snapshot.running is False
+    assert snapshot.rpc_connected is True
+    assert snapshot.anti_spoiler is False
+    assert isinstance(snapshot.game_state, GameState)
+    assert hasattr(snapshot, "bridge_installed")
+    assert hasattr(snapshot, "startup_enabled")
+    assert hasattr(snapshot, "update_available")
+    assert hasattr(snapshot, "updater_status")
 
 
 @pytest.mark.unit

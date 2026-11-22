@@ -220,7 +220,7 @@ def test_telemetry_contention_simulator_transient_locks(tmp_path) -> None:
     assert res_none is None
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_orchestrator_chaos_harness_lifecycle_smoke(tmp_path) -> None:
     """Verifies that OrchestratorChaosHarness initializes and tears down cleanly."""
     with OrchestratorChaosHarness(base_dir=tmp_path) as chaos:

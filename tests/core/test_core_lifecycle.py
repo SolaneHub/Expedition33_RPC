@@ -79,8 +79,8 @@ def test_settings_save_atomic_failure_preserves_ram_and_disk_consistency(tmp_pat
         assert service.is_anti_spoiler_enabled() is False
 
     snapshot = orchestrator.get_status_snapshot()
-    assert snapshot["anti_spoiler"] is False
-    assert not orchestrator.is_anti_spoiler_enabled()
+    assert snapshot.anti_spoiler is False
+    assert not orchestrator.settings_service.is_anti_spoiler_enabled()
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +403,7 @@ def test_single_instance_lock_contention_and_atomic_removal(tmp_path: Path) -> N
 @pytest.mark.unit
 def test_win32_kernel32_typing_and_last_error_flag() -> None:
     """Verifies that Win32 kernel32 function bindings are strictly typed with use_last_error=True."""
-    from expedition33_rpc.core import platform
+    import expedition33_rpc.core.platform as platform
 
     if sys.platform != "win32":
         pytest.skip("Win32 ctypes bindings are only initialized on Windows")

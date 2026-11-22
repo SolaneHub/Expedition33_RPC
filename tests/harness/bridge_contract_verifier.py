@@ -117,7 +117,7 @@ class BridgeContractInspector:
             def read_bridge_status(self) -> dict[str, Any] | None:
                 return payload
 
-        provider = InlineBridgeProvider(time_provider=lambda: now)
+        provider = InlineBridgeProvider(epoch_provider=lambda: now)
         data = provider.read_game_data(min_valid_timestamp=now - 5.0)
         if data is None:
             errors.append("BridgeStateProvider failed to process sample payload (returned None)")

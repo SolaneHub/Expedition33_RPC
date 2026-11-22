@@ -22,7 +22,7 @@ from expedition33_rpc.ui.presentation import (
     format_tray_title,
     format_tray_zone_status,
     is_continent_zone,
-    is_menu_zone,
+    is_main_menu,
     truncate_presence_field,
 )
 from expedition33_rpc.ui.tray_app import ExpeditionTrayApp
@@ -35,13 +35,13 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 
-def test_is_menu_zone() -> None:
-    assert is_menu_zone("Level_MainMenu") is True
-    assert is_menu_zone("WBP_MM_MainMenu") is True
-    assert is_menu_zone("WBP_MM_TitleScreen") is True
-    assert is_menu_zone(zone_name="Main Menu") is True
-    assert is_menu_zone(zone_name="Nel menu principale") is True
-    assert is_menu_zone("Level_Forest", zone_name="Forest") is False
+def test_is_main_menu() -> None:
+    assert is_main_menu("Level_MainMenu") is True
+    assert is_main_menu("WBP_MM_MainMenu") is True
+    assert is_main_menu("WBP_MM_TitleScreen") is True
+    assert is_main_menu(zone_display="Main Menu") is True
+    assert is_main_menu(zone_display="Nel menu principale") is True
+    assert is_main_menu("Level_Forest", zone_display="Forest") is False
 
 
 def test_is_continent_zone() -> None:

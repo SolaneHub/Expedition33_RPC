@@ -5,18 +5,18 @@ from __future__ import annotations
 import os
 import sys
 
+import PIL
+import pystray
+
+from expedition33_rpc.core.orchestrator import AppOrchestrator
+from expedition33_rpc.core.resources import get_resource_path
+from expedition33_rpc.core.settings import SettingsService
+from expedition33_rpc.detection.detector import GameDetector
+from expedition33_rpc.ui.tray_app import ExpeditionTrayApp
+
 
 def run_smoke_test() -> None:
     """Executes a smoke test validating essential imports, assets, and core initialization."""
-    import PIL
-    import pystray
-
-    from expedition33_rpc.core.orchestrator import AppOrchestrator
-    from expedition33_rpc.core.resources import get_resource_path
-    from expedition33_rpc.core.settings import SettingsService
-    from expedition33_rpc.detection.detector import GameDetector
-    from expedition33_rpc.ui.tray_app import ExpeditionTrayApp
-
     assets = (
         get_resource_path("icon.png"),
         get_resource_path("icon.ico"),

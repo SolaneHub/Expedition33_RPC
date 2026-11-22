@@ -43,6 +43,8 @@ class ExpeditionTrayApp:
         orchestrator: AppOrchestrator | None = None,
     ) -> None:
         self._menu_lock = threading.Lock()
+        self._tray_workers_lock = threading.Lock()
+        self._tray_workers: list[threading.Thread] = []
         self.icon: Any = None
         self._last_menu_state: tuple[Any, ...] | None = None
 
@@ -51,11 +53,8 @@ class ExpeditionTrayApp:
             self.orchestrator.subscribe_state_change(self.on_orchestrator_state_change)
         )
         self._unsubscribe_update: Callable[[], None] | None = (
-            self.orchestrator.subscribe_update_available(self._on_update_available_wrapper)
+            self.orchestrator.subscribe_update_available(self.on_update_available)
         )
-
-    def _on_update_available_wrapper(self, update_info: UpdateInfo) -> None:
-        self.on_update_available(update_info)
 
     def _safe_update_menu(self) -> None:
         if self.icon is not None:
@@ -75,15 +74,17 @@ class ExpeditionTrayApp:
                 state.tower_floor,
                 state.tower_stage_trial,
                 state.checkpoint_name,
-                self.orchestrator.is_rpc_connected(),
+                self.orchestrator.rpc_manager.is_connected,
                 anti_spoiler,
             )
-            if menu_state != self._last_menu_state:
-                self._last_menu_state = menu_state
-                self._safe_update_menu()
+            with self._menu_lock:
+                if menu_state != self._last_menu_state:
+                    self._last_menu_state = menu_state
+                    with contextlib.suppress(Exception):
+                        self.icon.update_menu()
 
-            with contextlib.suppress(Exception):
-                self.icon.title = format_tray_title(state, anti_spoiler=anti_spoiler)
+                with contextlib.suppress(Exception):
+                    self.icon.title = format_tray_title(state, anti_spoiler=anti_spoiler)
 
     def on_update_available(self, update_info: UpdateInfo) -> None:
         if self.icon is not None:
@@ -114,22 +115,22 @@ class ExpeditionTrayApp:
     def menu_zone_status(self, *_args: object) -> str:
         return format_tray_zone_status(
             self.orchestrator.current_state,
-            anti_spoiler=self.orchestrator.is_anti_spoiler_enabled(),
+            anti_spoiler=self.orchestrator.settings_service.is_anti_spoiler_enabled(),
         )
 
     def menu_combat_status(self, *_args: object) -> str:
         return format_tray_combat_status(
             self.orchestrator.current_state,
-            anti_spoiler=self.orchestrator.is_anti_spoiler_enabled(),
+            anti_spoiler=self.orchestrator.settings_service.is_anti_spoiler_enabled(),
         )
 
     def menu_discord_status(self, *_args: object) -> str:
-        if self.orchestrator.is_rpc_connected():
+        if self.orchestrator.rpc_manager.is_connected:
             return "Discord: Connected"
         return "Discord: Standby (Listening)"
 
     def menu_anti_spoiler_toggle(self, *_args: object) -> str:
-        if self.orchestrator.is_anti_spoiler_enabled():
+        if self.orchestrator.settings_service.is_anti_spoiler_enabled():
             return "Anti-Spoiler Mode  [Enabled]"
         return "Anti-Spoiler Mode  [Disabled]"
 
@@ -143,31 +144,57 @@ class ExpeditionTrayApp:
         return "Combat Bridge  [Install Now]"
 
     def action_toggle_bridge(self, *_args: object) -> None:
-        def _async_toggle() -> None:
-            self.orchestrator.toggle_bridge()
-            self._safe_update_menu()
+        with self._tray_workers_lock:
+            # Purge terminated workers
+            self._tray_workers = [t for t in self._tray_workers if t.is_alive()]
+            # Prevent double-click if already active
+            if any(t.name == "TrayToggleBridgeWorker" and t.is_alive() for t in self._tray_workers):
+                return
 
-        threading.Thread(target=_async_toggle, name="TrayToggleBridgeWorker", daemon=True).start()
-
-    def action_select_game_folder(self, *_args: object) -> None:
-        folder = self.prompt_folder_selection()
-        if folder:
-
-            def _async_install() -> None:
-                success, msg = self.orchestrator.install_bridge_to(folder)
-                if self.icon is not None:
-                    with contextlib.suppress(Exception):
-                        self.icon.notify(
-                            "Combat Bridge installed successfully!"
-                            if success
-                            else f"Installation failed: {msg}",
-                            "Expedition 33 RPC",
-                        )
+            def _async_toggle() -> None:
+                self.orchestrator.toggle_bridge()
                 self._safe_update_menu()
 
-            threading.Thread(
-                target=_async_install, name="TrayInstallBridgeWorker", daemon=True
-            ).start()
+            thread = threading.Thread(
+                target=_async_toggle, name="TrayToggleBridgeWorker", daemon=True
+            )
+            self._tray_workers.append(thread)
+            thread.start()
+
+    def action_select_game_folder(self, *_args: object) -> None:
+        with self._tray_workers_lock:
+            self._tray_workers = [t for t in self._tray_workers if t.is_alive()]
+            if any(
+                t.name == "TrayInstallBridgeWorker" and t.is_alive() for t in self._tray_workers
+            ):
+                return
+
+        folder = self.prompt_folder_selection()
+        if folder:
+            with self._tray_workers_lock:
+                self._tray_workers = [t for t in self._tray_workers if t.is_alive()]
+                if any(
+                    t.name == "TrayInstallBridgeWorker" and t.is_alive() for t in self._tray_workers
+                ):
+                    return
+
+                def _async_install() -> None:
+                    success, msg = self.orchestrator.install_bridge_to(folder)
+                    if self.icon is not None:
+                        with contextlib.suppress(Exception):
+                            self.icon.notify(
+                                "Combat Bridge installed successfully!"
+                                if success
+                                else f"Installation failed: {msg}",
+                                "Expedition 33 RPC",
+                            )
+                    self._safe_update_menu()
+
+                thread = threading.Thread(
+                    target=_async_install, name="TrayInstallBridgeWorker", daemon=True
+                )
+                self._tray_workers.append(thread)
+                thread.start()
 
     def prompt_folder_selection(self) -> str | None:
         return prompt_folder_selection()
@@ -182,7 +209,7 @@ class ExpeditionTrayApp:
         self._safe_update_menu()
 
     def menu_update_status(self, *_args: object) -> str:
-        return self.orchestrator.get_updater_status_text()
+        return self.orchestrator.updater.get_status_text()
 
     def action_update_click(self, *_args: object) -> None:
         self.orchestrator.trigger_update_action()
@@ -194,6 +221,15 @@ class ExpeditionTrayApp:
         if self._unsubscribe_update is not None:
             self._unsubscribe_update()
             self._unsubscribe_update = None
+
+        with self._tray_workers_lock:
+            workers = list(self._tray_workers)
+        current = threading.current_thread()
+        for worker in workers:
+            if worker.is_alive() and worker is not current:
+                with contextlib.suppress(Exception):
+                    worker.join(timeout=0.5)
+
         self.orchestrator.stop()
         if self.icon is not None:
             self.icon.stop()
