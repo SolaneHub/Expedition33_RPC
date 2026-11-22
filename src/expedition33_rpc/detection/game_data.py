@@ -3,25 +3,17 @@ from __future__ import annotations
 import functools
 import json
 import os
-from typing import TYPE_CHECKING, Any, cast
+import sys
+import types
+from typing import Any, cast
 
-if TYPE_CHECKING:
-    TARGET_PROCESS_NAMES: tuple[str, ...]
-    MAIN_MENU_TOKENS: frozenset[str]
-    ZONE_NAME_OVERRIDES_BY_LANG: dict[str, dict[str, str]]
-    CHECKPOINT_NAMES_BY_LANG: dict[str, dict[str, str]]
-    TOWER_STAGES_BY_LANG: dict[str, dict[str, str]]
-    LOCALIZED_PRESENTATION: dict[str, dict[str, str]]
-    CONTEXTUAL_CHECKPOINTS: list[dict[str, Any]]
-    ENDLESS_TOWER_TRIALS: list[TrialDefinition]
+from expedition33_rpc.core.resources import get_resource_path
 
 type TowerTrial = tuple[int, int] | str
 type TrialDefinition = tuple[TowerTrial, str | None, list[list[str]]]
 
 
 def _load_game_data() -> dict[str, Any]:
-    from expedition33_rpc.core.resources import get_resource_path
-
     path = get_resource_path("game_data.json")
     if not os.path.isfile(path):
         candidate = os.path.normpath(
@@ -149,6 +141,84 @@ def _build_endless_tower_trials(raw_trials: list[Any]) -> list[TrialDefinition]:
     ]
 
 
+def get_zone_name_overrides_by_lang() -> dict[str, dict[str, str]]:
+    """Returns zone name overrides mapping by language code, cached."""
+    data = get_game_data()
+    return _get_zone_name_overrides_cached(id(data))
+
+
+@functools.cache
+def _get_zone_name_overrides_cached(catalog_id: int) -> dict[str, dict[str, str]]:
+    del catalog_id
+    data = get_game_data()
+    return dict(data.get("zone_name_overrides_by_lang", {}))
+
+
+def get_checkpoint_names_by_lang() -> dict[str, dict[str, str]]:
+    """Returns checkpoint names mapping by language code, cached."""
+    data = get_game_data()
+    return _get_checkpoint_names_cached(id(data))
+
+
+@functools.cache
+def _get_checkpoint_names_cached(catalog_id: int) -> dict[str, dict[str, str]]:
+    del catalog_id
+    data = get_game_data()
+    return dict(data.get("checkpoint_names_by_lang", {}))
+
+
+def get_tower_stages_by_lang() -> dict[str, dict[str, str]]:
+    """Returns tower stage names mapping by language code, cached."""
+    data = get_game_data()
+    return _get_tower_stages_cached(id(data))
+
+
+@functools.cache
+def _get_tower_stages_cached(catalog_id: int) -> dict[str, dict[str, str]]:
+    del catalog_id
+    data = get_game_data()
+    return dict(data.get("tower_stages_by_lang", {}))
+
+
+def get_localized_presentation() -> dict[str, dict[str, str]]:
+    """Returns localized presentation strings mapping by language code, cached."""
+    data = get_game_data()
+    return _get_localized_presentation_cached(id(data))
+
+
+@functools.cache
+def _get_localized_presentation_cached(catalog_id: int) -> dict[str, dict[str, str]]:
+    del catalog_id
+    data = get_game_data()
+    return dict(data.get("localized_presentation", {}))
+
+
+def get_contextual_checkpoints() -> list[dict[str, Any]]:
+    """Returns contextual checkpoint matchers list, cached."""
+    data = get_game_data()
+    return _get_contextual_checkpoints_cached(id(data))
+
+
+@functools.cache
+def _get_contextual_checkpoints_cached(catalog_id: int) -> list[dict[str, Any]]:
+    del catalog_id
+    data = get_game_data()
+    return list(data.get("contextual_checkpoints", []))
+
+
+def get_endless_tower_trials() -> list[TrialDefinition]:
+    """Returns parsed endless tower trials definitions, cached."""
+    data = get_game_data()
+    return _get_endless_tower_trials_cached(id(data))
+
+
+@functools.cache
+def _get_endless_tower_trials_cached(catalog_id: int) -> list[TrialDefinition]:
+    del catalog_id
+    data = get_game_data()
+    return _build_endless_tower_trials(data.get("endless_tower_trials", []))
+
+
 LAZY_ATTRIBUTES = frozenset(
     {
         "TARGET_PROCESS_NAMES",
@@ -163,37 +233,56 @@ LAZY_ATTRIBUTES = frozenset(
 )
 
 
-def __getattr__(name: str) -> Any:
-    """Lazily loads heavy localized game data catalogs only upon access."""
-    if name not in LAZY_ATTRIBUTES:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    match name:
-        case "TARGET_PROCESS_NAMES":
-            val = get_target_process_names()
-        case "MAIN_MENU_TOKENS":
-            val = get_main_menu_tokens()
-        case "ZONE_NAME_OVERRIDES_BY_LANG":
-            data = get_game_data()
-            val = dict(data.get("zone_name_overrides_by_lang", {}))
-        case "CHECKPOINT_NAMES_BY_LANG":
-            data = get_game_data()
-            val = dict(data.get("checkpoint_names_by_lang", {}))
-        case "TOWER_STAGES_BY_LANG":
-            data = get_game_data()
-            val = dict(data.get("tower_stages_by_lang", {}))
-        case "LOCALIZED_PRESENTATION":
-            data = get_game_data()
-            val = dict(data.get("localized_presentation", {}))
-        case "CONTEXTUAL_CHECKPOINTS":
-            data = get_game_data()
-            val = list(data.get("contextual_checkpoints", []))
-        case "ENDLESS_TOWER_TRIALS":
-            data = get_game_data()
-            val = _build_endless_tower_trials(data.get("endless_tower_trials", []))
-        case _:
-            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    globals()[name] = val
-    return val
+class _GameDataModule(types.ModuleType):
+    """Module proxy exposing lazy, typed properties for heavy JSON catalogs."""
+
+    @property
+    def TARGET_PROCESS_NAMES(self) -> tuple[str, ...]:
+        return get_target_process_names()
+
+    @property
+    def MAIN_MENU_TOKENS(self) -> frozenset[str]:
+        return get_main_menu_tokens()
+
+    @property
+    def ZONE_NAME_OVERRIDES_BY_LANG(self) -> dict[str, dict[str, str]]:
+        return get_zone_name_overrides_by_lang()
+
+    @property
+    def CHECKPOINT_NAMES_BY_LANG(self) -> dict[str, dict[str, str]]:
+        return get_checkpoint_names_by_lang()
+
+    @property
+    def TOWER_STAGES_BY_LANG(self) -> dict[str, dict[str, str]]:
+        return get_tower_stages_by_lang()
+
+    @property
+    def LOCALIZED_PRESENTATION(self) -> dict[str, dict[str, str]]:
+        return get_localized_presentation()
+
+    @property
+    def CONTEXTUAL_CHECKPOINTS(self) -> list[dict[str, Any]]:
+        return get_contextual_checkpoints()
+
+    @property
+    def ENDLESS_TOWER_TRIALS(self) -> list[TrialDefinition]:
+        return get_endless_tower_trials()
+
+    def __dir__(self) -> list[str]:
+        return sorted(set(super().__dir__()) | set(__all__))
+
+
+TARGET_PROCESS_NAMES: tuple[str, ...]
+MAIN_MENU_TOKENS: frozenset[str]
+ZONE_NAME_OVERRIDES_BY_LANG: dict[str, dict[str, str]]
+CHECKPOINT_NAMES_BY_LANG: dict[str, dict[str, str]]
+TOWER_STAGES_BY_LANG: dict[str, dict[str, str]]
+LOCALIZED_PRESENTATION: dict[str, dict[str, str]]
+CONTEXTUAL_CHECKPOINTS: list[dict[str, Any]]
+ENDLESS_TOWER_TRIALS: list[TrialDefinition]
+
+_current_mod = sys.modules[__name__]
+_current_mod.__class__ = _GameDataModule
 
 
 __all__ = [

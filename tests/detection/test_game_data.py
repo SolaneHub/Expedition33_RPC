@@ -17,7 +17,7 @@ from expedition33_rpc.detection.game_data import ENDLESS_TOWER_TRIALS
 from expedition33_rpc.detection.normalization import (
     format_checkpoint_tag,
     is_continent_zone,
-    is_menu_zone,
+    is_main_menu,
     resolve_tower_trial,
 )
 
@@ -286,13 +286,13 @@ def test_detector_resolves_structured_bridge_payload_end_to_end(tmp_path: Path) 
 
 def test_normalization_pure_string_menu_and_continent_detection() -> None:
     # Pure string menu checks
-    assert is_menu_zone(raw_zone="Level_MainMenu") is True
-    assert is_menu_zone(raw_zone="WBP_MM_MainMenu") is True
-    assert is_menu_zone(raw_zone="WBP_MM_TitleScreen") is True
-    assert is_menu_zone(zone_name="Main Menu") is True
-    assert is_menu_zone(zone_name="Nel menu principale") is True
-    assert is_menu_zone(raw_zone="Level_Forest", zone_name="Forest") is False
-    assert is_menu_zone(None, None) is False
+    assert is_main_menu(raw_zone="Level_MainMenu") is True
+    assert is_main_menu(raw_zone="WBP_MM_MainMenu") is True
+    assert is_main_menu(raw_zone="WBP_MM_TitleScreen") is True
+    assert is_main_menu(zone_display="Main Menu") is True
+    assert is_main_menu(zone_display="Nel menu principale") is True
+    assert is_main_menu(raw_zone="Level_Forest", zone_display="Forest") is False
+    assert is_main_menu(None, None) is False
 
     # Pure string continent checks
     assert is_continent_zone(zone_name="The Continent") is True

@@ -11,8 +11,9 @@ import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any, cast
 
-from expedition33_rpc import __version__
+from expedition33_rpc._version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -102,14 +103,30 @@ class AppUpdater:
         try:
             req = urllib.request.Request(
                 self.api_url,
-                headers={"User-Agent": f"Expedition33-RPC-Updater/{self.current_version}"},
+                headers={"User-Agent": USER_AGENT},
             )
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                data = json.loads(response.read().decode("utf-8"))
+                data = cast(object, json.loads(response.read().decode("utf-8")))
 
-            tag_name = data.get("tag_name", "")
+            if not isinstance(data, dict):
+                msg = f"Invalid release data format: expected dict, got {type(data).__name__}"
+                logger.error(msg)
+                self._set_state(UpdateState.ERROR, error_msg=msg)
+                return None
+
+            raw_dict = cast(dict[str, Any], data)
+            raw_tag = raw_dict.get("tag_name")
+            if not isinstance(raw_tag, str) or not raw_tag.strip():
+                msg = "Release missing valid tag_name"
+                logger.error(msg)
+                self._set_state(UpdateState.ERROR, error_msg=msg)
+                return None
+
+            tag_name: str = raw_tag.strip()
             remote_tuple = parse_version(tag_name)
-            html_url = data.get("html_url", f"https://github.com/{GITHUB_REPO}/releases/latest")
+            html_url = str(
+                raw_dict.get("html_url", f"https://github.com/{GITHUB_REPO}/releases/latest")
+            )
 
             logger.info(
                 "Remote version: %s (%s) | Current: %s (%s)",
@@ -172,8 +189,13 @@ class AppUpdater:
         with self._lock:
             if self.state == UpdateState.CHECKING:
                 return
+            self.state = UpdateState.CHECKING
             self._cancel_event.clear()
-        self._set_state(UpdateState.CHECKING)
+        if self.on_state_change:
+            try:
+                self.on_state_change()
+            except Exception as e:
+                logger.error("Callback error on state change: %s", e)
 
         def _worker() -> None:
             try:
