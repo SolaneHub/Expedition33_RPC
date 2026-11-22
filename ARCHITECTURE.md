@@ -27,12 +27,13 @@ All source code lives under `src/expedition33_rpc/`. This structure is the proje
 src/expedition33_rpc/
 ├── __init__.py               # Public API exports (__version__, main, GameDetector, GameState)
 ├── __main__.py               # Entrypoint execution (`python -m expedition33_rpc`)
+├── _version.py               # Canonical application version metadata (__version__)
 │
 ├── core/                     # Application lifecycle, platform primitives & orchestrator
 │   ├── app.py                # Single-instance application bootstrap and clean shutdown
 │   ├── orchestrator.py       # Headless AppOrchestrator, UpdaterProtocol & unified callback lifecycle
 │   ├── platform.py           # OS abstraction: Win32 mutex, flock, CreateFileW 0x7, winreg
-│   ├── presence.py           # Decoupled immutable PresencePayload DTO (pruned of speculative multiplayer attributes)
+│   ├── presence.py           # Decoupled PresencePayload DTO & build_presence_payload (single-player wire, pruned of multiplayer attributes)
 │   ├── resources.py          # PyInstaller bundle (_MEIPASS) and development path resolution
 │   ├── settings.py           # Persistent JSON user preferences
 │   ├── smoke.py              # Startup validation and sanity verification
@@ -52,7 +53,7 @@ src/expedition33_rpc/
 │   └── updater.py            # GitHub Releases auto-updater (AppUpdater conforming to UpdaterProtocol)
 │
 ├── ui/                       # Presentation layer and graphical shell
-│   ├── presentation.py       # Pure formatting functions for Discord status and tray text
+│   ├── presentation.py       # Pure text formatting routines for system tray tooltips and menus
 │   └── tray_app.py           # System tray menu, background polling pump, and user actions
 │
 └── assets/                   # Bundled static data and binaries
@@ -61,6 +62,22 @@ src/expedition33_rpc/
     ├── icon.ico              # Windows executable icon
     └── icon.png              # System tray icon
 ```
+
+> [!NOTE]
+> **Complete Elimination of Legacy Shims**: Legacy cross-platform compatibility module `compat_paths.py` and manual `.spec` PyInstaller files have been permanently eliminated from the repository and are strictly forbidden by CI AST gatekeepers. All path and prefix resolutions are centralized under `detection/steam_resolver.py`.
+
+### 2.1. Strict 6-Tier Acyclic Dependency DAG
+
+The internal module hierarchy strictly conforms to a 6-tier Directed Acyclic Graph (DAG) enforced by AST analysis in CI (`test_architectural_invariants.py`). Lower tiers never depend on higher tiers:
+
+| Tier | Layer Name | Modules | Responsibilities & Invariants |
+| :---: | :--- | :--- | :--- |
+| **Tier 0** | **Primitives & Platform Leaves** | `_version.py`, `core/platform.py`, `core/resources.py`, `core/settings.py`, `detection/timer_tracker.py` | Standalone primitives, OS abstraction, JSON configuration, version metadata, and zero-dependency duration tracking. Zero internal dependencies. |
+| **Tier 1** | **Static Data & Configuration** | `detection/game_data.py`, `core/startup.py`, `integrations/updater.py` | Localization catalogs, static entity dictionaries, Windows Run registry management, and GitHub update client. |
+| **Tier 2** | **Normalization & Resolvers** | `detection/normalization.py`, `detection/steam_resolver.py` | Pure zone/menu string normalization and Steam/Proton/Linux prefix path resolution. |
+| **Tier 3** | **Telemetry Ingestion & State** | `detection/detector.py`, `detection/save_reader.py` | Non-blocking telemetry ingestion (`0x7`), binary `.sav` save parsing via `mmap`, and immutable `GameState` derivation. |
+| **Tier 4** | **Wire Presence & Protocols** | `core/presence.py`, `ui/presentation.py`, `integrations/discord_rpc.py`, `integrations/bridge_installer.py` | `PresencePayload` DTO, Discord IPC binary `<II` wire framing, system tray text formatters, and UE4SS bridge mod deployment. |
+| **Tier 5** | **Orchestration & App Shell** | `core/orchestrator.py`, `ui/tray_app.py`, `core/smoke.py`, `core/app.py`, `__main__.py`, `__init__.py` | Headless lifecycle coordination, system tray GUI, single-instance mutex gating, startup smoke tests, and CLI entrypoint. |
 
 ---
 
@@ -129,7 +146,8 @@ The application runtime maintains resilient execution across host process faults
      * Deterministic testability: In unit and integration test suites, `FakeUpdater(UpdaterProtocol)` simulates all update lifecycle states offline without making external HTTP requests.
 10. **Unified Callback Lifecycle in `AppOrchestrator`**:
     - `AppOrchestrator` acts as the single central hub dispatching state updates across the headless core, system tray, and tests:
-      * Unified observer registration via `subscribe_state_change(callback)` / `unsubscribe_state(callback)` alongside the `on_state_change` and `on_update_available` hooks.
+      * Unified observer registration via `subscribe_state_change(callback)` / `subscribe_update_available(callback)` returning an idempotent unsubscribe closure `unsubscribe() -> None`, alongside constructor hooks (`on_state_change`, `on_update_available`).
+      * Thread-safe subscriber registration guarded by reentrant synchronization locks (`_subscribers_lock`), eliminating race conditions during dynamic listener attachment/detachment.
       * State transitions (`step_update()`) cleanly separate state derivation, presence dirty-checking, and listener notification.
       * Listeners are invoked with `(game_state: GameState, is_active: bool)` synchronously within the worker tick or test harness, ensuring deterministic notification without intermediate thread race conditions or dropped frames.
 11. **Unified Cross-Platform Resolution via `SteamCompatResolver`**:

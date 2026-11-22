@@ -68,28 +68,29 @@ def test_discord_rpc_no_monotonic_on_wire_timestamps() -> None:
 
 
 def test_presentation_no_monotonic_on_wire_timestamps() -> None:
-    """Verifies that time.monotonic is never assigned/serialized to outbound Discord timestamps in presentation.py."""
-    presentation_file = SRC_DIR / "ui" / "presentation.py"
-    assert presentation_file.exists()
-    content = presentation_file.read_text(encoding="utf-8")
-    tree = ast.parse(content, filename=str(presentation_file))
+    """Verifies that time.monotonic is never assigned/serialized to outbound Discord timestamps in presentation.py or core/presence.py."""
+    for rel_path in ("ui/presentation.py", "core/presence.py"):
+        target_file = SRC_DIR / rel_path
+        assert target_file.exists()
+        content = target_file.read_text(encoding="utf-8")
+        tree = ast.parse(content, filename=str(target_file))
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            for kw in node.keywords:
-                if kw.arg in _FORBIDDEN_TIMESTAMP_TARGETS:
-                    for child in ast.walk(kw.value):
-                        assert not _is_time_monotonic(child), (
-                            f"Forbidden monotonic assigned to {kw.arg} in {presentation_file}:{node.lineno}"
-                        )
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                for kw in node.keywords:
+                    if kw.arg in _FORBIDDEN_TIMESTAMP_TARGETS:
+                        for child in ast.walk(kw.value):
+                            assert not _is_time_monotonic(child), (
+                                f"Forbidden monotonic assigned to {kw.arg} in {target_file}:{node.lineno}"
+                            )
 
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id in _FORBIDDEN_TIMESTAMP_TARGETS:
-                    for child in ast.walk(node.value):
-                        assert not _is_time_monotonic(child), (
-                            f"Forbidden monotonic assigned to {target.id} in {presentation_file}:{node.lineno}"
-                        )
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id in _FORBIDDEN_TIMESTAMP_TARGETS:
+                        for child in ast.walk(node.value):
+                            assert not _is_time_monotonic(child), (
+                                f"Forbidden monotonic assigned to {target.id} in {target_file}:{node.lineno}"
+                            )
 
 
 def test_detector_and_timer_tracker_no_monotonic_on_start_timestamps() -> None:
@@ -442,3 +443,258 @@ def test_clock_decoupling_bridge_and_rpc_manager() -> None:
                             pytest.fail(
                                 f"Direct call to time.time() inside BridgeStateProvider.{item.name} at line {sub.lineno}"
                             )
+
+
+def test_orchestrator_imports_no_symbols_from_ui() -> None:
+    """Verifies that core/orchestrator.py never imports any symbols from expedition33_rpc.ui."""
+    orch_file = SRC_DIR / "core" / "orchestrator.py"
+    assert orch_file.exists()
+    tree = ast.parse(orch_file.read_text(encoding="utf-8"), filename=str(orch_file))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert not alias.name.startswith("expedition33_rpc.ui"), (
+                    f"Forbidden UI import in orchestrator: {alias.name}"
+                )
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert not node.module.startswith("expedition33_rpc.ui"), (
+                f"Forbidden UI import from in orchestrator: {node.module}"
+            )
+
+
+def test_strict_acyclic_import_dag() -> None:
+    """Gate 1: Scans recursively all files in src/expedition33_rpc/ via ast.parse and
+
+    verifies that the directed module dependency graph is a strict DAG without any cycles.
+    """
+    all_py = list(SRC_DIR.rglob("*.py"))
+    assert all_py, "No python files found in src/expedition33_rpc"
+
+    mod_to_file: dict[str, Path] = {}
+    file_to_mod: dict[Path, str] = {}
+    for p in all_py:
+        rel = p.relative_to(SRC_DIR).with_suffix("")
+        parts = list(rel.parts)
+        if parts[-1] == "__init__":
+            parts.pop()
+        mod_name = "expedition33_rpc" + (("." + ".".join(parts)) if parts else "")
+        mod_to_file[mod_name] = p
+        file_to_mod[p] = mod_name
+
+    graph: dict[str, set[str]] = {m: set() for m in mod_to_file}
+
+    for py_file, cur_mod in file_to_mod.items():
+        tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        cur_pkg = cur_mod if py_file.name == "__init__.py" else cur_mod.rpartition(".")[0]
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    name = alias.name
+                    if name.startswith("expedition33_rpc"):
+                        matched: str | None = None
+                        for m in mod_to_file:
+                            if (name == m or name.startswith(m + ".")) and (
+                                matched is None or len(m) > len(matched)
+                            ):
+                                matched = m
+                        if matched and matched != cur_mod:
+                            graph[cur_mod].add(matched)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level > 0:
+                    parts = cur_pkg.split(".")
+                    level = node.level
+                    if level <= len(parts):
+                        base = ".".join(parts[: len(parts) - level + 1])
+                        full = f"{base}.{node.module}" if node.module else base
+                    else:
+                        full = ""
+                else:
+                    full = node.module or ""
+
+                if full.startswith("expedition33_rpc"):
+                    matched = None
+                    for m in mod_to_file:
+                        if (full == m or full.startswith(m + ".")) and (
+                            matched is None or len(m) > len(matched)
+                        ):
+                            matched = m
+                    if matched and matched != cur_mod:
+                        graph[cur_mod].add(matched)
+                    for alias in node.names:
+                        cand = f"{full}.{alias.name}"
+                        if cand in mod_to_file and cand != cur_mod:
+                            graph[cur_mod].add(cand)
+
+    visited: dict[str, int] = {}
+    cycle: list[str] = []
+
+    def dfs(node: str, path: list[str]) -> bool:
+        visited[node] = 1
+        path.append(node)
+        for neighbor in sorted(graph[node]):
+            if visited.get(neighbor) == 1:
+                cycle_start = path.index(neighbor)
+                cycle.extend(path[cycle_start:] + [neighbor])
+                return True
+            if visited.get(neighbor) != 2 and dfs(neighbor, path):
+                return True
+        path.pop()
+        visited[node] = 2
+        return False
+
+    for m in sorted(graph):
+        if m not in visited and dfs(m, []):
+            break
+
+    assert not cycle, f"Cycle detected in import graph: {' -> '.join(cycle)}"
+
+
+def test_layer_boundary_enforcement() -> None:
+    """Gate 2: Asserts that no file in core/ imports any module from ui/
+
+    and that no file in integrations/ imports from expedition33_rpc.__init__.
+    """
+    core_dir = SRC_DIR / "core"
+    integrations_dir = SRC_DIR / "integrations"
+    assert core_dir.is_dir() and integrations_dir.is_dir()
+
+    violations: list[str] = []
+
+    # 1. core/ must not import from ui/ (exclude app.py and smoke.py which serve as application entrypoints)
+    exempt_core_files = {"app.py", "smoke.py"}
+    for py_file in core_dir.rglob("*.py"):
+        if py_file.name in exempt_core_files:
+            continue
+        tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("expedition33_rpc.ui") or alias.name == "ui":
+                        violations.append(
+                            f"{py_file.name}:{node.lineno} imports forbidden UI module '{alias.name}'"
+                        )
+            elif isinstance(node, ast.ImportFrom):
+                mod = node.module or ""
+                if mod.startswith("expedition33_rpc.ui") or mod == "ui":
+                    violations.append(
+                        f"{py_file.name}:{node.lineno} imports from forbidden UI module '{mod}'"
+                    )
+
+    # 2. integrations/ must not import from expedition33_rpc.__init__
+    for py_file in integrations_dir.rglob("*.py"):
+        tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "expedition33_rpc":
+                        violations.append(
+                            f"{py_file.name}:{node.lineno} imports from expedition33_rpc root package"
+                        )
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.level == 0
+                and node.module == "expedition33_rpc"
+            ):
+                violations.append(
+                    f"{py_file.name}:{node.lineno} imports from expedition33_rpc root package"
+                )
+
+    assert not violations, "Layer boundary violations found:\n" + "\n".join(violations)
+
+
+def test_no_zombie_shims_or_spec_files() -> None:
+    """Gate 3: Asserts that compat_paths.py does not exist in src/
+
+    and that no *.spec file exists in repo root or tracked in git.
+    """
+    repo_root = SRC_DIR.parents[1]
+
+    # Check compat_paths.py in src/
+    compat_files = list(SRC_DIR.rglob("compat_paths.py"))
+    assert not compat_files, f"Zombie shim compat_paths.py found: {compat_files}"
+
+    # Check *.spec files in repo root
+    root_spec_files = list(repo_root.glob("*.spec"))
+    assert not root_spec_files, f"Spec files found in root: {root_spec_files}"
+
+    # Verify no *.spec file is tracked in git (via git ls-files if git available, or checking git index)
+    try:
+        import subprocess
+
+        res = subprocess.run(
+            ["git", "ls-files", "*.spec"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if res.returncode == 0:
+            tracked = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+            assert not tracked, f"Tracked .spec files in git: {tracked}"
+    except (FileNotFoundError, PermissionError):
+        pass
+
+
+def test_clock_naming_uniformity() -> None:
+    """Gate 4: Verifies via AST that in classes (BridgeStateProvider, GameDetector,
+
+    AppOrchestrator, DiscordRPCManager) time parameters are named strictly
+    'monotonic_provider' and 'epoch_provider', with no ambiguous 'time_provider' parameter.
+    """
+    target_classes = {
+        "BridgeStateProvider",
+        "GameDetector",
+        "AppOrchestrator",
+        "DiscordRPCManager",
+    }
+    found_classes: set[str] = set()
+
+    for py_file in SRC_DIR.rglob("*.py"):
+        tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name in target_classes:
+                found_classes.add(node.name)
+                for item in node.body:
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        all_params = [arg.arg for arg in item.args.args + item.args.kwonlyargs]
+                        assert "time_provider" not in all_params, (
+                            f"Ambiguous parameter 'time_provider' found in {node.name}.{item.name} at {py_file.name}:{item.lineno}"
+                        )
+                        for param in all_params:
+                            if "provider" in param and param not in (
+                                "monotonic_provider",
+                                "epoch_provider",
+                                "bridge_provider",
+                            ):
+                                pytest.fail(
+                                    f"Unexpected provider parameter '{param}' in {node.name}.{item.name} at {py_file.name}:{item.lineno}"
+                                )
+
+    assert found_classes == target_classes, (
+        f"Missing classes in AST search: {target_classes - found_classes}"
+    )
+
+
+def test_orchestrator_stop_monotonic_decoupling() -> None:
+    """Gate 5: Asserts that AppOrchestrator.stop does not invoke time.monotonic() directly,
+
+    but uses the injected monotonic_provider.
+    """
+    orch_file = SRC_DIR / "core" / "orchestrator.py"
+    assert orch_file.exists()
+    tree = ast.parse(orch_file.read_text(encoding="utf-8"), filename=str(orch_file))
+
+    found_stop = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "AppOrchestrator":
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == "stop":
+                    found_stop = True
+                    for sub in ast.walk(item):
+                        if isinstance(sub, ast.Call) and _is_time_monotonic(sub.func):
+                            pytest.fail(
+                                f"Direct time.monotonic() call found in AppOrchestrator.stop at {orch_file.name}:{sub.lineno}"
+                            )
+
+    assert found_stop, "AppOrchestrator.stop method not found in AST"
