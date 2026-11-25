@@ -120,14 +120,14 @@ Release binaries are built in clean, isolated environments via GitHub Actions. E
 | Artifact | SHA-256 (Prefix) | Verification Status | VirusTotal Analysis |
 | :--- | :--- | :---: | :---: |
 | **`Expedition33_RPC.exe`** | [`fbaaa01b...d9b5`](https://www.virustotal.com/gui/file/fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5) | 🛡️ **Clean** | [Inspect Live Report](https://www.virustotal.com/gui/file/fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5) |
-| **`bridge.zip`** | [`3b910cf8...aa1b`](https://www.virustotal.com/gui/file/3b910cf859322d632c2197b7ecd322587f428fac361f19d0ff6224330197aa1b) | 🛡️ **Clean** | [Inspect Live Report](https://www.virustotal.com/gui/file/3b910cf859322d632c2197b7ecd322587f428fac361f19d0ff6224330197aa1b) |
+| **`bridge.zip`** | [`02b3d9fb...00fc`](https://www.virustotal.com/gui/file/02b3d9fb7890639b43428389e51dffa2f5cc7e1100d9226419b7b8966ed800fc) | 🛡️ **Clean** | [Inspect Live Report](https://www.virustotal.com/gui/file/02b3d9fb7890639b43428389e51dffa2f5cc7e1100d9226419b7b8966ed800fc) |
 
 <details>
 <summary>📋 <b>Click to view full SHA-256 Checksums</b></summary>
 
 ```text
 fbaaa01ba5bf61d2034ce1b15fed58497674df3f5705b17432a37d10ddc8d9b5  Expedition33_RPC.exe
-3b910cf859322d632c2197b7ecd322587f428fac361f19d0ff6224330197aa1b  bridge.zip
+02b3d9fb7890639b43428389e51dffa2f5cc7e1100d9226419b7b8966ed800fc  bridge.zip
 ```
 
 </details>
