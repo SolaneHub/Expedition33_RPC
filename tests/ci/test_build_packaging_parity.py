@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -28,24 +29,19 @@ def _extract_build_exe_assets() -> set[str]:
     tree = ast.parse(content, filename=str(BUILD_SCRIPT))
 
     referenced_assets: set[str] = set()
+    asset_pattern = re.compile(r"assets[/\\]([A-Za-z0-9_.-]+)")
 
     # Search for string literals in the PyInstaller cmd list
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            val = node.value
-            for asset_name in ["icon.ico", "icon.png", "bridge.zip", "game_data.json"]:
-                if f"assets/{asset_name}" in val or f"assets\\{asset_name}" in val:
-                    referenced_assets.add(asset_name)
+            for match in asset_pattern.finditer(node.value):
+                referenced_assets.add(match.group(1))
         elif isinstance(node, ast.JoinedStr):
             # Formatted strings, e.g. f"src/expedition33_rpc/assets/icon.png{os.pathsep}..."
             for part in node.values:
                 if isinstance(part, ast.Constant) and isinstance(part.value, str):
-                    for asset_name in ["icon.ico", "icon.png", "bridge.zip", "game_data.json"]:
-                        if (
-                            f"assets/{asset_name}" in part.value
-                            or f"assets\\{asset_name}" in part.value
-                        ):
-                            referenced_assets.add(asset_name)
+                    for match in asset_pattern.finditer(part.value):
+                        referenced_assets.add(match.group(1))
 
     return referenced_assets
 

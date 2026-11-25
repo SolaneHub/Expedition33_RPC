@@ -64,3 +64,25 @@ def test_verify_game_data_detects_malformed_trials(tmp_path: Path) -> None:
     assert is_valid is False
     assert any("invalid [stage, trial] coordinates" in e for e in errors)
     assert any("must have non-empty variants list" in e for e in errors)
+
+
+def test_verify_game_data_detects_invalid_process_tokens_and_checkpoints(tmp_path: Path) -> None:
+    """Verifies verify_game_data fails on invalid target_process_names, main_menu_tokens, and contextual_checkpoints."""
+    invalid_data = {
+        "localized_presentation": {},
+        "zone_name_overrides_by_lang": {},
+        "checkpoint_names_by_lang": {},
+        "tower_stages_by_lang": {},
+        "endless_tower_trials": [],
+        "target_process_names": ["Game.EXE"],
+        "main_menu_tokens": ["MainMenu"],
+        "contextual_checkpoints": [{"en": "Test"}],
+    }
+    test_file = tmp_path / "game_data_extra_broken.json"
+    test_file.write_text(json.dumps(invalid_data), encoding="utf-8")
+
+    is_valid, errors = verify_game_data(test_file)
+    assert is_valid is False
+    assert any("target_process_names[0]" in e for e in errors)
+    assert any("main_menu_tokens[0]" in e for e in errors)
+    assert any("contextual_checkpoints[0]" in e for e in errors)

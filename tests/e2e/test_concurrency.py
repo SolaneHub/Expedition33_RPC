@@ -191,3 +191,241 @@ def test_concurrent_telemetry_ticks_and_ui_toggles(tmp_path: Path) -> None:
     for op, payload in frames:
         assert op == OP_FRAME
         assert payload.get("cmd") == "SET_ACTIVITY"
+
+
+def test_concurrent_step_update_and_stop_bridge_install_thread_race() -> None:
+    """High-contention barrier race between step_update(auto_install_bridge=True) and stop()."""
+    from tests.harness import FakeBridgeInstaller, FakeProcess
+
+    class SlowInstaller(FakeBridgeInstaller):
+        def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            del win64_dir
+            self.install_call_count += 1
+            self.installed = True
+            return True, "Installed"
+
+    def _run_iteration(iteration: int) -> None:
+        procs = [
+            FakeProcess(
+                pid=10_000 + iteration,
+                name="sandfall-win64-shipping.exe",
+                is_running=True,
+                exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+            )
+        ]
+        detector = GameDetector(bridge_provider=None, process_scanner=lambda: procs)
+        pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+        rpc = DiscordRPCManager(client=DiscordIPCClient(client_id="123456789", transport=pipe))
+        installer = SlowInstaller(installed=False)
+        orchestrator = AppOrchestrator(
+            detector=detector,
+            rpc_manager=rpc,
+            bridge_installer=installer,
+            auto_install_bridge=True,
+            sync_startup=False,
+        )
+
+        barrier = threading.Barrier(2)
+        errors: list[BaseException] = []
+
+        def _step() -> None:
+            try:
+                barrier.wait(timeout=2.0)
+                orchestrator.step_update()
+            except BaseException as exc:
+                errors.append(exc)
+
+        def _stop() -> None:
+            try:
+                barrier.wait(timeout=2.0)
+                orchestrator.stop()
+            except BaseException as exc:
+                errors.append(exc)
+
+        t_step = threading.Thread(target=_step)
+        t_stop = threading.Thread(target=_stop)
+        t_step.start()
+        t_stop.start()
+        t_step.join(timeout=5.0)
+        t_stop.join(timeout=5.0)
+
+        assert errors == [], f"Iteration {iteration} raised errors: {errors}"
+        orchestrator.stop()
+        assert orchestrator._bridge_install_thread is None
+
+    initial_threads = {t for t in threading.enumerate() if t.is_alive()}
+
+    for i in range(30):
+        _run_iteration(i)
+
+    # Verify zero orphaned BridgeAutoInstallerThread instances remain
+    remaining = [
+        t
+        for t in threading.enumerate()
+        if t.is_alive() and t not in initial_threads and "BridgeAutoInstallerThread" in t.name
+    ]
+    assert remaining == []
+
+
+def test_concurrent_bridge_mutations_and_probes_no_stale_overwrite(tmp_path: Path) -> None:
+    """High-contention barrier race across step_update, toggle_bridge, install_bridge_to, and stop."""
+    import time
+
+    from tests.harness import FakeBridgeInstaller, FakeProcess
+
+    class YieldingInstaller(FakeBridgeInstaller):
+        def is_bridge_installed(self, win64_dir: Path | str | None = None) -> bool:
+            del win64_dir
+            val = self.installed
+            time.sleep(0.002)
+            return val
+
+        def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            del win64_dir
+            time.sleep(0.002)
+            self.installed = True
+            return True, "Installed"
+
+        def uninstall_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            del win64_dir
+            time.sleep(0.002)
+            self.installed = False
+            return True, "Uninstalled"
+
+    def _run_iteration(iteration: int) -> None:
+        procs = [
+            FakeProcess(
+                pid=20_000 + iteration,
+                name="sandfall-win64-shipping.exe",
+                is_running=True,
+                exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+            )
+        ]
+        detector = GameDetector(bridge_provider=None, process_scanner=lambda: procs)
+        pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+        rpc = DiscordRPCManager(client=DiscordIPCClient(client_id="123456789", transport=pipe))
+        installer = YieldingInstaller(installed=(iteration % 2 == 0))
+        orchestrator = AppOrchestrator(
+            detector=detector,
+            rpc_manager=rpc,
+            bridge_installer=installer,
+            auto_install_bridge=False,
+            sync_startup=False,
+        )
+        if installer.installed:
+            orchestrator.install_bridge_to(tmp_path)
+
+        barrier = threading.Barrier(4)
+        errors: list[BaseException] = []
+
+        def _step() -> None:
+            try:
+                barrier.wait(timeout=2.0)
+                orchestrator.step_update()
+            except BaseException as exc:
+                errors.append(exc)
+
+        def _toggle() -> None:
+            try:
+                barrier.wait(timeout=2.0)
+                orchestrator.toggle_bridge()
+            except BaseException as exc:
+                errors.append(exc)
+
+        def _install_to() -> None:
+            try:
+                barrier.wait(timeout=2.0)
+                orchestrator.install_bridge_to(tmp_path)
+            except BaseException as exc:
+                errors.append(exc)
+
+        def _stop() -> None:
+            try:
+                barrier.wait(timeout=2.0)
+                orchestrator.stop()
+            except BaseException as exc:
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=_step),
+            threading.Thread(target=_toggle),
+            threading.Thread(target=_install_to),
+            threading.Thread(target=_stop),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
+
+        assert errors == [], f"Iteration {iteration} raised errors: {errors}"
+        assert orchestrator.is_bridge_installed() == installer.installed, (
+            f"Iteration {iteration} desync: orch={orchestrator.is_bridge_installed()} "
+            f"installer={installer.installed}"
+        )
+
+    for i in range(25):
+        _run_iteration(i)
+
+
+def test_orchestrator_chaos_harness_multi_cycle_no_orphaned_threads() -> None:
+    """Runs multi-cycle chaos simulation across orchestrator, tray, clocks, and Discord pipe."""
+    from tests.harness.orchestrator_chaos_harness import OrchestratorChaosHarness
+
+    initial_threads = {t for t in threading.enumerate() if t.is_alive()}
+    with OrchestratorChaosHarness() as chaos:
+        chaos.run_chaos_cycles(cycles=50, seed=33)
+        chaos.assert_no_orphaned_threads()
+    chaos.assert_no_orphaned_threads(initial_threads=initial_threads)
+
+    with OrchestratorChaosHarness() as chaos_auto:
+        chaos_auto.orchestrator.auto_install_bridge = True
+        chaos_auto.run_chaos_cycles(cycles=20, seed=99)
+        chaos_auto.assert_no_orphaned_threads()
+    chaos_auto.assert_no_orphaned_threads(initial_threads=initial_threads)
+
+
+def test_orchestrator_chaos_harness_tray_updater_bridge_rpc_no_orphaned_threads(
+    tmp_path: Path,
+) -> None:
+    """Runs full chaos simulation combining tray actions, folder_picker DI, updater, bridge, and RPC."""
+    from tests.harness.orchestrator_chaos_harness import OrchestratorChaosHarness
+
+    from expedition33_rpc.integrations.updater import UpdateInfo, UpdateState
+
+    picked_folder = tmp_path / "CustomGameWin64"
+    picked_folder.mkdir()
+
+    initial_threads = {t for t in threading.enumerate() if t.is_alive()}
+    with OrchestratorChaosHarness() as chaos:
+        tray_with_picker = ExpeditionTrayApp(
+            orchestrator=chaos.orchestrator,
+            folder_picker=lambda: str(picked_folder),
+        )
+        tray_with_picker.icon = MagicMock()
+        chaos.orchestrator.auto_install_bridge = True
+
+        chaos.run_chaos_cycles(cycles=25, seed=77)
+
+        # Interleave tray UI actions, updater state transitions, and RPC cycles
+        chaos.session.start_game(pid=9001).enter_zone("Level_Main_OldLumiere")
+        chaos.orchestrator.step_update()
+        tray_with_picker.action_toggle_anti_spoiler()
+        tray_with_picker.action_toggle_bridge()
+        tray_with_picker.action_select_game_folder()
+
+        chaos.updater.state = UpdateState.AVAILABLE
+        chaos.updater.available_update = UpdateInfo(
+            tag_name="v9.9.9",
+            version_tuple=(9, 9, 9),
+            html_url="https://github.com/SolaneHub/Expedition33_RPC/releases/tag/v9.9.9",
+        )
+        chaos.orchestrator.on_update_check_complete(chaos.updater.available_update)
+        tray_with_picker.action_update_click()
+        assert chaos.updater.open_release_page_called is True
+
+        chaos.updater.state = UpdateState.UP_TO_DATE
+        chaos.orchestrator.step_update()
+
+        tray_with_picker.action_exit()
+        chaos.assert_no_orphaned_threads()
+    chaos.assert_no_orphaned_threads(initial_threads=initial_threads)

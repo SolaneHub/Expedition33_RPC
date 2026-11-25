@@ -17,6 +17,7 @@ from tests.harness import (
 )
 
 from expedition33_rpc.core.orchestrator import AppOrchestrator
+from expedition33_rpc.core.presence import build_presence_payload
 from expedition33_rpc.core.settings import SettingsService
 from expedition33_rpc.integrations.discord_rpc import (
     OP_CLOSE,
@@ -26,7 +27,6 @@ from expedition33_rpc.integrations.discord_rpc import (
     DiscordIPCClient,
     DiscordRPCManager,
 )
-from expedition33_rpc.ui.presentation import build_presence_payload
 from expedition33_rpc.ui.tray_app import ExpeditionTrayApp
 
 pytestmark = pytest.mark.integration

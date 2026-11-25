@@ -666,6 +666,7 @@ def test_clock_naming_uniformity() -> None:
                                 "monotonic_provider",
                                 "epoch_provider",
                                 "bridge_provider",
+                                "jitter_provider",
                             ):
                                 pytest.fail(
                                     f"Unexpected provider parameter '{param}' in {node.name}.{item.name} at {py_file.name}:{item.lineno}"
@@ -698,3 +699,332 @@ def test_orchestrator_stop_monotonic_decoupling() -> None:
                             )
 
     assert found_stop, "AppOrchestrator.stop method not found in AST"
+
+
+MODULE_TIERS: dict[str, int] = {
+    # Tier 0: Pure primitives, platform, resources, settings, timer_tracker
+    "_version": 0,
+    "core.platform": 0,
+    "core.resources": 0,
+    "core.settings": 0,
+    "detection.timer_tracker": 0,
+    # Tier 1: Static data, startup, updater
+    "detection.game_data": 1,
+    "core.startup": 1,
+    "integrations.updater": 1,
+    # Tier 2: Normalization, steam resolver
+    "detection.normalization": 2,
+    "detection.steam_resolver": 2,
+    # Tier 3: Presence, detector, save_reader
+    "core.presence": 3,
+    "detection.detector": 3,
+    "detection.save_reader": 3,
+    # Tier 4: Presentation, discord_rpc, bridge_installer
+    "ui.presentation": 4,
+    "integrations.discord_rpc": 4,
+    "integrations.bridge_installer": 4,
+    # Tier 5: Orchestration, tray, smoke, app, entrypoints, package __init__s
+    "core.orchestrator": 5,
+    "ui.tray_app": 5,
+    "core.smoke": 5,
+    "core.app": 5,
+    "__main__": 5,
+    "__init__": 5,
+    "core.__init__": 5,
+    "detection.__init__": 5,
+    "integrations.__init__": 5,
+    "ui.__init__": 5,
+}
+
+
+def _module_name_from_path(py_file: Path) -> str:
+    """Convert a path under src/expedition33_rpc/ to its dotted module name."""
+    rel = py_file.relative_to(SRC_DIR).with_suffix("")
+    return ".".join(rel.parts)
+
+
+def _is_type_checking_guard(node: ast.If) -> bool:
+    """Return True if an ast.If test is `TYPE_CHECKING` or `typing.TYPE_CHECKING`."""
+    test = node.test
+    if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
+        return True
+    return (
+        isinstance(test, ast.Attribute)
+        and test.attr == "TYPE_CHECKING"
+        and isinstance(test.value, ast.Name)
+        and test.value.id == "typing"
+    )
+
+
+def _iter_runtime_nodes(node: ast.AST) -> list[ast.AST]:
+    """Collect AST nodes excluding `if TYPE_CHECKING:` bodies."""
+    collected: list[ast.AST] = []
+    stack: list[ast.AST] = [node]
+    while stack:
+        current = stack.pop()
+        collected.append(current)
+        if isinstance(current, ast.If) and _is_type_checking_guard(current):
+            stack.extend(current.orelse)
+            continue
+        stack.extend(ast.iter_child_nodes(current))
+    return collected
+
+
+def _resolve_relative_import(importer_mod: str, level: int, target: str | None) -> str:
+    """Resolve a relative import to a dotted module name under expedition33_rpc."""
+    parts = importer_mod.split(".")
+    # Package parts of the importer
+    pkg_parts = parts[:-1]
+    if level > 1:
+        pkg_parts = pkg_parts[: len(pkg_parts) - (level - 1)]
+    if target:
+        return ".".join([*pkg_parts, target])
+    return ".".join(pkg_parts)
+
+
+def test_strict_6_tier_dag_hierarchy() -> None:
+    """Gate 6: Enforces the strict 6-Tier DAG across all modules in src/expedition33_rpc/."""
+    py_files = sorted(SRC_DIR.rglob("*.py"))
+    assert py_files, "No python files found in src/expedition33_rpc"
+
+    discovered_modules = {_module_name_from_path(f) for f in py_files}
+    unclassified = discovered_modules - set(MODULE_TIERS.keys())
+    assert not unclassified, f"Unclassified modules in MODULE_TIERS: {sorted(unclassified)}"
+
+    violations: list[str] = []
+
+    for py_file in py_files:
+        importer_mod = _module_name_from_path(py_file)
+        importer_tier = MODULE_TIERS[importer_mod]
+        tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+
+        for node in _iter_runtime_nodes(tree):
+            imported_mods: list[str] = []
+
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "expedition33_rpc":
+                        imported_mods.append("__init__")
+                    elif alias.name.startswith("expedition33_rpc."):
+                        imported_mods.append(alias.name.removeprefix("expedition33_rpc."))
+
+            elif isinstance(node, ast.ImportFrom):
+                if node.level > 0:
+                    resolved = _resolve_relative_import(importer_mod, node.level, node.module)
+                    if resolved in MODULE_TIERS:
+                        imported_mods.append(resolved)
+                    elif f"{resolved}.__init__" in MODULE_TIERS:
+                        imported_mods.append(f"{resolved}.__init__")
+                elif node.module == "expedition33_rpc":
+                    for alias in node.names:
+                        if alias.name in MODULE_TIERS:
+                            imported_mods.append(alias.name)
+                        elif f"{alias.name}.__init__" in MODULE_TIERS:
+                            imported_mods.append(f"{alias.name}.__init__")
+                        else:
+                            imported_mods.append("__init__")
+                elif node.module and node.module.startswith("expedition33_rpc."):
+                    mod_name = node.module.removeprefix("expedition33_rpc.")
+                    if mod_name in MODULE_TIERS:
+                        imported_mods.append(mod_name)
+                    elif f"{mod_name}.__init__" in MODULE_TIERS:
+                        imported_mods.append(f"{mod_name}.__init__")
+
+            for imported_mod in imported_mods:
+                if imported_mod not in MODULE_TIERS:
+                    continue
+                imported_tier = MODULE_TIERS[imported_mod]
+                if importer_tier < 5:
+                    if importer_tier <= imported_tier:
+                        violations.append(
+                            f"{importer_mod} (Tier {importer_tier}) -> {imported_mod} (Tier {imported_tier}) at line {getattr(node, 'lineno', '?')}"
+                        )
+                elif importer_tier < imported_tier:
+                    violations.append(
+                        f"{importer_mod} (Tier {importer_tier}) -> {imported_mod} (Tier {imported_tier}) at line {getattr(node, 'lineno', '?')}"
+                    )
+
+    assert not violations, "6-Tier DAG violations found:\n" + "\n".join(violations)
+
+
+def test_yagni_contract_extended() -> None:
+    """Gate 7: Forbids small_image/small_text, presentation re-exports of core.presence, and POSIX lock shims."""
+    forbidden_presence_fields = {"small_image", "small_text"}
+    violations: list[str] = []
+
+    for rel_path in ("core/presence.py", "integrations/discord_rpc.py"):
+        target = SRC_DIR / rel_path
+        tree = ast.parse(target.read_text(encoding="utf-8"), filename=str(target))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in forbidden_presence_fields:
+                violations.append(f"{rel_path}:{node.lineno} references '{node.id}'")
+            elif isinstance(node, ast.Attribute) and node.attr in forbidden_presence_fields:
+                violations.append(f"{rel_path}:{node.lineno} accesses '.{node.attr}'")
+            elif isinstance(node, ast.arg) and node.arg in forbidden_presence_fields:
+                violations.append(f"{rel_path}:{node.lineno} declares arg '{node.arg}'")
+            elif isinstance(node, ast.keyword) and node.arg in forbidden_presence_fields:
+                violations.append(f"{rel_path} passes keyword '{node.arg}'")
+            elif (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value in forbidden_presence_fields
+            ):
+                violations.append(f"{rel_path}:{node.lineno} uses literal '{node.value}'")
+
+    presentation_file = SRC_DIR / "ui" / "presentation.py"
+    pres_tree = ast.parse(
+        presentation_file.read_text(encoding="utf-8"), filename=str(presentation_file)
+    )
+    core_presence_imports: set[str] = set()
+    for node in ast.walk(pres_tree):
+        if isinstance(node, ast.ImportFrom) and node.module and "core.presence" in node.module:
+            for alias in node.names:
+                core_presence_imports.add(alias.asname or alias.name)
+    for node in ast.walk(pres_tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id == "__all__"
+                    and isinstance(node.value, (ast.List, ast.Tuple))
+                ):
+                    for elt in node.value.elts:
+                        if (
+                            isinstance(elt, ast.Constant)
+                            and isinstance(elt.value, str)
+                            and elt.value in core_presence_imports
+                        ):
+                            violations.append(
+                                f"ui/presentation.py:{node.lineno} re-exports core.presence symbol '{elt.value}' in __all__"
+                            )
+
+    platform_file = SRC_DIR / "core" / "platform.py"
+    plat_tree = ast.parse(platform_file.read_text(encoding="utf-8"), filename=str(platform_file))
+    forbidden_platform_syms = {"acquire_posix_file_lock", "release_posix_file_lock"}
+    for node in ast.walk(plat_tree):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in forbidden_platform_syms
+        ):
+            violations.append(
+                f"core/platform.py:{node.lineno} defines forbidden symbol '{node.name}'"
+            )
+
+    assert not violations, "Extended YAGNI violations found:\n" + "\n".join(violations)
+
+
+def test_timer_tracker_no_epoch_to_monotonic() -> None:
+    """Gate 8a: Asserts ZoneTimerTracker.update() never assigns epoch parameters to monotonic targets."""
+    tracker_file = SRC_DIR / "detection" / "timer_tracker.py"
+    tree = ast.parse(tracker_file.read_text(encoding="utf-8"), filename=str(tracker_file))
+
+    monotonic_targets = {"now_monotonic", "_combat_start_monotonic"}
+    found_update = False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "ZoneTimerTracker":
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == "update":
+                    found_update = True
+                    for sub in ast.walk(item):
+                        if isinstance(sub, ast.Assign):
+                            target_names = {
+                                t.id if isinstance(t, ast.Name) else t.attr
+                                for t in sub.targets
+                                if isinstance(t, (ast.Name, ast.Attribute))
+                            }
+                            if target_names & monotonic_targets:
+                                for val_node in ast.walk(sub.value):
+                                    if (
+                                        isinstance(val_node, ast.Name)
+                                        and "epoch" in val_node.id.lower()
+                                    ):
+                                        pytest.fail(
+                                            f"Epoch value '{val_node.id}' assigned to {target_names & monotonic_targets} at {tracker_file.name}:{sub.lineno}"
+                                        )
+
+    assert found_update, "ZoneTimerTracker.update method not found in AST"
+
+
+def test_core_classes_no_ambiguous_now_or_time_provider() -> None:
+    """Gate 8b: Asserts the 5 core classes never declare parameters named 'now' or 'time_provider'."""
+    target_classes = {
+        "BridgeStateProvider",
+        "GameDetector",
+        "AppOrchestrator",
+        "DiscordRPCManager",
+        "ZoneTimerTracker",
+    }
+    found_classes: set[str] = set()
+
+    for py_file in SRC_DIR.rglob("*.py"):
+        tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name in target_classes:
+                found_classes.add(node.name)
+                for item in node.body:
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        all_params = [arg.arg for arg in item.args.args + item.args.kwonlyargs]
+                        for forbidden in ("now", "time_provider"):
+                            assert forbidden not in all_params, (
+                                f"Ambiguous parameter '{forbidden}' found in {node.name}.{item.name} at {py_file.name}:{item.lineno}"
+                            )
+
+    assert found_classes == target_classes, (
+        f"Missing classes in AST search: {target_classes - found_classes}"
+    )
+
+
+def test_discord_ipc_read_exact_no_direct_monotonic() -> None:
+    """Gate 8c: Asserts DiscordIPCClient._read_exact() does not call time.monotonic() directly."""
+    rpc_file = SRC_DIR / "integrations" / "discord_rpc.py"
+    tree = ast.parse(rpc_file.read_text(encoding="utf-8"), filename=str(rpc_file))
+
+    found_method = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "DiscordIPCClient":
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == "_read_exact":
+                    found_method = True
+                    for sub in ast.walk(item):
+                        if isinstance(sub, ast.Call) and _is_time_monotonic(sub.func):
+                            pytest.fail(
+                                f"Direct time.monotonic() call in DiscordIPCClient._read_exact at {rpc_file.name}:{sub.lineno}"
+                            )
+
+    assert found_method, "DiscordIPCClient._read_exact method not found in AST"
+
+
+def test_no_raw_pipe_or_af_unix_outside_platform() -> None:
+    """Gate 9: Asserts no module outside core/platform.py opens raw 'r+b' pipes or uses socket.AF_UNIX."""
+    platform_file = (SRC_DIR / "core" / "platform.py").resolve()
+    violations: list[str] = []
+
+    for py_file in SRC_DIR.rglob("*.py"):
+        if py_file.resolve() == platform_file:
+            continue
+        tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Attribute) and node.attr == "AF_UNIX") or (
+                isinstance(node, ast.Name) and node.id == "AF_UNIX"
+            ):
+                violations.append(f"{py_file.name}:{node.lineno} references AF_UNIX")
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "open"
+            ):
+                for arg in node.args[1:2]:
+                    if isinstance(arg, ast.Constant) and arg.value == "r+b":
+                        violations.append(f"{py_file.name}:{node.lineno} calls open(..., 'r+b')")
+                for kw in node.keywords:
+                    if (
+                        kw.arg == "mode"
+                        and isinstance(kw.value, ast.Constant)
+                        and kw.value.value == "r+b"
+                    ):
+                        violations.append(
+                            f"{py_file.name}:{node.lineno} calls open(..., mode='r+b')"
+                        )
+
+    assert not violations, "Platform boundary violations found:\n" + "\n".join(violations)

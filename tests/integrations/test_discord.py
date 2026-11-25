@@ -1458,8 +1458,6 @@ def test_discord_rpc_manager_concurrent_update_presence_none_ts_and_disconnect_r
 
     t_disc = threading.Thread(target=run_disconnect)
     t_disc.start()
-    # Give disconnect() a brief moment to contend on _io_lock before resuming slow write
-    time.sleep(0.02)
     allow_resume.set()
 
     t_upd.join(timeout=5.0)

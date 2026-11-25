@@ -19,10 +19,17 @@ import pytest
 from tests.harness import (
     DiscordPipeSimulator,
     GameSessionSimulator,
+    generate_adversarial_discord_frames,
 )
 
 from expedition33_rpc.core.orchestrator import AppOrchestrator
-from expedition33_rpc.core.presence import PresencePayload
+from expedition33_rpc.core.presence import (
+    DISCORD_MAX_FIELD_LENGTH,
+    PresencePayload,
+    build_presence_payload,
+    format_presence,
+    truncate_presence_field,
+)
 from expedition33_rpc.core.settings import SettingsService
 from expedition33_rpc.detection.detector import GameState
 from expedition33_rpc.integrations.discord_rpc import (
@@ -31,16 +38,11 @@ from expedition33_rpc.integrations.discord_rpc import (
     OP_HANDSHAKE,
     OP_PING,
     OP_PONG,
+    VALID_OPCODES,
     DiscordFrameCodec,
     DiscordIPCClient,
     DiscordRPCManager,
     IPCTransport,
-)
-from expedition33_rpc.ui.presentation import (
-    DISCORD_MAX_FIELD_LENGTH,
-    build_presence_payload,
-    format_presence,
-    truncate_presence_field,
 )
 
 pytestmark = pytest.mark.integration
@@ -880,6 +882,162 @@ def test_stress_dirty_checking_fingerprint_variations() -> None:
     # Sending same long title is suppressed
     assert manager.update_presence(p_long_title, pid=1234) is True
     assert len(mock_pipe.drain_all_frames()) == 0  # Suppressed!
+
+
+# ===========================================================================
+# Area 8: Anti-OOM/DoS MAX_FRAME_LENGTH Cap & Fuzz Frame Survival
+# ===========================================================================
+
+
+class _SpyReadSizeTransport:
+    """Transport spy recording every read(n) size to prove zero oversized allocation."""
+
+    def __init__(self, incoming: bytes) -> None:
+        self._buf = bytearray(incoming)
+        self.read_sizes: list[int] = []
+        self.closed = False
+
+    def read(self, n: int) -> bytes:
+        self.read_sizes.append(n)
+        if not self._buf:
+            return b""
+        take = len(self._buf) if n < 0 else min(n, len(self._buf))
+        chunk = bytes(self._buf[:take])
+        del self._buf[:take]
+        return chunk
+
+    def write(self, data: bytes) -> int:
+        return len(data)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.unit
+def test_adversarial_max_frame_length_anti_oom_dos_before_read_allocation() -> None:
+    """Verifies MAX_FRAME_LENGTH == 1_048_576 rejects oversized frames before _read_exact allocation."""
+    assert DiscordFrameCodec.MAX_FRAME_LENGTH == 1_048_576
+
+    # 1. Exact boundary: 1_048_576 bytes succeeds in DiscordFrameCodec.decode()
+    max_body = b'{"k":"' + (b"a" * (DiscordFrameCodec.MAX_FRAME_LENGTH - 8)) + b'"}'
+    assert len(max_body) == DiscordFrameCodec.MAX_FRAME_LENGTH
+    ok_op, ok_payload = DiscordFrameCodec.decode(
+        struct.pack("<II", OP_FRAME, len(max_body)) + max_body
+    )
+    assert ok_op == OP_FRAME
+    assert len(ok_payload["k"]) == DiscordFrameCodec.MAX_FRAME_LENGTH - 8
+
+    # 2. Boundary + 1 and uint32 max rejected in DiscordFrameCodec.decode()
+    for oversized in (DiscordFrameCodec.MAX_FRAME_LENGTH + 1, 2_000_000, 0xFFFFFFFF):
+        with pytest.raises(ValueError, match="exceeds maximum allowed"):
+            DiscordFrameCodec.decode(struct.pack("<II", OP_FRAME, oversized) + b"{}")
+
+    # 3. Direct read_frame() with spy transport: MUST NOT call read(n) with n > 8
+    for hostile_len in (DiscordFrameCodec.MAX_FRAME_LENGTH + 1, 0xFFFFFFFF):
+        spy = _SpyReadSizeTransport(struct.pack("<II", OP_FRAME, hostile_len))
+        client = DiscordIPCClient(client_id="spy_client", transport=spy)
+        client._pipe = spy
+        client.is_connected = True
+
+        with pytest.raises(ValueError, match="exceeds maximum allowed"):
+            client.read_frame()
+        assert spy.read_sizes == [8]
+        assert all(sz <= DiscordFrameCodec.HEADER_SIZE for sz in spy.read_sizes)
+
+    # 4. connect(), set_activity(), and clear_activity() close pipe and return False on oversized frame
+    spy_hs = _SpyReadSizeTransport(struct.pack("<II", OP_FRAME, 0xFFFFFFFF))
+    client_hs = DiscordIPCClient(client_id="spy_hs", transport=spy_hs)
+    assert client_hs.connect() is False
+    assert client_hs.is_connected is False
+    assert spy_hs.closed is True
+    assert spy_hs.read_sizes == [8]
+
+    ready_frame = DiscordFrameCodec.encode(
+        OP_FRAME, {"cmd": "DISPATCH", "evt": "READY", "data": {}}
+    )
+    for op_name in ("set_activity", "clear_activity"):
+        spy_op = _SpyReadSizeTransport(
+            ready_frame + struct.pack("<II", OP_FRAME, DiscordFrameCodec.MAX_FRAME_LENGTH + 1)
+        )
+        client_op = DiscordIPCClient(client_id=f"spy_{op_name}", transport=spy_op)
+        assert client_op.connect() is True
+        if op_name == "set_activity":
+            ok = client_op.set_activity(pid=1234, details="Safe")
+        else:
+            ok = client_op.clear_activity(pid=1234)
+        assert ok is False
+        assert client_op.is_connected is False
+        assert spy_op.closed is True
+        assert max(spy_op.read_sizes) <= len(ready_frame) - DiscordFrameCodec.HEADER_SIZE
+
+
+@pytest.mark.unit
+def test_adversarial_fuzz_generated_frames_and_non_dict_json_survive_without_oom() -> None:
+    """Feeds deterministic adversarial frames (including non-dict JSON & 0xFFFFFFFF lengths) safely."""
+    fuzz_frames = generate_adversarial_discord_frames(count=30, seed=42)
+    for raw in fuzz_frames:
+        try:
+            op, _payload = DiscordFrameCodec.decode(raw)
+            assert op not in VALID_OPCODES
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            pass
+
+        spy = _SpyReadSizeTransport(raw)
+        client = DiscordIPCClient(client_id="fuzz_client", transport=spy)
+        assert client.connect() is False
+        assert client.is_connected is False
+        assert spy.closed is True
+        assert all(sz <= 128 for sz in spy.read_sizes)
+
+
+def test_adversarial_concurrent_connect_update_disconnect_serialized_no_deadlock() -> None:
+    """Hammer DiscordRPCManager concurrently with connect/update/disconnect/is_connected."""
+    mock_pipe = DiscordPipeSimulator(auto_respond_set_activity=True)
+    client = DiscordIPCClient(client_id="adv_conc", transport=mock_pipe)
+    manager = DiscordRPCManager(client=client)
+    payload = PresencePayload(details="Sirene", state="Exploring", start_timestamp=None)
+
+    num_threads = 8
+    barrier = threading.Barrier(num_threads)
+    errors: list[Exception] = []
+
+    def worker(idx: int) -> None:
+        try:
+            barrier.wait()
+            for step in range(25):
+                _ = manager.is_connected
+                if (idx + step) % 5 == 0:
+                    manager.disconnect()
+                elif (idx + step) % 5 == 1:
+                    manager.connect()
+                else:
+                    manager.update_presence(payload, pid=5555)
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(num_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5.0)
+        assert not t.is_alive(), "Deadlock detected in concurrent DiscordRPCManager stress test"
+
+    assert errors == []
+
+    # Final disconnect -> reconnect -> update_presence MUST emit 1 SET_ACTIVITY frame
+    manager.disconnect()
+    assert manager.last_update_state is None
+    assert manager.is_connected is False
+    mock_pipe.drain_all_frames()
+
+    assert manager.connect() is True
+    mock_pipe.drain_all_frames()
+    assert manager.update_presence(payload, pid=5555) is True
+    frames = mock_pipe.drain_all_frames()
+    assert len(frames) == 1
+    assert frames[0][0] == OP_FRAME
+    assert frames[0][1]["cmd"] == "SET_ACTIVITY"
+    assert "timestamps" not in frames[0][1]["args"]["activity"]
 
 
 # ===========================================================================

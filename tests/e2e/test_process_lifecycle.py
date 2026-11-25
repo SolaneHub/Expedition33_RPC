@@ -13,7 +13,7 @@ import pytest
 from tests.harness import FakeProcess
 
 from expedition33_rpc.core.app import main
-from expedition33_rpc.core.platform import acquire_posix_file_lock
+from expedition33_rpc.core.platform import is_already_running
 
 pytestmark = pytest.mark.integration
 
@@ -99,7 +99,7 @@ def test_posix_file_lock_subprocess_concurrency(tmp_path: Path) -> None:
         patch.dict(sys.modules, {"fcntl": mock_fcntl}),
         patch("sys.platform", "linux"),
     ):
-        locked = acquire_posix_file_lock(lock_file)
+        locked = not is_already_running(lock_path=lock_file)
         assert locked is False
         exit_code = 0 if not locked else 1
         proc2_sim = FakeProcess(pid=2002, name="python", returncode=exit_code)
@@ -117,9 +117,9 @@ def test_posix_file_lock_subprocess_concurrency(tmp_path: Path) -> None:
         holder_script = (
             "import time, sys\n"
             "from pathlib import Path\n"
-            "from expedition33_rpc.core.platform import acquire_posix_file_lock\n"
+            "from expedition33_rpc.core.platform import is_already_running\n"
             f"lock_path = Path(r'{lock_file}')\n"
-            "locked = acquire_posix_file_lock(lock_path)\n"
+            "locked = not is_already_running(lock_path=lock_path)\n"
             "assert locked is True\n"
             "print('LOCKED', flush=True)\n"
             "time.sleep(5.0)\n"
@@ -140,9 +140,9 @@ def test_posix_file_lock_subprocess_concurrency(tmp_path: Path) -> None:
             check_script = (
                 "import sys\n"
                 "from pathlib import Path\n"
-                "from expedition33_rpc.core.platform import acquire_posix_file_lock\n"
+                "from expedition33_rpc.core.platform import is_already_running\n"
                 f"lock_path = Path(r'{lock_file}')\n"
-                "locked = acquire_posix_file_lock(lock_path)\n"
+                "locked = not is_already_running(lock_path=lock_path)\n"
                 "sys.exit(0 if not locked else 1)\n"
             )
             proc2 = subprocess.run(
@@ -169,7 +169,7 @@ def test_single_instance_posix_app_subprocess(tmp_path: Path) -> None:
 
     with (
         patch("sys.platform", "linux"),
-        patch("expedition33_rpc.core.platform.acquire_posix_file_lock", return_value=False),
+        patch("expedition33_rpc.core.platform.SingleInstanceLock.acquire", return_value=False),
         pytest.raises(SystemExit) as exc_info,
     ):
         main()

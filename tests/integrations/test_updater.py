@@ -439,7 +439,7 @@ def test_stress_updater_concurrent_check_and_cancel_race() -> None:
 
         def runner_check(b: threading.Barrier = barrier, u: AppUpdater = updater) -> None:
             b.wait()
-            u.check_in_background(delay_seconds=0.05)
+            u.check_in_background(delay_seconds=0.0)
 
         def runner_cancel(b: threading.Barrier = barrier, u: AppUpdater = updater) -> None:
             b.wait()

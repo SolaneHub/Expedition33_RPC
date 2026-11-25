@@ -3,27 +3,40 @@
 from __future__ import annotations
 
 import contextlib
+import threading
 from pathlib import Path
-from unittest.mock import MagicMock
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.harness.fake_process import FakeProcess
+from tests.harness.fake_services import (
+    FakeBridgeInstaller,
+    FakeStartupService,
+    FakeUpdater,
+)
+from tests.harness.tray_harness import HeadlessTrayHarness
 
 from expedition33_rpc.core.orchestrator import AppOrchestrator
-from expedition33_rpc.core.settings import SettingsService
-from expedition33_rpc.detection.detector import GameDetector, GameState
-from expedition33_rpc.integrations.updater import UpdateInfo
-from expedition33_rpc.ui.presentation import (
+from expedition33_rpc.core.presence import (
     DISCORD_MAX_FIELD_LENGTH,
-    WIN32_MAX_TRAY_TITLE_LENGTH,
     build_presence_payload,
     format_location_name,
     format_presence,
+    truncate_presence_field,
+)
+from expedition33_rpc.core.settings import SettingsService
+from expedition33_rpc.detection.detector import GameDetector, GameState
+from expedition33_rpc.detection.normalization import (
+    is_continent_zone,
+    is_main_menu,
+)
+from expedition33_rpc.integrations.updater import UpdateInfo, UpdateState
+from expedition33_rpc.ui.presentation import (
+    WIN32_MAX_TRAY_TITLE_LENGTH,
     format_tray_combat_status,
     format_tray_title,
     format_tray_zone_status,
-    is_continent_zone,
-    is_main_menu,
-    truncate_presence_field,
 )
 from expedition33_rpc.ui.tray_app import ExpeditionTrayApp
 
@@ -815,3 +828,280 @@ def test_tray_app_handles_none_icon_gracefully(tmp_path: Path) -> None:
     state = GameState.create(is_running=True, zone_name="Lumiere")
     # Must not raise AttributeError
     app.on_orchestrator_state_change(state, anti_spoiler=False)
+
+
+def test_tray_menu_state_refreshes_on_subsystem_changes_outside_menu_lock(tmp_path: Path) -> None:
+    """Verifies menu_state refreshes on bridge/startup/updater changes under identical GameState,
+    and that _menu_lock is NEVER held while querying orchestrator subsystems.
+    """
+    app_ref: list[ExpeditionTrayApp] = []
+    lock_held_during_probe: list[bool] = []
+
+    class InspectingBridgeInstaller(FakeBridgeInstaller):
+        def is_bridge_installed(self, win64_dir: Path | str | None = None) -> bool:
+            if app_ref:
+                lock_held_during_probe.append(app_ref[0]._menu_lock.locked())
+            return super().is_bridge_installed(win64_dir)
+
+    class InspectingStartupService(FakeStartupService):
+        def is_startup_enabled(self) -> bool:
+            if app_ref:
+                lock_held_during_probe.append(app_ref[0]._menu_lock.locked())
+            return super().is_startup_enabled()
+
+    bridge = InspectingBridgeInstaller(installed=False)
+    startup = InspectingStartupService(enabled=False)
+    updater = FakeUpdater(state=UpdateState.IDLE)
+    orchestrator = AppOrchestrator(
+        detector=MagicMock(spec=GameDetector),
+        rpc_manager=MagicMock(),
+        bridge_installer=bridge,
+        startup_service=startup,
+        updater=updater,
+        auto_install_bridge=False,
+        sync_startup=False,
+        settings_service=SettingsService(tmp_path / "settings.json"),
+    )
+
+    app = ExpeditionTrayApp(orchestrator=orchestrator)
+    app_ref.append(app)
+    mock_icon = MagicMock()
+    app.icon = mock_icon
+
+    same_state = GameState.create(is_running=True, process_pid=1111, zone_name="Lumiere")
+
+    # 1. Initial notification
+    app.on_orchestrator_state_change(same_state, anti_spoiler=False)
+    assert mock_icon.update_menu.call_count == 1
+
+    # 2. Identical state & subsystems -> no redundant update_menu
+    app.on_orchestrator_state_change(same_state, anti_spoiler=False)
+    assert mock_icon.update_menu.call_count == 1
+
+    # 3. Bridge installed flips under identical GameState
+    orchestrator.toggle_bridge()
+    app.on_orchestrator_state_change(same_state, anti_spoiler=False)
+    assert mock_icon.update_menu.call_count == 2
+
+    # 4. Startup enabled flips under identical GameState
+    orchestrator.toggle_startup()
+    app.on_orchestrator_state_change(same_state, anti_spoiler=False)
+    assert mock_icon.update_menu.call_count == 3
+
+    # 5. Updater state transitions under identical GameState
+    updater.state = UpdateState.AVAILABLE
+    app.on_orchestrator_state_change(same_state, anti_spoiler=False)
+    assert mock_icon.update_menu.call_count == 4
+
+    assert lock_held_during_probe and all(held is False for held in lock_held_during_probe)
+
+
+def test_tray_menu_updates_to_installed_on_async_auto_install_completion(tmp_path: Path) -> None:
+    """End-to-end async auto-install completion refreshes tray menu label to [Installed]."""
+    install_started = threading.Event()
+    allow_install = threading.Event()
+    install_done = threading.Event()
+
+    class SignalingBridgeInstaller(FakeBridgeInstaller):
+        def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            install_started.set()
+            assert allow_install.wait(timeout=2.0)
+            res = super().install_bridge(win64_dir)
+            install_done.set()
+            return res
+
+    procs = [
+        FakeProcess(
+            pid=4321,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    ]
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: procs)
+    bridge = SignalingBridgeInstaller(installed=False)
+    orchestrator = AppOrchestrator(
+        detector=detector,
+        rpc_manager=MagicMock(),
+        bridge_installer=bridge,
+        startup_service=FakeStartupService(),
+        updater=FakeUpdater(),
+        auto_install_bridge=True,
+        sync_startup=False,
+        settings_service=SettingsService(tmp_path / "settings.json"),
+    )
+
+    app = ExpeditionTrayApp(orchestrator=orchestrator)
+    mock_icon = MagicMock()
+    app.icon = mock_icon
+    harness = HeadlessTrayHarness(menu=app.create_menu(), mock_icon=mock_icon)
+
+    assert "Combat Bridge  [Install Now]" in harness.get_labels()
+
+    try:
+        orchestrator.step_update()
+        assert install_started.wait(timeout=2.0)
+        assert mock_icon.update_menu.call_count == 1
+        assert "Combat Bridge  [Install Now]" in harness.get_labels()
+
+        allow_install.set()
+        assert install_done.wait(timeout=2.0)
+
+        # Wait briefly for _async_install to emit _notify_state_change after install_bridge returns
+        with orchestrator._bridge_lock:
+            install_thread = orchestrator._bridge_install_thread
+        if install_thread is not None:
+            install_thread.join(timeout=2.0)
+
+        assert orchestrator.is_bridge_installed() is True
+        assert mock_icon.update_menu.call_count >= 2
+        assert "Combat Bridge  [Installed]" in harness.get_labels()
+    finally:
+        allow_install.set()
+        orchestrator.stop()
+
+
+def test_tray_app_run_initializes_icon_before_orchestrator_start(tmp_path: Path) -> None:
+    """Verifies run() constructs self.icon before orchestrator.start() so early events are not lost."""
+    orchestrator = AppOrchestrator(
+        detector=MagicMock(spec=GameDetector),
+        rpc_manager=MagicMock(),
+        bridge_installer=FakeBridgeInstaller(),
+        startup_service=FakeStartupService(),
+        updater=FakeUpdater(),
+        auto_install_bridge=False,
+        sync_startup=False,
+        settings_service=SettingsService(tmp_path / "settings.json"),
+    )
+    app = ExpeditionTrayApp(orchestrator=orchestrator)
+
+    icon_seen_at_start: list[Any] = []
+    early_state = GameState.create(is_running=True, process_pid=777, zone_name="Lumiere")
+
+    def _fake_start() -> None:
+        icon_seen_at_start.append(app.icon)
+        orchestrator._notify_state_change(early_state, False)
+
+    class _FakeIcon:
+        def __init__(self, name: str, icon: Any, title: str, menu: Any) -> None:
+            self.name = name
+            self.icon = icon
+            self.title = title
+            self.menu = menu
+            self.update_menu = MagicMock()
+            self.run_called = False
+            self.stop_called = False
+
+        def run(self) -> None:
+            self.run_called = True
+
+        def stop(self) -> None:
+            self.stop_called = True
+
+    with (
+        patch.object(orchestrator, "start", side_effect=_fake_start),
+        patch("expedition33_rpc.ui.tray_app.pystray.Icon", _FakeIcon),
+    ):
+        app.run()
+
+    assert len(icon_seen_at_start) == 1
+    assert icon_seen_at_start[0] is not None
+    assert app.icon.run_called is True
+    assert "Lumiere" in app.icon.title
+    assert app._last_menu_state is not None
+    app.icon.update_menu.assert_called_once()
+
+
+def test_tray_menu_state_seq_prevents_stale_overwrite_on_concurrent_callbacks(
+    tmp_path: Path,
+) -> None:
+    """Out-of-order concurrent on_orchestrator_state_change calls must not overwrite newer state."""
+    app_ref: list[ExpeditionTrayApp] = []
+    lock_held_during_probe: list[bool] = []
+    first_probe_entered = threading.Event()
+    release_first_probe = threading.Event()
+    probe_call_count = 0
+    probe_count_lock = threading.Lock()
+
+    class GatedBridgeInstaller(FakeBridgeInstaller):
+        def is_bridge_installed(self, win64_dir: Path | str | None = None) -> bool:
+            nonlocal probe_call_count
+            if app_ref:
+                lock_held_during_probe.append(app_ref[0]._menu_lock.locked())
+            with probe_count_lock:
+                probe_call_count += 1
+                is_first = probe_call_count == 1
+            if is_first:
+                first_probe_entered.set()
+                assert release_first_probe.wait(timeout=2.0)
+            return super().is_bridge_installed(win64_dir)
+
+    class InspectingStartupService(FakeStartupService):
+        def is_startup_enabled(self) -> bool:
+            if app_ref:
+                lock_held_during_probe.append(app_ref[0]._menu_lock.locked())
+            return super().is_startup_enabled()
+
+    bridge = GatedBridgeInstaller(installed=False)
+    startup = InspectingStartupService(enabled=False)
+    updater = FakeUpdater(state=UpdateState.IDLE)
+    orchestrator = AppOrchestrator(
+        detector=MagicMock(spec=GameDetector),
+        rpc_manager=MagicMock(),
+        bridge_installer=bridge,
+        startup_service=startup,
+        updater=updater,
+        auto_install_bridge=False,
+        sync_startup=False,
+        settings_service=SettingsService(tmp_path / "settings.json"),
+    )
+
+    app = ExpeditionTrayApp(orchestrator=orchestrator)
+    app_ref.append(app)
+    mock_icon = MagicMock()
+    app.icon = mock_icon
+
+    old_state = GameState.create(is_running=True, process_pid=1001, zone_name="Lumiere")
+    new_state = GameState.create(is_running=True, process_pid=1001, zone_name="Flying Waters")
+
+    thread_a_errors: list[BaseException] = []
+
+    def _run_stale_callback() -> None:
+        try:
+            app.on_orchestrator_state_change(old_state, anti_spoiler=False)
+        except BaseException as exc:  # pragma: no cover - defensive capture
+            thread_a_errors.append(exc)
+
+    def _probe_bridge(force_probe: bool = False) -> bool:
+        del force_probe
+        return bridge.is_bridge_installed(orchestrator.current_state.win64_dir)
+
+    thread_a = threading.Thread(target=_run_stale_callback, daemon=True)
+    with patch.object(orchestrator, "is_bridge_installed", side_effect=_probe_bridge):
+        try:
+            thread_a.start()
+            assert first_probe_entered.wait(timeout=2.0)
+
+            # Newer state arrives and commits while Thread A is paused outside _menu_lock
+            bridge.installed = True
+            app.on_orchestrator_state_change(new_state, anti_spoiler=False)
+
+            assert app._applied_menu_seq == 2
+            assert app._last_menu_state is not None
+            assert app._last_menu_state[2] == "Flying Waters"
+            assert app._last_menu_state[12] is True
+            expected_title = format_tray_title(new_state, anti_spoiler=False)
+            assert mock_icon.title == expected_title
+        finally:
+            release_first_probe.set()
+            thread_a.join(timeout=2.0)
+
+    assert not thread_a_errors
+    assert app._applied_menu_seq == 2
+    assert app._last_menu_state is not None
+    assert app._last_menu_state[2] == "Flying Waters"
+    assert app._last_menu_state[12] is True
+    assert mock_icon.title == expected_title
+    assert mock_icon.update_menu.call_count == 1
+    assert len(lock_held_during_probe) >= 2
+    assert all(held is False for held in lock_held_during_probe)

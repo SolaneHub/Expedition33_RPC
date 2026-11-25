@@ -320,10 +320,12 @@ def test_native_game_data_structures_at_module_load() -> None:
     assert "sandfall-win64-shipping.exe" in TARGET_PROCESS_NAMES
     assert "sandfall-wingdk-shipping.exe" in TARGET_PROCESS_NAMES
     assert isinstance(MAIN_MENU_TOKENS, frozenset)
-    assert isinstance(ZONE_NAME_OVERRIDES_BY_LANG, dict)
-    assert isinstance(CHECKPOINT_NAMES_BY_LANG, dict)
-    assert isinstance(CONTEXTUAL_CHECKPOINTS, list)
-    assert isinstance(ENDLESS_TOWER_TRIALS, list)
+    from collections.abc import Mapping
+
+    assert isinstance(ZONE_NAME_OVERRIDES_BY_LANG, Mapping)
+    assert isinstance(CHECKPOINT_NAMES_BY_LANG, Mapping)
+    assert isinstance(CONTEXTUAL_CHECKPOINTS, tuple)
+    assert isinstance(ENDLESS_TOWER_TRIALS, tuple)
 
     import expedition33_rpc.detection as detection
     import expedition33_rpc.detection.game_data as gd
