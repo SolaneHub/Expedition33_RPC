@@ -119,13 +119,19 @@ class AppOrchestrator:
         self.settings_service = (
             settings_service if settings_service is not None else SettingsService()
         )
-        self.detector = (
-            detector if detector is not None else GameDetector(save_reader=SaveFileReader())
-        )
         self.monotonic_provider = (
             monotonic_provider if monotonic_provider is not None else time.monotonic
         )
         self.epoch_provider = epoch_provider if epoch_provider is not None else time.time
+        self.detector = (
+            detector
+            if detector is not None
+            else GameDetector(
+                save_reader=SaveFileReader(),
+                monotonic_provider=self.monotonic_provider,
+                epoch_provider=self.epoch_provider,
+            )
+        )
         self.updater: UpdaterProtocol = updater if updater is not None else AppUpdater()
         self.bridge_installer: BridgeInstallerProtocol = (
             bridge_installer if bridge_installer is not None else bridge_installer_module
@@ -154,10 +160,15 @@ class AppOrchestrator:
             if self.rpc_manager.is_stopping is None:
                 self.rpc_manager.is_stopping = self._is_stopping
         else:
-            self.rpc_manager = DiscordRPCManager(is_stopping=self._is_stopping)
+            self.rpc_manager = DiscordRPCManager(
+                is_stopping=self._is_stopping,
+                monotonic_provider=self.monotonic_provider,
+                epoch_provider=self.epoch_provider,
+            )
 
         self._subscribers_lock = threading.Lock()
         self._bridge_lock = threading.Lock()
+        self._bridge_io_lock = threading.Lock()
         self._state_subscribers: list[Callable[[GameState, bool], None]] = []
         self._update_available_subscribers: list[Callable[[UpdateInfo], None]] = []
 
@@ -174,6 +185,7 @@ class AppOrchestrator:
         self._bridge_install_thread: threading.Thread | None = None
 
         self._bridge_installed: bool = False
+        self._bridge_state_seq: int = 0
 
         if self.sync_startup:
             self.startup_service.sync_startup_path()
@@ -228,52 +240,68 @@ class AppOrchestrator:
         """Atomically installs the bridge to the specified folder and updates internal state."""
         try:
             target_path = Path(folder) if isinstance(folder, str) else folder
-            success, msg = self.bridge_installer.install_bridge(target_path)
-            if success:
-                with self._bridge_lock:
-                    self._bridge_installed = True
-            return success, msg
+            with self._bridge_io_lock:
+                success, msg = self.bridge_installer.install_bridge(target_path)
+                if success:
+                    with self._bridge_lock:
+                        self._bridge_installed = True
+                        self._bridge_state_seq += 1
+                return success, msg
         except Exception as e:
             return False, f"Bridge installation error: {e}"
 
+    def _notify_state_change(self, state: GameState, anti_spoiler: bool) -> None:
+        """Snapshots state subscribers under lock and invokes callbacks outside lock."""
+        with self._subscribers_lock:
+            subs = list(self._state_subscribers)
+
+        for sub in subs:
+            try:
+                sub(state, anti_spoiler)
+            except Exception as e:
+                logger.error("State subscriber error: %s", e)
+
     def check_and_auto_install_bridge(
         self,
-        now: float | None = None,
+        now_monotonic: float | None = None,
         known_win64_dir: str | None = None,
         known_exe_path: str | None = None,
     ) -> bool:
         """Checks game installation directory and automatically deploys the bridge mod with deterministic cooldown."""
-        current_time = self.monotonic_provider() if now is None else now
-        with self._bridge_lock:
-            if current_time - self.last_bridge_install_attempt < self.bridge_install_cooldown:
-                return False
-            self.last_bridge_install_attempt = current_time
+        current_time = self.monotonic_provider() if now_monotonic is None else now_monotonic
+        with self._bridge_io_lock:
+            with self._bridge_lock:
+                if current_time - self.last_bridge_install_attempt < self.bridge_install_cooldown:
+                    return False
+                self.last_bridge_install_attempt = current_time
 
-        try:
-            target_dir = known_win64_dir or (
-                str(self.current_state.win64_dir) if self.current_state.win64_dir else None
-            )
-            target_exe = known_exe_path or self.current_state.exe_path
-            game_dir = self.bridge_installer.find_game_win64_directory(
-                known_win64_dir=target_dir, known_exe_path=target_exe
-            )
-            if game_dir:
-                if self.bridge_installer.is_bridge_installed(game_dir):
-                    with self._bridge_lock:
-                        self._bridge_installed = True
-                    return True
+            try:
+                target_dir = known_win64_dir or (
+                    str(self.current_state.win64_dir) if self.current_state.win64_dir else None
+                )
+                target_exe = known_exe_path or self.current_state.exe_path
+                game_dir = self.bridge_installer.find_game_win64_directory(
+                    known_win64_dir=target_dir, known_exe_path=target_exe
+                )
+                if game_dir:
+                    if self.bridge_installer.is_bridge_installed(game_dir):
+                        with self._bridge_lock:
+                            self._bridge_installed = True
+                            self._bridge_state_seq += 1
+                        return True
 
-                success, msg = self.bridge_installer.install_bridge(game_dir)
-                if success:
-                    with self._bridge_lock:
-                        self._bridge_installed = True
-                    logger.info("Automatically deployed Combat Bridge to: %s", game_dir)
-                    return True
-                else:
-                    logger.error("Combat Bridge auto-install failed: %s", msg)
-        except Exception as e:
-            logger.error("Bridge auto-install check failed: %s", e)
-        return False
+                    success, msg = self.bridge_installer.install_bridge(game_dir)
+                    if success:
+                        with self._bridge_lock:
+                            self._bridge_installed = True
+                            self._bridge_state_seq += 1
+                        logger.info("Automatically deployed Combat Bridge to: %s", game_dir)
+                        return True
+                    else:
+                        logger.error("Combat Bridge auto-install failed: %s", msg)
+            except Exception as e:
+                logger.error("Bridge auto-install check failed: %s", e)
+            return False
 
     def step_update(self) -> GameState | None:
         """Executes a single synchronous telemetry polling and presence update tick."""
@@ -305,27 +333,33 @@ class AppOrchestrator:
                 )
             )
 
-            if is_new_process:
+            if is_new_process and self.auto_install_bridge:
+                self._notify_state_change(state, anti_spoiler)
                 target_dir = state.win64_dir
-                if self.auto_install_bridge:
+                now_val = self.monotonic_provider()
+                win64_dir_str = str(target_dir) if target_dir else None
+                exe_path_val = state.exe_path
+
+                def _async_install() -> None:
+                    try:
+                        installed = self.check_and_auto_install_bridge(
+                            now_monotonic=now_val,
+                            known_win64_dir=win64_dir_str,
+                            known_exe_path=exe_path_val,
+                        )
+                        if installed and not self._is_stopping():
+                            self._notify_state_change(
+                                self.current_state,
+                                self.settings_service.is_anti_spoiler_enabled(),
+                            )
+                    except Exception as e:
+                        logger.error("Combat Bridge async auto-install failed: %s", e)
+
+                with self._bridge_lock:
                     is_installing = bool(
                         self._bridge_install_thread and self._bridge_install_thread.is_alive()
                     )
-                    if not is_installing:
-                        now_val = self.monotonic_provider()
-                        win64_dir_str = str(target_dir) if target_dir else None
-                        exe_path_val = state.exe_path
-
-                        def _async_install() -> None:
-                            try:
-                                self.check_and_auto_install_bridge(
-                                    now=now_val,
-                                    known_win64_dir=win64_dir_str,
-                                    known_exe_path=exe_path_val,
-                                )
-                            except Exception as e:
-                                logger.error("Combat Bridge async auto-install failed: %s", e)
-
+                    if not is_installing and not self._is_stopping():
                         install_thread = threading.Thread(
                             target=_async_install,
                             name="BridgeAutoInstallerThread",
@@ -333,21 +367,18 @@ class AppOrchestrator:
                         )
                         self._bridge_install_thread = install_thread
                         install_thread.start()
-                else:
-                    with contextlib.suppress(Exception), self._bridge_lock:
-                        self._bridge_installed = self.bridge_installer.is_bridge_installed(
-                            target_dir
-                        )
+            else:
+                if is_new_process:
+                    target_dir = state.win64_dir
+                    with contextlib.suppress(Exception):
+                        with self._bridge_lock:
+                            seq_before = self._bridge_state_seq
+                        installed = self.bridge_installer.is_bridge_installed(target_dir)
+                        with self._bridge_lock:
+                            if self._bridge_state_seq == seq_before:
+                                self._bridge_installed = installed
 
-            # Notify subscribed listeners under lock snapshot
-            with self._subscribers_lock:
-                subs = list(self._state_subscribers)
-
-            for sub in subs:
-                try:
-                    sub(state, anti_spoiler)
-                except Exception as e:
-                    logger.error("State subscriber error: %s", e)
+                self._notify_state_change(state, anti_spoiler)
 
             return state
         except Exception as e:
@@ -397,12 +428,11 @@ class AppOrchestrator:
                 self.worker_thread.join(timeout=max(0.0, deadline - self.monotonic_provider()))
             self.worker_thread = None
 
-        if self._bridge_install_thread is not None:
-            if self._bridge_install_thread is not current:
-                self._bridge_install_thread.join(
-                    timeout=max(0.0, deadline - self.monotonic_provider())
-                )
+        with self._bridge_lock:
+            install_thread = self._bridge_install_thread
             self._bridge_install_thread = None
+        if install_thread is not None and install_thread is not current:
+            install_thread.join(timeout=max(0.0, deadline - self.monotonic_provider()))
 
         with contextlib.suppress(Exception):
             self.updater.cancel()
@@ -421,9 +451,12 @@ class AppOrchestrator:
         """Checks if the UE4SS Lua bridge mod is installed from in-memory cache in O(1)."""
         if force_probe:
             with contextlib.suppress(Exception):
+                with self._bridge_lock:
+                    seq_before = self._bridge_state_seq
                 installed = self.bridge_installer.is_bridge_installed(self.current_state.win64_dir)
                 with self._bridge_lock:
-                    self._bridge_installed = installed
+                    if self._bridge_state_seq == seq_before:
+                        self._bridge_installed = installed
         with self._bridge_lock:
             return self._bridge_installed
 
@@ -433,18 +466,25 @@ class AppOrchestrator:
 
     def toggle_bridge(self) -> bool:
         """Installs or uninstalls the UE4SS Lua bridge mod."""
-        with self._bridge_lock:
-            self.last_bridge_install_attempt = -float("inf")
+        with self._bridge_io_lock:
+            with self._bridge_lock:
+                self.last_bridge_install_attempt = -float("inf")
+                currently_installed = self._bridge_installed
             target_dir = self.current_state.win64_dir
-            if self._bridge_installed:
-                self.bridge_installer.uninstall_bridge(target_dir)
-                self._bridge_installed = False
-                return False
+            if currently_installed:
+                success, _msg = self.bridge_installer.uninstall_bridge(target_dir)
+                with self._bridge_lock:
+                    if success:
+                        self._bridge_installed = False
+                        self._bridge_state_seq += 1
+                    return self._bridge_installed
             else:
                 success, _msg = self.bridge_installer.install_bridge(target_dir)
-                if success:
-                    self._bridge_installed = True
-                return success
+                with self._bridge_lock:
+                    if success:
+                        self._bridge_installed = True
+                        self._bridge_state_seq += 1
+                    return self._bridge_installed
 
     def toggle_startup(self) -> bool:
         """Toggles Windows autostart configuration."""

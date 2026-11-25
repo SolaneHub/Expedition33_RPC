@@ -12,15 +12,10 @@ if TYPE_CHECKING:
     from expedition33_rpc.detection.detector import GameState
 
 from expedition33_rpc.core.presence import (
-    DISCORD_MAX_FIELD_LENGTH,
-    build_presence_payload,
     format_location_name,
-    format_presence,
     get_presentation_strings,
-    truncate_presence_field,
 )
 from expedition33_rpc.detection.normalization import (
-    is_continent_zone,
     is_main_menu,
     normalize_language_code,
     resolve_menu_substate,
@@ -106,15 +101,7 @@ def format_tray_combat_status(game_state: GameState, anti_spoiler: bool = False)
 
 
 __all__ = [
-    "DISCORD_MAX_FIELD_LENGTH",
     "WIN32_MAX_TRAY_TITLE_LENGTH",
-    "get_presentation_strings",
-    "truncate_presence_field",
-    "format_presence",
-    "build_presence_payload",
-    "format_location_name",
-    "is_main_menu",
-    "is_continent_zone",
     "format_tray_title",
     "format_tray_zone_status",
     "format_tray_combat_status",

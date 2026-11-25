@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import contextlib
 import os
 import shutil
 import zipfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import psutil
 
@@ -35,24 +34,8 @@ def _find_win64_from_running_processes(
 
     for proc in procs:
         try:
-            name: str | None = None
-            exe_path: str | None = None
-
-            # 1. Check proc.info dict (psutil.process_iter or legacy mock)
-            if hasattr(proc, "info") and isinstance(proc.info, dict):
-                proc_info = cast(dict[str, Any], proc.info)
-                info_name: Any = proc_info.get("name")
-                info_exe: Any = proc_info.get("exe")
-                if isinstance(info_name, str):
-                    name = info_name
-                if isinstance(info_exe, str):
-                    exe_path = info_exe
-
-            # 2. Check ProcessLike methods if not found in info
-            if not isinstance(name, str) and callable(getattr(proc, "name", None)):
-                name = proc.name()
-            if not isinstance(exe_path, str) and callable(getattr(proc, "exe", None)):
-                exe_path = proc.exe()
+            name: str | None = proc.name() if callable(getattr(proc, "name", None)) else None
+            exe_path: str | None = proc.exe() if callable(getattr(proc, "exe", None)) else None
 
             if name and name.lower() in target_names and exe_path and os.path.exists(exe_path):
                 target_dir = os.path.dirname(os.path.abspath(exe_path))
@@ -82,12 +65,6 @@ def find_game_win64_directory(
         )
         if os.path.isdir(candidate):
             return candidate
-    if (
-        target_process_names
-        and isinstance(target_process_names, str)
-        and os.path.isdir(target_process_names)
-    ):
-        return os.path.normpath(target_process_names)
 
     target_names: set[str] = set()
     if target_process_names is not None:
@@ -139,6 +116,25 @@ def _update_mods_txt_for_install(mods_txt_path: str) -> None:
     os.makedirs(os.path.dirname(mods_txt_path), exist_ok=True)
     with open(mods_txt_path, "w", encoding="utf-8") as f:
         f.write(f"{target_mod} : 1\n")
+
+
+def _has_other_active_mods(mods_txt_path: str) -> bool:
+    """Returns True if mods.txt contains active mods other than Expedition33RPC."""
+    target_mod = "Expedition33RPC"
+    if not os.path.exists(mods_txt_path):
+        return False
+    try:
+        with open(mods_txt_path, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                parts = line.split(":", 1)
+                name = parts[0].strip()
+                if name.lower() == target_mod.lower():
+                    continue
+                if len(parts) > 1 and parts[1].strip() == "1":
+                    return True
+    except Exception:
+        pass
+    return False
 
 
 def _update_mods_txt_for_uninstall(mods_txt_path: str) -> bool:
@@ -238,20 +234,45 @@ def uninstall_bridge(win64_dir: Path | str | None = None) -> tuple[bool, str]:
         return False, "Game directory not found."
 
     try:
-        mods_txt = os.path.join(target_dir, "ue4ss", "Mods", "mods.txt")
-        other_mods_exist = _update_mods_txt_for_uninstall(mods_txt)
-
         mod_dir = os.path.join(target_dir, "ue4ss", "Mods", "Expedition33RPC")
         if os.path.exists(mod_dir):
-            shutil.rmtree(mod_dir, ignore_errors=True)
+            try:
+                shutil.rmtree(mod_dir)
+            except (PermissionError, OSError) as exc:
+                return (
+                    False,
+                    f"Failed to remove '{mod_dir}': {exc}. Please close the game if it is running.",
+                )
+
+        if os.path.exists(mod_dir):
+            return (
+                False,
+                f"Failed to remove '{mod_dir}': target still exists on disk. "
+                "Please close the game if it is running.",
+            )
+
+        mods_txt = os.path.join(target_dir, "ue4ss", "Mods", "mods.txt")
+        other_mods_exist = _has_other_active_mods(mods_txt)
 
         # Only remove injection proxy DLL if no other active mods depend on UE4SS
-        if not other_mods_exist:
-            dwmapi = os.path.join(target_dir, "dwmapi.dll")
-            if os.path.exists(dwmapi):
-                with contextlib.suppress(OSError):
-                    os.remove(dwmapi)
+        dwmapi = os.path.join(target_dir, "dwmapi.dll")
+        if not other_mods_exist and os.path.exists(dwmapi):
+            try:
+                os.remove(dwmapi)
+            except (PermissionError, OSError) as exc:
+                return (
+                    False,
+                    f"Failed to remove '{dwmapi}': {exc}. Please close the game if it is running.",
+                )
 
+        if not other_mods_exist and os.path.exists(dwmapi):
+            return (
+                False,
+                f"Failed to remove '{dwmapi}': target still exists on disk. "
+                "Please close the game if it is running.",
+            )
+
+        _update_mods_txt_for_uninstall(mods_txt)
         return True, "Bridge uninstalled successfully."
     except Exception as e:
         return False, f"Error during uninstallation: {e}"

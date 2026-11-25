@@ -41,12 +41,16 @@ class ExpeditionTrayApp:
     def __init__(
         self,
         orchestrator: AppOrchestrator | None = None,
+        folder_picker: Callable[[], str | None] | None = None,
     ) -> None:
         self._menu_lock = threading.Lock()
         self._tray_workers_lock = threading.Lock()
         self._tray_workers: list[threading.Thread] = []
         self.icon: Any = None
         self._last_menu_state: tuple[Any, ...] | None = None
+        self._menu_state_seq: int = 0
+        self._applied_menu_seq: int = 0
+        self._folder_picker: Callable[[], str | None] | None = folder_picker
 
         self.orchestrator = orchestrator if orchestrator is not None else AppOrchestrator()
         self._unsubscribe_state: Callable[[], None] | None = (
@@ -62,7 +66,11 @@ class ExpeditionTrayApp:
                 self.icon.update_menu()
 
     def on_orchestrator_state_change(self, state: GameState, anti_spoiler: bool) -> None:
-        if self.icon is not None:
+        icon = self.icon
+        if icon is not None:
+            with self._menu_lock:
+                self._menu_state_seq += 1
+                seq = self._menu_state_seq
             menu_state = (
                 state.is_running,
                 state.process_pid,
@@ -76,15 +84,21 @@ class ExpeditionTrayApp:
                 state.checkpoint_name,
                 self.orchestrator.rpc_manager.is_connected,
                 anti_spoiler,
+                self.orchestrator.is_bridge_installed(),
+                self.orchestrator.is_startup_enabled(),
+                self.orchestrator.updater.state,
             )
             with self._menu_lock:
+                if seq <= self._applied_menu_seq:
+                    return
+                self._applied_menu_seq = seq
                 if menu_state != self._last_menu_state:
                     self._last_menu_state = menu_state
                     with contextlib.suppress(Exception):
-                        self.icon.update_menu()
+                        icon.update_menu()
 
                 with contextlib.suppress(Exception):
-                    self.icon.title = format_tray_title(state, anti_spoiler=anti_spoiler)
+                    icon.title = format_tray_title(state, anti_spoiler=anti_spoiler)
 
     def on_update_available(self, update_info: UpdateInfo) -> None:
         if self.icon is not None:
@@ -152,8 +166,12 @@ class ExpeditionTrayApp:
                 return
 
             def _async_toggle() -> None:
-                self.orchestrator.toggle_bridge()
-                self._safe_update_menu()
+                try:
+                    self.orchestrator.toggle_bridge()
+                except Exception as e:
+                    logger.error("[TrayApp] Bridge toggle failed: %s", e)
+                finally:
+                    self._safe_update_menu()
 
             thread = threading.Thread(
                 target=_async_toggle, name="TrayToggleBridgeWorker", daemon=True
@@ -197,6 +215,12 @@ class ExpeditionTrayApp:
                 thread.start()
 
     def prompt_folder_selection(self) -> str | None:
+        if self._folder_picker is not None:
+            try:
+                return self._folder_picker()
+            except Exception as e:
+                logger.warning("[TrayApp] Folder picker failed: %s", e)
+                return None
         return prompt_folder_selection()
 
     def menu_startup_toggle(self, *_args: object) -> str:
@@ -225,10 +249,13 @@ class ExpeditionTrayApp:
         with self._tray_workers_lock:
             workers = list(self._tray_workers)
         current = threading.current_thread()
-        for worker in workers:
-            if worker.is_alive() and worker is not current:
+        pending = [w for w in workers if w.is_alive() and w is not current]
+        if pending:
+            deadline = self.orchestrator.monotonic_provider() + 1.0
+            for worker in pending:
+                remaining = max(0.0, deadline - self.orchestrator.monotonic_provider())
                 with contextlib.suppress(Exception):
-                    worker.join(timeout=0.5)
+                    worker.join(timeout=remaining)
 
         self.orchestrator.stop()
         if self.icon is not None:
@@ -256,7 +283,6 @@ class ExpeditionTrayApp:
         )
 
     def run(self) -> None:
-        self.orchestrator.start()
         img = self.get_icon_image()
         self.icon = pystray.Icon(
             name="Expedition33RPC",
@@ -264,6 +290,7 @@ class ExpeditionTrayApp:
             title="Expedition 33 Discord RPC",
             menu=self.create_menu(),
         )
+        self.orchestrator.start()
         if self.icon is not None:
             self.icon.run()
 

@@ -11,14 +11,13 @@ import json
 import logging
 import os
 import random
-import socket
 import struct
 import sys
 import threading
 import time
 import uuid
 from collections.abc import Callable
-from typing import Any, BinaryIO, Protocol
+from typing import Any, BinaryIO, Protocol, cast
 
 import expedition33_rpc.core.platform as platform
 from expedition33_rpc.core.presence import PresencePayload, truncate_presence_field
@@ -40,6 +39,7 @@ class DiscordFrameCodec:
 
     HEADER_SIZE: int = 8
     HEADER_FORMAT: str = "<II"
+    MAX_FRAME_LENGTH: int = 1_048_576
 
     @classmethod
     def encode(cls, op: int, payload: dict[str, Any]) -> bytes:
@@ -54,6 +54,10 @@ class DiscordFrameCodec:
         if len(data) < cls.HEADER_SIZE:
             raise ValueError(f"Insufficient data for frame header: {len(data)} < {cls.HEADER_SIZE}")
         op, length = struct.unpack(cls.HEADER_FORMAT, data[: cls.HEADER_SIZE])
+        if length > cls.MAX_FRAME_LENGTH:
+            raise ValueError(
+                f"Discord IPC frame length {length} exceeds maximum allowed {cls.MAX_FRAME_LENGTH}"
+            )
         if len(data) < cls.HEADER_SIZE + length:
             raise ValueError(
                 f"Truncated frame payload: expected {length} bytes, got {len(data) - cls.HEADER_SIZE}"
@@ -61,7 +65,12 @@ class DiscordFrameCodec:
         body = data[cls.HEADER_SIZE : cls.HEADER_SIZE + length]
         if not body:
             return op, {}
-        return op, json.loads(body.decode("utf-8"))
+        decoded: Any = json.loads(body.decode("utf-8"))
+        if not isinstance(decoded, dict):
+            raise ValueError(
+                f"Expected JSON object payload in Discord IPC frame, got {type(decoded).__name__}"
+            )
+        return op, cast(dict[str, Any], decoded)
 
     @classmethod
     def decode_header(cls, header_bytes: bytes | bytearray) -> tuple[int, int]:
@@ -92,13 +101,17 @@ class DiscordIPCClient:
         custom_pipe_path: str | None = None,
         transport: IPCTransport | None = None,
         timeout: float = 2.0,
+        monotonic_provider: Callable[[], float] | None = None,
     ):
         self.client_id = client_id
         self.custom_pipe_path = custom_pipe_path
         self._transport: IPCTransport | None = transport
         self.timeout = timeout
+        self.monotonic_provider: Callable[[], float] = (
+            monotonic_provider if monotonic_provider is not None else time.monotonic
+        )
         self._pipe: IPCTransport | BinaryIO | None = None
-        self._sock: socket.socket | None = None
+        self._sock: Any = None
         self.is_connected: bool = False
         self._lock = threading.RLock()
 
@@ -137,11 +150,18 @@ class DiscordIPCClient:
         if not self._pipe:
             raise ConnectionError("Not connected to Discord IPC pipe")
         buf = bytearray()
-        deadline = time.monotonic() + self.timeout
+        deadline = self.monotonic_provider() + self.timeout
         while len(buf) < n:
+            now = self.monotonic_provider()
+            if len(buf) > 0 and now >= deadline:
+                raise TimeoutError(f"Discord IPC read timed out after {self.timeout}s")
             remaining = n - len(buf)
-            remaining_time = max(0.0, deadline - time.monotonic())
-            if not platform.peek_named_pipe_ready(self._pipe, timeout=remaining_time):
+            remaining_time = max(0.0, deadline - now)
+            if not platform.peek_named_pipe_ready(
+                self._pipe,
+                timeout=remaining_time,
+                monotonic_provider=self.monotonic_provider,
+            ):
                 raise TimeoutError(f"Discord IPC read timed out after {self.timeout}s")
 
             chunk = self._pipe.read(remaining)
@@ -155,6 +175,11 @@ class DiscordIPCClient:
             while True:
                 header = self._read_exact(DiscordFrameCodec.HEADER_SIZE)
                 _op, length = DiscordFrameCodec.decode_header(header)
+                if length > DiscordFrameCodec.MAX_FRAME_LENGTH:
+                    raise ValueError(
+                        f"Discord IPC frame length {length} exceeds maximum allowed "
+                        f"{DiscordFrameCodec.MAX_FRAME_LENGTH}"
+                    )
                 body = self._read_exact(length)
                 op, payload = DiscordFrameCodec.decode(header + body)
 
@@ -191,19 +216,21 @@ class DiscordIPCClient:
                     self.close()
                     return False
 
+            if self._pipe is not None or self._sock is not None:
+                self.close()
+
             num_attempts = attempts if attempts is not None else (5 if self.custom_pipe_path else 1)
             for path in self._candidate_pipe_paths():
                 for attempt in range(num_attempts):
-                    sock: socket.socket | None = None
+                    sock: Any = None
                     try:
-                        if sys.platform == "win32":
-                            pipe: IPCTransport | BinaryIO = open(path, "r+b", buffering=0)
-                        else:
-                            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                            sock.settimeout(self.timeout)
-                            sock.connect(path)
-                            pipe = sock.makefile("rwb", buffering=0)
+                        opened: Any = platform.open_discord_pipe(path, timeout=self.timeout)
+                        if hasattr(opened, "makefile"):
+                            sock = opened
+                            pipe: IPCTransport | BinaryIO = opened.makefile("rwb", buffering=0)
                             self._sock = sock
+                        else:
+                            pipe = opened
                         self._pipe = pipe
 
                         # Handshake
@@ -223,6 +250,12 @@ class DiscordIPCClient:
                         if attempt < num_attempts - 1:
                             time.sleep(0.025)
                         continue
+                    except Exception:
+                        if sock is not None:
+                            with contextlib.suppress(Exception):
+                                sock.close()
+                        self.close()
+                        raise
 
             return False
 
@@ -251,8 +284,6 @@ class DiscordIPCClient:
         start_timestamp: int | None = None,
         large_image: str | None = "logo",
         large_text: str | None = "Clair Obscur: Expedition 33",
-        small_image: str | None = None,
-        small_text: str | None = None,
     ) -> bool:
         """Sends a SET_ACTIVITY frame to Discord atomically."""
         assets: dict[str, Any] = {}
@@ -260,10 +291,6 @@ class DiscordIPCClient:
             assets["large_image"] = large_image
         if large_text:
             assets["large_text"] = large_text
-        if small_image:
-            assets["small_image"] = small_image
-        if small_text:
-            assets["small_text"] = small_text
 
         activity: dict[str, Any] = {
             "state": state,
@@ -284,7 +311,12 @@ class DiscordIPCClient:
         with self._lock:
             try:
                 self._send(OP_FRAME, payload)
-                _op, _resp = self._recv()
+                _op, resp = self._recv()
+                if isinstance(resp, dict) and resp.get("evt") == "ERROR":
+                    logger.error("Discord IPC SET_ACTIVITY error: %s", resp.get("data", resp))
+                    if self._transport is None:
+                        self.close()
+                    return False
                 return True
             except Exception:
                 self.close()
@@ -303,7 +335,12 @@ class DiscordIPCClient:
         with self._lock:
             try:
                 self._send(OP_FRAME, payload)
-                _op, _resp = self._recv()
+                _op, resp = self._recv()
+                if isinstance(resp, dict) and resp.get("evt") == "ERROR":
+                    logger.error("Discord IPC clear_activity error: %s", resp.get("data", resp))
+                    if self._transport is None:
+                        self.close()
+                    return False
                 return True
             except Exception:
                 self.close()
@@ -321,18 +358,25 @@ class DiscordRPCManager:
         is_stopping: Callable[[], bool] | None = None,
         monotonic_provider: Callable[[], float] | None = None,
         epoch_provider: Callable[[], float] | None = None,
+        jitter_provider: Callable[[float, float], float] | None = None,
     ) -> None:
         self.client_id: str = EMBEDDED_CLIENT_ID
-        self._is_injected_client: bool = client is not None
-        self._client: DiscordIPCClient = (
-            client if client is not None else DiscordIPCClient(self.client_id)
-        )
         self.monotonic_provider: Callable[[], float] = (
             monotonic_provider if monotonic_provider is not None else time.monotonic
         )
         self.epoch_provider: Callable[[], float] = (
             epoch_provider if epoch_provider is not None else time.time
         )
+        self.jitter_provider: Callable[[float, float], float] = (
+            jitter_provider if jitter_provider is not None else random.uniform
+        )
+        self._is_injected_client: bool = client is not None
+        self._client: DiscordIPCClient = (
+            client
+            if client is not None
+            else DiscordIPCClient(self.client_id, monotonic_provider=self.monotonic_provider)
+        )
+        self._io_lock = threading.RLock()
         self._state_lock = threading.Lock()
         self.last_update_state: str | None = None
         self.last_retry_time: float = 0.0
@@ -374,7 +418,9 @@ class DiscordRPCManager:
                 self._client = client
             else:
                 self._is_injected_client = False
-                self._client = DiscordIPCClient(self.client_id)
+                self._client = DiscordIPCClient(
+                    self.client_id, monotonic_provider=self.monotonic_provider
+                )
 
     @property
     def is_connected(self) -> bool:
@@ -385,72 +431,99 @@ class DiscordRPCManager:
         if self.is_stopping is not None and self.is_stopping():
             return False
 
-        with self._state_lock:
-            if self._client.is_connected:
-                return True
+        with self._io_lock:
+            if self.is_stopping is not None and self.is_stopping():
+                return False
 
-            now = self.monotonic_provider()
-            if self._retry_failures > 0 and self.last_retry_time != 0.0:
-                delay = min(
-                    30.0, self.base_retry_interval * (2 ** max(0, self._retry_failures - 1))
-                )
-                if self._retry_failures > 1:
-                    delay += random.uniform(0.0, 0.5)
-                if now - self.last_retry_time < delay:
-                    return False
-
-            client = self._client
-            is_injected = self._is_injected_client
-
-        try:
-            if not is_injected and not client.is_connected:
-                new_client = DiscordIPCClient(self.client_id)
-                with self._state_lock:
-                    if not self._is_injected_client:
-                        self._client = new_client
-                        client = new_client
-            res = client.connect()
-            connected = bool(getattr(client, "is_connected", True) if res is None else res)
             with self._state_lock:
-                if connected:
-                    self._retry_failures = 0
-                    self.last_retry_time = 0.0
-                    logger.info("Connected to Discord IPC (Client ID: %s)", self.client_id)
-                else:
+                if self._client.is_connected:
+                    return True
+
+                now = self.monotonic_provider()
+                if self._retry_failures > 0 and self.last_retry_time != 0.0:
+                    delay = min(
+                        30.0, self.base_retry_interval * (2 ** max(0, self._retry_failures - 1))
+                    )
+                    if self._retry_failures > 1:
+                        delay += self.jitter_provider(0.0, 0.5)
+                    if now - self.last_retry_time < delay:
+                        return False
+
+                client = self._client
+                is_injected = self._is_injected_client
+
+            try:
+                if not is_injected and not client.is_connected:
+                    with contextlib.suppress(Exception):
+                        client.close()
+                    new_client = DiscordIPCClient(
+                        self.client_id, monotonic_provider=self.monotonic_provider
+                    )
+                    with self._state_lock:
+                        if not self._is_injected_client:
+                            self._client = new_client
+                            client = new_client
+                res = client.connect()
+                connected = bool(getattr(client, "is_connected", True) if res is None else res)
+                if not connected and not is_injected:
+                    with contextlib.suppress(Exception):
+                        client.close()
+                with self._state_lock:
+                    if connected:
+                        self._retry_failures = 0
+                        self.last_retry_time = 0.0
+                        logger.info("Connected to Discord IPC (Client ID: %s)", self.client_id)
+                    else:
+                        self._retry_failures += 1
+                        self.last_retry_time = now
+                        if not self._is_injected_client:
+                            self._client = DiscordIPCClient(
+                                self.client_id, monotonic_provider=self.monotonic_provider
+                            )
+                return connected
+            except Exception:
+                if not is_injected:
+                    with contextlib.suppress(Exception):
+                        client.close()
+                with self._state_lock:
                     self._retry_failures += 1
                     self.last_retry_time = now
                     if not self._is_injected_client:
-                        self._client = DiscordIPCClient(self.client_id)
-            return connected
-        except Exception:
-            with self._state_lock:
-                self._retry_failures += 1
-                self.last_retry_time = now
-                if not self._is_injected_client:
-                    self._client = DiscordIPCClient(self.client_id)
-            return False
+                        self._client = DiscordIPCClient(
+                            self.client_id, monotonic_provider=self.monotonic_provider
+                        )
+                return False
 
     def disconnect(self) -> None:
-        with self._state_lock:
-            self._retry_failures = 0
-            self.last_retry_time = 0.0
-            client = self._client
-            is_injected = self._is_injected_client
-            target_pid = self._last_target_pid or os.getpid()
+        with self._io_lock:
+            with self._state_lock:
+                self._retry_failures = 0
+                self.last_retry_time = 0.0
+                self.last_update_state = None
+                client = self._client
+                is_injected = self._is_injected_client
+                target_pid = self._last_target_pid or os.getpid()
 
-        with contextlib.suppress(Exception):
-            client.clear_activity(pid=target_pid)
-            client.close()
+            try:
+                with contextlib.suppress(Exception):
+                    client.clear_activity(pid=target_pid)
+            finally:
+                with contextlib.suppress(Exception):
+                    client.close()
 
-        with self._state_lock:
-            if not is_injected and not self._is_injected_client:
-                self._client = DiscordIPCClient(self.client_id)
+            with self._state_lock:
+                self.last_update_state = None
+                if not is_injected and not self._is_injected_client:
+                    self._client = DiscordIPCClient(
+                        self.client_id, monotonic_provider=self.monotonic_provider
+                    )
 
     def reconnect(self) -> None:
-        self.disconnect()
-        with self._state_lock:
-            self.last_retry_time = 0.0
-        self.connect()
+        with self._io_lock:
+            self.disconnect()
+            with self._state_lock:
+                self.last_retry_time = 0.0
+            self.connect()
 
     def invalidate(self) -> None:
         """Clears the cached presence fingerprint, forcing re-transmission on the next update."""
@@ -468,86 +541,95 @@ class DiscordRPCManager:
         if self.is_stopping is not None and self.is_stopping():
             return False
 
-        if force:
-            with self._state_lock:
-                self.last_update_state = None
-
-        if not self.is_connected:
+        with self._io_lock:
             if self.is_stopping is not None and self.is_stopping():
                 return False
-            if not self.connect():
-                return False
 
-        target_pid = pid if (pid and pid > 0) else os.getpid()
+            if force:
+                with self._state_lock:
+                    self.last_update_state = None
 
-        if payload is None:
-            with self._state_lock:
-                already_idle = self.last_update_state == "idle"
-                client = self._client
-            if not already_idle:
-                try:
-                    success = client.clear_activity(pid=target_pid)
-                    with self._state_lock:
-                        if success:
-                            self.last_update_state = "idle"
-                            self._last_target_pid = target_pid
-                            return True
-                        else:
-                            self._client.is_connected = False
-                            return False
-                except Exception:
-                    with self._state_lock:
-                        self._client.is_connected = False
+            if not self.is_connected:
+                if self.is_stopping is not None and self.is_stopping():
                     return False
-            return True
+                if not self.connect():
+                    return False
 
-        details_text = truncate_presence_field(payload.details) if payload.details else None
-        state_text = truncate_presence_field(payload.state) if payload.state else None
-        start_timestamp = (
-            payload.start_timestamp
-            if payload.start_timestamp is not None
-            else int(self.epoch_provider())
-        )
-        large_image = payload.large_image or "logo"
-        large_text = payload.large_text or "Clair Obscur: Expedition 33"
+            target_pid = pid if (pid and pid > 0) else os.getpid()
 
-        # State fingerprint to avoid redundant IPC writes
-        fingerprint = (
-            f"{details_text}|{state_text}|{start_timestamp}|{large_image}|"
-            f"{large_text}|{payload.small_image}|{payload.small_text}|"
-            f"{target_pid}"
-        )
-        with self._state_lock:
-            if fingerprint == self.last_update_state:
-                self._last_target_pid = target_pid
+            if payload is None:
+                with self._state_lock:
+                    already_idle = self.last_update_state == "idle"
+                    client = self._client
+                if not already_idle:
+                    try:
+                        success = client.clear_activity(pid=target_pid)
+                        if not success and client.transport is None:
+                            with contextlib.suppress(Exception):
+                                client.close()
+                        with self._state_lock:
+                            if success:
+                                self.last_update_state = "idle"
+                                self._last_target_pid = target_pid
+                                return True
+                            else:
+                                self._client.is_connected = False
+                                return False
+                    except Exception:
+                        if client.transport is None:
+                            with contextlib.suppress(Exception):
+                                client.close()
+                        with self._state_lock:
+                            self._client.is_connected = False
+                        return False
                 return True
-            client = self._client
 
-        try:
-            success = client.set_activity(
-                pid=target_pid,
-                state=state_text,
-                details=details_text,
-                start_timestamp=start_timestamp,
-                large_image=large_image,
-                large_text=large_text,
-                small_image=payload.small_image,
-                small_text=payload.small_text,
+            details_text = truncate_presence_field(payload.details) if payload.details else None
+            state_text = truncate_presence_field(payload.state) if payload.state else None
+            start_timestamp = payload.start_timestamp
+            large_image = payload.large_image or "logo"
+            large_text = payload.large_text or "Clair Obscur: Expedition 33"
+
+            # State fingerprint to avoid redundant IPC writes
+            fingerprint = (
+                f"{details_text}|{state_text}|{start_timestamp}|{large_image}|"
+                f"{large_text}|{target_pid}"
             )
             with self._state_lock:
-                if success:
-                    self.last_update_state = fingerprint
+                if fingerprint == self.last_update_state:
                     self._last_target_pid = target_pid
-                    logger.info("Status updated: %s - %s", details_text, state_text)
                     return True
-                else:
+                client = self._client
+
+            try:
+                success = client.set_activity(
+                    pid=target_pid,
+                    state=state_text,
+                    details=details_text,
+                    start_timestamp=start_timestamp,
+                    large_image=large_image,
+                    large_text=large_text,
+                )
+                if not success and client.transport is None:
+                    with contextlib.suppress(Exception):
+                        client.close()
+                with self._state_lock:
+                    if success:
+                        self.last_update_state = fingerprint
+                        self._last_target_pid = target_pid
+                        logger.info("Status updated: %s - %s", details_text, state_text)
+                        return True
+                    else:
+                        self._client.is_connected = False
+                        return False
+            except Exception as e:
+                logger.error("RPC update error: %s", e)
+                if client.transport is None:
+                    with contextlib.suppress(Exception):
+                        client.close()
+                with self._state_lock:
                     self._client.is_connected = False
-                    return False
-        except Exception as e:
-            logger.error("RPC update error: %s", e)
-            with self._state_lock:
-                self._client.is_connected = False
-            return False
+                return False
 
 
 __all__ = [
