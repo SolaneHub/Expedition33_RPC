@@ -5,8 +5,10 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import shutil
 import sys
 import time
+import zipfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -17,9 +19,7 @@ from expedition33_rpc.core import startup
 from expedition33_rpc.core.app import main
 from expedition33_rpc.core.platform import (
     SingleInstanceLock,
-    acquire_posix_file_lock,
     is_already_running,
-    release_posix_file_lock,
     release_single_instance_lock,
 )
 from expedition33_rpc.core.resources import get_resource_path
@@ -111,54 +111,33 @@ def test_get_current_executable_command() -> None:
 @pytest.mark.unit
 def test_is_startup_enabled_command_validation(tmp_path: Path) -> None:
     """Verifies that is_startup_enabled correctly extracts the binary path from both frozen and module commands."""
+    from tests.harness.fake_services import FakeWinreg
 
-    class FakeWinregKey:
-        def __init__(self, store: dict[str, str]) -> None:
-            self.store = store
-
-        def __enter__(self) -> FakeWinregKey:
-            return self
-
-        def __exit__(self, *args: Any) -> None:
-            pass
-
-    class FakeWinreg:
-        HKEY_CURRENT_USER = 0x80000001
-        KEY_SET_VALUE = 0x0002
-        KEY_READ = 0x20019
-        REG_SZ = 1
-
-        def __init__(self, val: str) -> None:
-            self.store: dict[str, str] = {startup.APP_NAME: val}
-
-        def OpenKey(
-            self, _root: Any, _subkey: str, _res: int = 0, _access: int = 0
-        ) -> FakeWinregKey:
-            return FakeWinregKey(self.store)
-
-        def QueryValueEx(self, key: FakeWinregKey, name: str) -> tuple[str, int]:
-            if name in key.store:
-                return key.store[name], self.REG_SZ
-            raise FileNotFoundError(name)
+    run_key = (FakeWinreg.HKEY_CURRENT_USER, startup.RUN_KEY)
 
     fake_py = tmp_path / "python.exe"
     fake_py.touch()
 
     # Module command format: "path/to/python.exe" -m expedition33_rpc
     module_cmd = f'"{fake_py}" -m expedition33_rpc'
-    with patch("expedition33_rpc.core.startup.winreg", FakeWinreg(module_cmd)):
+    reg_module = FakeWinreg(initial={run_key: {startup.APP_NAME: (module_cmd, FakeWinreg.REG_SZ)}})
+    with patch("expedition33_rpc.core.startup.winreg", reg_module):
         assert startup.is_startup_enabled() is True
 
     # Frozen command format: "path/to/Expedition33_RPC.exe"
     fake_exe = tmp_path / "Expedition33_RPC.exe"
     fake_exe.touch()
     frozen_cmd = f'"{fake_exe}"'
-    with patch("expedition33_rpc.core.startup.winreg", FakeWinreg(frozen_cmd)):
+    reg_frozen = FakeWinreg(initial={run_key: {startup.APP_NAME: (frozen_cmd, FakeWinreg.REG_SZ)}})
+    with patch("expedition33_rpc.core.startup.winreg", reg_frozen):
         assert startup.is_startup_enabled() is True
 
     # Missing binary returns False
     missing_cmd = f'"{tmp_path / "nonexistent.exe"}"'
-    with patch("expedition33_rpc.core.startup.winreg", FakeWinreg(missing_cmd)):
+    reg_missing = FakeWinreg(
+        initial={run_key: {startup.APP_NAME: (missing_cmd, FakeWinreg.REG_SZ)}}
+    )
+    with patch("expedition33_rpc.core.startup.winreg", reg_missing):
         assert startup.is_startup_enabled() is False
 
 
@@ -171,55 +150,37 @@ def test_startup_frozen_constants_contract() -> None:
 
 @pytest.mark.unit
 def test_startup_enable_disable_and_toggle() -> None:
-    class FakeWinregKey:
-        def __init__(self, store: dict[str, str]) -> None:
-            self.store = store
+    from tests.harness.fake_services import FakeWinreg
 
-        def __enter__(self) -> FakeWinregKey:
-            return self
-
-        def __exit__(self, *args: Any) -> None:
-            pass
-
-    class FakeWinreg:
-        HKEY_CURRENT_USER = 0x80000001
-        KEY_SET_VALUE = 0x0002
-        KEY_READ = 0x20019
-        REG_SZ = 1
-
-        def __init__(self) -> None:
-            self.store: dict[str, str] = {}
-
-        def OpenKey(
-            self, _root: Any, _subkey: str, _res: int = 0, _access: int = 0
-        ) -> FakeWinregKey:
-            return FakeWinregKey(self.store)
-
-        def SetValueEx(
-            self, key: FakeWinregKey, name: str, _res: int, _type: int, value: str
-        ) -> None:
-            key.store[name] = value
-
-        def QueryValueEx(self, key: FakeWinregKey, name: str) -> tuple[str, int]:
-            if name in key.store:
-                return key.store[name], self.REG_SZ
-            raise FileNotFoundError(name)
-
-        def DeleteValue(self, key: FakeWinregKey, name: str) -> None:
-            if name in key.store:
-                del key.store[name]
-            else:
-                raise FileNotFoundError(name)
-
-    fake = FakeWinreg()
+    run_key = (FakeWinreg.HKEY_CURRENT_USER, startup.RUN_KEY)
+    fake = FakeWinreg(initial={run_key: {}})
     with patch("expedition33_rpc.core.startup.winreg", fake):
         assert startup.set_startup_enabled(True) is True
-        assert startup.APP_NAME in fake.store
+        assert (
+            startup.APP_NAME in fake.keys[(FakeWinreg.HKEY_CURRENT_USER, startup.RUN_KEY.lower())]
+        )
         assert startup.is_startup_enabled() is True
 
         assert startup.set_startup_enabled(False) is True
-        assert startup.APP_NAME not in fake.store
+        assert (
+            startup.APP_NAME
+            not in fake.keys[(FakeWinreg.HKEY_CURRENT_USER, startup.RUN_KEY.lower())]
+        )
         assert startup.is_startup_enabled() is False
+
+
+@pytest.mark.unit
+def test_toggle_startup_when_winreg_absent_or_permission_error() -> None:
+    """Verifies toggle_startup returns False (never True) when winreg is absent or raises PermissionError."""
+    from tests.harness.fake_services import FakeWinreg
+
+    with patch("expedition33_rpc.core.startup.winreg", None):
+        assert startup.toggle_startup() is False
+
+    fake_perm_err = FakeWinreg()
+    fake_perm_err.open_error = PermissionError("Access denied")
+    with patch("expedition33_rpc.core.startup.winreg", fake_perm_err):
+        assert startup.toggle_startup() is False
 
 
 @pytest.mark.unit
@@ -227,7 +188,100 @@ def test_startup_disabled_when_winreg_none() -> None:
     with patch.object(startup, "winreg", None):
         assert startup.is_startup_enabled() is False
         assert startup.set_startup_enabled(True) is False
+        assert startup.toggle_startup() is False
         startup.sync_startup_path()
+
+
+@pytest.mark.unit
+def test_startup_toggle_failure_returns_real_unchanged_state(tmp_path: Path) -> None:
+    """Verifies toggle_startup returns real is_startup_enabled() state when registry mutation fails."""
+    from tests.harness.fake_services import FakeWinreg
+
+    run_key_tuple = (FakeWinreg.HKEY_CURRENT_USER, startup.RUN_KEY)
+
+    # 1. Initially disabled; SetValueEx fails -> toggle_startup must return False
+    fake_enable_fail = FakeWinreg(initial={run_key_tuple: {}})
+    fake_enable_fail.set_error = PermissionError("Access is denied")
+    with patch("expedition33_rpc.core.startup.winreg", fake_enable_fail):
+        assert startup.is_startup_enabled() is False
+        assert startup.toggle_startup() is False
+        assert startup.is_startup_enabled() is False
+
+    # 2. Initially enabled; OpenKey(KEY_SET_VALUE) fails -> toggle_startup must return True
+    class WriteDeniedWinreg(FakeWinreg):
+        def OpenKey(
+            self,
+            key: int,
+            sub_key: str,
+            reserved: int = 0,
+            access: int = FakeWinreg.KEY_READ,
+        ) -> Any:
+            if access == self.KEY_SET_VALUE:
+                raise PermissionError("Access is denied")
+            return super().OpenKey(key, sub_key, reserved=reserved, access=access)
+
+    fake_exe = tmp_path / "Expedition33_RPC.exe"
+    fake_exe.touch()
+    fake_disable_fail = WriteDeniedWinreg(
+        initial={
+            run_key_tuple: {
+                startup.APP_NAME: (f'"{fake_exe}"', FakeWinreg.REG_SZ),
+            }
+        }
+    )
+    with patch("expedition33_rpc.core.startup.winreg", fake_disable_fail):
+        assert startup.is_startup_enabled() is True
+        assert startup.toggle_startup() is True
+        assert startup.is_startup_enabled() is True
+
+
+@pytest.mark.unit
+def test_startup_toggle_delete_value_permission_error_preserves_enabled_state(
+    tmp_path: Path,
+) -> None:
+    """Regression test for Finding 1: winreg_delete_value must not swallow PermissionError."""
+    import errno
+
+    from tests.harness.fake_services import FakeWinreg
+
+    from expedition33_rpc.core.platform import winreg_delete_value
+
+    run_key_tuple = (FakeWinreg.HKEY_CURRENT_USER, startup.RUN_KEY)
+    fake_exe = tmp_path / "Expedition33_RPC.exe"
+    fake_exe.touch()
+
+    reg = FakeWinreg(
+        initial={
+            run_key_tuple: {
+                startup.APP_NAME: (f'"{fake_exe}"', FakeWinreg.REG_SZ),
+            }
+        }
+    )
+    reg.delete_error = PermissionError("Access is denied")
+
+    with patch("expedition33_rpc.core.startup.winreg", reg):
+        assert startup.is_startup_enabled() is True
+        assert startup.toggle_startup() is True
+        assert startup.is_startup_enabled() is True
+
+    # Non-ENOENT OSError also fails cleanly; ENOENT / FileNotFoundError succeeds cleanly
+    reg.delete_error = OSError(errno.EACCES, "Permission denied")
+    assert (
+        winreg_delete_value(FakeWinreg.HKEY_CURRENT_USER, startup.RUN_KEY, startup.APP_NAME, reg)
+        is False
+    )
+
+    reg.delete_error = OSError(errno.ENOENT, "Value not found")
+    assert (
+        winreg_delete_value(FakeWinreg.HKEY_CURRENT_USER, startup.RUN_KEY, startup.APP_NAME, reg)
+        is True
+    )
+
+    reg.delete_error = None
+    assert (
+        winreg_delete_value(FakeWinreg.HKEY_CURRENT_USER, startup.RUN_KEY, "MissingValue", reg)
+        is True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +327,7 @@ def test_single_instance_cross_platform_guards(tmp_path: Path) -> None:
 
         with (
             patch("sys.platform", "linux"),
-            patch("expedition33_rpc.core.platform.acquire_posix_file_lock", return_value=False),
+            patch("expedition33_rpc.core.platform.SingleInstanceLock.acquire", return_value=False),
         ):
             assert is_already_running() is True
     finally:
@@ -289,22 +343,22 @@ def test_posix_file_lock_lifecycle_and_cleanup(tmp_path: Path) -> None:
     test_lock = tmp_path / "lifecycle.lock"
     try:
         # 1. Acquire lock cleanly
-        assert acquire_posix_file_lock(test_lock) is True
+        assert is_already_running(lock_path=test_lock) is False
         assert test_lock.is_file()
 
-        # 2. Idempotent re-acquisition in same process returns True
-        assert acquire_posix_file_lock(test_lock) is True
+        # 2. Idempotent re-acquisition in same process returns False (not already running)
+        assert is_already_running(lock_path=test_lock) is False
 
         # 3. Switching lock paths closes old file and acquires new one
         other_lock = tmp_path / "other.lock"
-        assert acquire_posix_file_lock(other_lock) is True
+        assert is_already_running(lock_path=other_lock) is False
         assert other_lock.is_file()
 
         # 4. Release closes file
-        release_posix_file_lock()
+        release_single_instance_lock()
 
         # 5. Subsequent release is a safe no-op
-        release_posix_file_lock()
+        release_single_instance_lock()
 
         # 6. Verify contention detection on second instance
         lock_a = SingleInstanceLock(lock_path=test_lock)
@@ -325,28 +379,30 @@ def test_single_instance_lock_contention_and_atomic_removal(tmp_path: Path) -> N
         # 1. First instance acquires mutex successfully
         lock1 = SingleInstanceLock(mutex_name=test_mutex)
         assert lock1.acquire() is True
-        assert lock1._is_locked is True
 
         # 2. Second instance attempts to acquire same mutex -> contention detected
         lock2 = SingleInstanceLock(mutex_name=test_mutex)
         assert lock2.acquire() is False
-        assert lock2._is_locked is False
 
         # 3. Context manager usage respects contention
         with SingleInstanceLock(mutex_name=test_mutex) as ctx_lock:
-            assert ctx_lock._is_locked is False
+            assert ctx_lock.acquire() is False
 
         # 4. Release primary lock cleanly
         lock1.release()
-        assert lock1._is_locked is False
 
         # 5. Secondary lock can now acquire following primary release
         assert lock2.acquire() is True
-        assert lock2._is_locked is True
         lock2.release()
-        assert lock2._is_locked is False
 
-        # 6. is_already_running integration test on isolated mutex
+        # 6. Context manager releases even on exception
+        with pytest.raises(RuntimeError, match="boom"), SingleInstanceLock(mutex_name=test_mutex):
+            assert lock2.acquire() is False
+            raise RuntimeError("boom")
+        assert lock2.acquire() is True
+        lock2.release()
+
+        # 7. is_already_running integration test on isolated mutex
         release_single_instance_lock()
         try:
             assert is_already_running(mutex_name=test_mutex) is False
@@ -360,18 +416,15 @@ def test_single_instance_lock_contention_and_atomic_removal(tmp_path: Path) -> N
         # 1. First instance acquires lock successfully
         lock1 = SingleInstanceLock(lock_path=lock_file)
         assert lock1.acquire() is True
-        assert lock1._is_locked is True
         assert lock_file.is_file()
 
         # 2. Second instance attempts to acquire on same path -> contention detected
         lock2 = SingleInstanceLock(lock_path=lock_file)
         assert lock2.acquire() is False
-        assert lock2._is_locked is False
-        assert lock2._flock_file is None
 
         # 3. Context manager usage respects contention
         with SingleInstanceLock(lock_path=lock_file) as ctx_lock:
-            assert ctx_lock._is_locked is False
+            assert ctx_lock.acquire() is False
 
         # 4. Atomic removal of lock file from disk while still locked
         assert lock_file.is_file()
@@ -380,17 +433,20 @@ def test_single_instance_lock_contention_and_atomic_removal(tmp_path: Path) -> N
 
         # 5. Release primary lock cleanly
         lock1.release()
-        assert lock1._is_locked is False
-        assert lock1._flock_file is None
 
         # 6. Secondary lock can now acquire following primary release
         assert lock2.acquire() is True
-        assert lock2._is_locked is True
         assert lock_file.is_file()
         lock2.release()
-        assert lock2._is_locked is False
 
-        # 7. is_already_running integration test on isolated lock path
+        # 7. Context manager releases even on exception
+        with pytest.raises(RuntimeError, match="boom"), SingleInstanceLock(lock_path=lock_file):
+            assert lock2.acquire() is False
+            raise RuntimeError("boom")
+        assert lock2.acquire() is True
+        lock2.release()
+
+        # 8. is_already_running integration test on isolated lock path
         release_single_instance_lock()
         try:
             assert is_already_running(lock_path=lock_file) is False
@@ -580,6 +636,95 @@ def test_smoke_test_missing_icon_exits_one() -> None:
     with patch("expedition33_rpc.ui.tray_app.ExpeditionTrayApp.get_icon_image", return_value=None):
         with pytest.raises(SystemExit) as exc_info:
             run_smoke_test()
+        assert exc_info.value.code == 1
+
+
+@pytest.mark.unit
+def test_smoke_test_default_isolates_user_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies run_smoke_test() uses TemporaryDirectory by default and never touches APPDATA/XDG_CONFIG_HOME."""
+    from expedition33_rpc.core.smoke import run_smoke_test
+
+    isolated_config = tmp_path / "user_config"
+    monkeypatch.setenv("APPDATA", str(isolated_config))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(isolated_config))
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_smoke_test()
+    assert exc_info.value.code == 0
+    assert not isolated_config.exists()
+
+
+@pytest.mark.unit
+def test_smoke_test_explicit_settings_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifies run_smoke_test(settings_path=...) uses the explicit path without touching default dir."""
+    from expedition33_rpc.core.smoke import run_smoke_test
+
+    isolated_config = tmp_path / "user_config"
+    monkeypatch.setenv("APPDATA", str(isolated_config))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(isolated_config))
+    custom_settings = tmp_path / "custom" / "settings.json"
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_smoke_test(settings_path=custom_settings)
+    assert exc_info.value.code == 0
+    assert custom_settings.parent.is_dir()
+    assert not isolated_config.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bad_content", ["{invalid-json", "[]", "{}"])
+def test_smoke_test_invalid_game_data_json_exits_one(tmp_path: Path, bad_content: str) -> None:
+    """Verifies run_smoke_test exits with code 1 if game_data.json is invalid or not a non-empty dict."""
+    from expedition33_rpc.core.smoke import run_smoke_test
+
+    assets_dir = tmp_path / "assets"
+    assets_dir.mkdir()
+    for name in ("icon.png", "icon.ico", "bridge.zip"):
+        shutil.copy2(get_resource_path(name), assets_dir / name)
+    (assets_dir / "game_data.json").write_text(bad_content, encoding="utf-8")
+
+    with patch(
+        "expedition33_rpc.core.smoke.get_resource_path",
+        side_effect=lambda name: str(assets_dir / name),
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            run_smoke_test(settings_path=tmp_path / "settings.json")
+        assert exc_info.value.code == 1
+
+
+@pytest.mark.unit
+def test_smoke_test_invalid_or_incomplete_bridge_zip_exits_one(tmp_path: Path) -> None:
+    """Verifies run_smoke_test exits with code 1 if bridge.zip is corrupt or missing main.lua."""
+    from expedition33_rpc.core.smoke import run_smoke_test
+
+    assets_dir = tmp_path / "assets"
+    assets_dir.mkdir()
+    for name in ("icon.png", "icon.ico", "game_data.json"):
+        shutil.copy2(get_resource_path(name), assets_dir / name)
+
+    bridge_zip = assets_dir / "bridge.zip"
+
+    # 1. Corrupt non-zip bytes
+    bridge_zip.write_bytes(b"not-a-valid-zip-archive")
+    with patch(
+        "expedition33_rpc.core.smoke.get_resource_path",
+        side_effect=lambda name: str(assets_dir / name),
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            run_smoke_test(settings_path=tmp_path / "settings1.json")
+        assert exc_info.value.code == 1
+
+    # 2. Valid zip missing ue4ss/Mods/Expedition33RPC/scripts/main.lua
+    with zipfile.ZipFile(bridge_zip, "w") as zf:
+        zf.writestr("dwmapi.dll", b"dummy")
+    with patch(
+        "expedition33_rpc.core.smoke.get_resource_path",
+        side_effect=lambda name: str(assets_dir / name),
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            run_smoke_test(settings_path=tmp_path / "settings2.json")
         assert exc_info.value.code == 1
 
 

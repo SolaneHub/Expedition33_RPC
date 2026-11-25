@@ -191,7 +191,7 @@ def test_orchestrator_step_update_error_resilience() -> None:
     assert result is None
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_orchestrator_lifecycle_start_stop() -> None:
     rpc, _ = _make_connected_rpc()
     assert rpc.is_connected is True
@@ -248,11 +248,20 @@ def test_orchestrator_auto_install_bridge_on_process_detection() -> None:
     assert fake_installer.installed is False
     assert orchestrator.is_bridge_installed() is False
 
+    install_done = threading.Event()
+    orig_install = fake_installer.install_bridge
+
+    def _install_with_event(win64_dir: Path | str | None = None) -> tuple[bool, str]:
+        try:
+            return orig_install(win64_dir)
+        finally:
+            install_done.set()
+
+    fake_installer.install_bridge = _install_with_event
+
     # Process detection event triggers auto installation
     orchestrator.step_update()
-    deadline = time.monotonic() + 1.0
-    while not orchestrator.is_bridge_installed() and time.monotonic() < deadline:
-        time.sleep(0.005)
+    assert install_done.wait(timeout=2.0)
     assert fake_installer.installed is True
     assert orchestrator.is_bridge_installed() is True
     orchestrator.stop()
@@ -282,11 +291,20 @@ def test_orchestrator_event_driven_bridge_check_eliminates_parasitic_io() -> Non
         sync_startup=False,
     )
 
+    install_done = threading.Event()
+    orig_install = fake_installer.install_bridge
+
+    def _install_with_event(win64_dir: Path | str | None = None) -> tuple[bool, str]:
+        try:
+            return orig_install(win64_dir)
+        finally:
+            install_done.set()
+
+    fake_installer.install_bridge = _install_with_event
+
     # Tick 1: First time PID 4242 detected -> triggers check and auto installation
     orchestrator.step_update()
-    deadline = time.monotonic() + 1.0
-    while not orchestrator.is_bridge_installed() and time.monotonic() < deadline:
-        time.sleep(0.005)
+    assert install_done.wait(timeout=2.0)
     assert fake_installer.installed is True
     assert orchestrator.is_bridge_installed() is True
     assert fake_installer.install_call_count == 1
@@ -390,11 +408,20 @@ def test_orchestrator_eliminates_parasitic_io_on_gameplay_timer_transitions(tmp_
             sync_startup=False,
         )
 
+        install_done = threading.Event()
+        orig_install = fake_installer.install_bridge
+
+        def _install_with_event(win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            try:
+                return orig_install(win64_dir)
+            finally:
+                install_done.set()
+
+        fake_installer.install_bridge = _install_with_event
+
         # 1. Game launches: PID=4242 (exploration) -> triggers installation
         orchestrator.step_update()
-        deadline = time.monotonic() + 1.0
-        while fake_installer.install_call_count == 0 and time.monotonic() < deadline:
-            time.sleep(0.005)
+        assert install_done.wait(timeout=2.0)
         assert fake_installer.install_call_count == 1
         assert orchestrator.is_bridge_installed() is True
 
@@ -445,15 +472,27 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
         monotonic_provider=lambda: current_time,
     )
 
+    install_done = threading.Event()
+    orig_install = fake_installer.install_bridge
+
+    def _install_with_event(win64_dir: Path | str | None = None) -> tuple[bool, str]:
+        try:
+            return orig_install(win64_dir)
+        finally:
+            install_done.set()
+
+    fake_installer.install_bridge = _install_with_event
+
     # First attempt fails at t = 1000.0, backoff cooldown activated
     orchestrator.step_update()
-    deadline = time.monotonic() + 1.0
-    while fake_installer.install_call_count < 1 and time.monotonic() < deadline:
-        time.sleep(0.005)
+    assert install_done.wait(timeout=2.0)
+    if orchestrator._bridge_install_thread is not None:
+        orchestrator._bridge_install_thread.join(timeout=2.0)
     assert orchestrator.is_bridge_installed() is False
     assert fake_installer.install_call_count == 1
 
     # Second tick with new process at t = 1010.0 (within cooldown 30.0s)
+    install_done.clear()
     current_time = 1010.0
     fake_installer.install_success = True
     fake_installer.install_msg = "Installed"
@@ -464,8 +503,8 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
         exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
     orchestrator.step_update()
-    time.sleep(0.05)
     # Throttled by cooldown - install is NOT re-attempted, call count remains 1
+    assert not install_done.is_set()
     assert orchestrator.is_bridge_installed() is False
     assert fake_installer.install_call_count == 1
 
@@ -478,9 +517,7 @@ def test_orchestrator_step_update_respects_cooldown_before_bridge_check() -> Non
         exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
     )
     orchestrator.step_update()
-    deadline = time.monotonic() + 1.0
-    while fake_installer.install_call_count < 2 and time.monotonic() < deadline:
-        time.sleep(0.005)
+    assert install_done.wait(timeout=2.0)
     # Now allowed - installation succeeds and status reflects True
     assert orchestrator.is_bridge_installed() is True
     assert fake_installer.install_call_count == 2
@@ -507,7 +544,7 @@ def test_orchestrator_bridge_auto_install_deterministic_cooldown() -> None:
     )
 
     # 1. First attempt fails at t = 1000.0
-    res1 = orchestrator.check_and_auto_install_bridge(now=1000.0)
+    res1 = orchestrator.check_and_auto_install_bridge(now_monotonic=1000.0)
     assert res1 is False
     assert fake_installer.installed is False
     assert orchestrator.is_bridge_installed() is False
@@ -515,19 +552,19 @@ def test_orchestrator_bridge_auto_install_deterministic_cooldown() -> None:
 
     # 2. Immediate next attempt at t = 1002.0 (2 seconds later)
     # Should be throttled by deterministic cooldown (30s)
-    res2 = orchestrator.check_and_auto_install_bridge(now=1002.0)
+    res2 = orchestrator.check_and_auto_install_bridge(now_monotonic=1002.0)
     assert res2 is False
     assert fake_installer.install_call_count == 1
 
     # 3. Intermediate attempt at t = 1025.0 (still within cooldown window)
-    res_mid = orchestrator.check_and_auto_install_bridge(now=1025.0)
+    res_mid = orchestrator.check_and_auto_install_bridge(now_monotonic=1025.0)
     assert res_mid is False
     assert fake_installer.install_call_count == 1
 
     # 4. Attempt after cooldown expires at t = 1035.0
     fake_installer.install_success = True
     fake_installer.install_msg = "Installed successfully"
-    res4 = orchestrator.check_and_auto_install_bridge(now=1035.0)
+    res4 = orchestrator.check_and_auto_install_bridge(now_monotonic=1035.0)
     assert res4 is True
     assert fake_installer.installed is True
     assert orchestrator.is_bridge_installed() is True
@@ -553,8 +590,8 @@ def test_orchestrator_bridge_auto_install_early_boot_and_preinstalled() -> None:
         sync_startup=False,
     )
 
-    # 1. Early monotonic boot timestamp (now=0.5) must NOT be throttled by initial cooldown
-    res = orchestrator.check_and_auto_install_bridge(now=0.5)
+    # 1. Early monotonic boot timestamp (now_monotonic=0.5) must NOT be throttled by initial cooldown
+    res = orchestrator.check_and_auto_install_bridge(now_monotonic=0.5)
     assert res is True
     assert fake_installer.installed is True
     assert orchestrator.is_bridge_installed() is True
@@ -624,7 +661,7 @@ def test_orchestrator_os_status_queries_and_toggles(tmp_path: Path) -> None:
     assert saved_off["anti_spoiler"] is False
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_orchestrator_session_simulator_telemetry_flow(tmp_path: Path) -> None:
     """Verifies observable telemetry state propagation and wire-level presence frames using GameSessionSimulator."""
     rpc, pipe = _make_connected_rpc()
@@ -1045,7 +1082,7 @@ def test_orchestrator_status_snapshot() -> None:
     assert hasattr(snapshot, "updater_status")
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_orchestrator_run_loop_adaptive_idle_backoff() -> None:
     """Verifies that orchestrator uses idle_polling_interval when game is idle and polling_interval when running."""
     active_procs: list[FakeProcess] = []
@@ -1177,10 +1214,11 @@ def test_orchestrator_stop_waits_for_bridge_install_thread() -> None:
     class SlowInstaller(FakeBridgeInstaller):
         def __init__(self) -> None:
             super().__init__(installed=False)
+            self.started = threading.Event()
             self.finished = False
 
         def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
-            time.sleep(0.05)
+            self.started.set()
             self.finished = True
             return super().install_bridge(win64_dir)
 
@@ -1205,13 +1243,13 @@ def test_orchestrator_stop_waits_for_bridge_install_thread() -> None:
     )
 
     orchestrator.step_update()
-    assert fake_installer.finished is False
+    assert fake_installer.started.wait(timeout=2.0)
 
     orchestrator.stop()
     assert fake_installer.finished is True
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_orchestrator_step_with_real_detector(tmp_path: Path) -> None:
     """Verifies that orchestrator functions end-to-end with a real GameDetector instance."""
     real_detector = GameDetector(
@@ -1440,3 +1478,442 @@ def test_orchestrator_stop_cancels_updater_and_joins_worker_thread() -> None:
     assert fake_updater.cancel_called is True
     # The worker thread must have been joined cleanly
     assert fake_updater.worker_thread.is_alive() is False
+
+
+@pytest.mark.unit
+def test_orchestrator_clock_propagation_to_default_subsystems(tmp_path: Path) -> None:
+    """Verifies monotonic_provider and epoch_provider propagate to default GameDetector and DiscordRPCManager."""
+    from tests.harness.clock_harness import DualClockHarness
+
+    clock = DualClockHarness(initial_monotonic=500.0, initial_epoch=1_700_000_000.0)
+    mono_fn = clock.monotonic_clock
+    epoch_fn = clock.epoch_clock
+    settings = SettingsService(path=tmp_path / "settings.json")
+
+    orchestrator = AppOrchestrator(
+        settings_service=settings,
+        auto_install_bridge=False,
+        sync_startup=False,
+        monotonic_provider=mono_fn,
+        epoch_provider=epoch_fn,
+    )
+
+    assert orchestrator.detector.monotonic_provider is mono_fn
+    assert orchestrator.detector.epoch_provider is epoch_fn
+    assert isinstance(orchestrator.detector.bridge_provider, BridgeStateProvider)
+    assert orchestrator.detector.bridge_provider.monotonic_provider is mono_fn
+    assert orchestrator.detector.bridge_provider.epoch_provider is epoch_fn
+    assert orchestrator.rpc_manager.monotonic_provider is mono_fn
+    assert orchestrator.rpc_manager.epoch_provider is epoch_fn
+
+
+@pytest.mark.unit
+def test_orchestrator_zero_io_under_bridge_lock_non_blocking(tmp_path: Path) -> None:
+    """Verifies toggle_bridge and step_update never hold _bridge_lock during bridge_installer I/O."""
+    install_entered = threading.Event()
+    uninstall_entered = threading.Event()
+    probe_entered = threading.Event()
+    release_io = threading.Event()
+
+    class BlockingInstaller(FakeBridgeInstaller):
+        def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            del win64_dir
+            install_entered.set()
+            release_io.wait(timeout=3.0)
+            self.installed = True
+            return True, "Installed"
+
+        def uninstall_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            del win64_dir
+            uninstall_entered.set()
+            release_io.wait(timeout=3.0)
+            self.installed = False
+            return True, "Uninstalled"
+
+        def is_bridge_installed(self, win64_dir: Path | str | None = None) -> bool:
+            del win64_dir
+            probe_entered.set()
+            release_io.wait(timeout=3.0)
+            return self.installed
+
+    settings = SettingsService(path=tmp_path / "settings.json")
+    procs = [
+        FakeProcess(
+            pid=4321,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    ]
+    detector = _make_detector_with_procs(procs)
+    rpc, _ = _make_connected_rpc()
+    installer = BlockingInstaller(installed=False)
+
+    orchestrator = AppOrchestrator(
+        detector=detector,
+        rpc_manager=rpc,
+        settings_service=settings,
+        bridge_installer=installer,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    # 1. toggle_bridge() installing must not block is_bridge_installed() or stop()
+    t_install = threading.Thread(target=orchestrator.toggle_bridge, daemon=True)
+    t_install.start()
+    assert install_entered.wait(timeout=1.0) is True
+
+    t0 = time.perf_counter()
+    assert orchestrator.is_bridge_installed() is False
+    orchestrator.stop()
+    assert time.perf_counter() - t0 < 0.25
+
+    release_io.set()
+    t_install.join(timeout=1.0)
+    assert orchestrator.is_bridge_installed() is True
+
+    # 2. toggle_bridge() uninstalling must not block is_bridge_installed() or stop()
+    release_io.clear()
+    t_uninstall = threading.Thread(target=orchestrator.toggle_bridge, daemon=True)
+    t_uninstall.start()
+    assert uninstall_entered.wait(timeout=1.0) is True
+
+    t1 = time.perf_counter()
+    assert orchestrator.is_bridge_installed() is True
+    orchestrator.stop()
+    assert time.perf_counter() - t1 < 0.25
+
+    release_io.set()
+    t_uninstall.join(timeout=1.0)
+    assert orchestrator.is_bridge_installed() is False
+
+    # 3. step_update(auto_install_bridge=False) probing must not block _bridge_lock
+    release_io.clear()
+    installer.installed = True
+    orchestrator2 = AppOrchestrator(
+        detector=_make_detector_with_procs(procs),
+        rpc_manager=_make_connected_rpc()[0],
+        settings_service=settings,
+        bridge_installer=installer,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+    t_step = threading.Thread(target=orchestrator2.step_update, daemon=True)
+    t_step.start()
+    assert probe_entered.wait(timeout=1.0) is True
+
+    t2 = time.perf_counter()
+    assert orchestrator2.is_bridge_installed() is False
+    orchestrator2.stop()
+    assert time.perf_counter() - t2 < 0.25
+
+    release_io.set()
+    t_step.join(timeout=1.0)
+    assert orchestrator2.is_bridge_installed() is True
+
+
+@pytest.mark.unit
+def test_orchestrator_toggle_bridge_respects_uninstall_failure(tmp_path: Path) -> None:
+    """Verifies that toggle_bridge preserves _bridge_installed=True when uninstall_bridge fails."""
+
+    class FailingUninstallBridge(FakeBridgeInstaller):
+        def uninstall_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            del win64_dir
+            return False, "Failed to remove dwmapi.dll: file is locked."
+
+    settings = SettingsService(path=tmp_path / "settings.json")
+    installer = FailingUninstallBridge(installed=True)
+    orchestrator = AppOrchestrator(
+        detector=GameDetector(bridge_provider=None, process_scanner=lambda: []),
+        rpc_manager=_make_connected_rpc()[0],
+        settings_service=settings,
+        bridge_installer=installer,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    assert orchestrator.toggle_bridge() is True
+    assert orchestrator.is_bridge_installed() is True
+
+    # Failed uninstall should keep state True and return True on next attempt too
+    assert orchestrator.toggle_bridge() is True
+    assert orchestrator.is_bridge_installed() is True
+
+
+@pytest.mark.unit
+def test_orchestrator_async_auto_install_notifies_state_subscribers(tmp_path: Path) -> None:
+    """Verifies async auto-install emits a state-change notification upon successful completion."""
+    install_started = threading.Event()
+    release_install = threading.Event()
+
+    class DelayedInstaller(FakeBridgeInstaller):
+        def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            del win64_dir
+            self.install_call_count += 1
+            install_started.set()
+            release_install.wait(timeout=2.0)
+            self.installed = True
+            return True, "Installed"
+
+    procs = [
+        FakeProcess(
+            pid=9876,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    ]
+    settings = SettingsService(path=tmp_path / "settings.json")
+    installer = DelayedInstaller(installed=False)
+    orchestrator = AppOrchestrator(
+        detector=_make_detector_with_procs(procs),
+        rpc_manager=_make_connected_rpc()[0],
+        settings_service=settings,
+        bridge_installer=installer,
+        auto_install_bridge=True,
+        sync_startup=False,
+    )
+
+    notifications: list[tuple[GameState, bool, bool]] = []
+    done_notified = threading.Event()
+
+    def subscriber(state: GameState, anti_spoiler: bool) -> None:
+        installed_now = orchestrator.is_bridge_installed()
+        notifications.append((state, anti_spoiler, installed_now))
+        if installed_now:
+            done_notified.set()
+
+    orchestrator.subscribe_state_change(subscriber)
+
+    # First tick triggers async install and emits initial tick notification (installed=False)
+    orchestrator.step_update()
+    assert install_started.wait(timeout=1.0) is True
+    assert len(notifications) == 1
+    assert notifications[0][2] is False
+
+    # Allow async install to complete; subscriber should be notified without another step_update()
+    release_install.set()
+    assert done_notified.wait(timeout=1.5) is True
+    assert len(notifications) == 2
+    assert notifications[1][2] is True
+    assert orchestrator.is_bridge_installed() is True
+    orchestrator.stop()
+
+
+@pytest.mark.unit
+def test_orchestrator_toggle_startup_failure_preserves_real_state() -> None:
+    """Verifies toggle_startup preserves actual startup state when set_startup_enabled fails."""
+    failing_enable = FakeStartupService(enabled=False, set_result=False)
+    orch_disabled = AppOrchestrator(
+        detector=GameDetector(bridge_provider=None, process_scanner=lambda: []),
+        rpc_manager=_make_connected_rpc()[0],
+        startup_service=failing_enable,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+    assert orch_disabled.toggle_startup() is False
+    assert orch_disabled.is_startup_enabled() is False
+
+    failing_disable = FakeStartupService(enabled=True, set_result=False)
+    orch_enabled = AppOrchestrator(
+        detector=GameDetector(bridge_provider=None, process_scanner=lambda: []),
+        rpc_manager=_make_connected_rpc()[0],
+        startup_service=failing_disable,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+    assert orch_enabled.toggle_startup() is True
+    assert orch_enabled.is_startup_enabled() is True
+
+
+@pytest.mark.unit
+def test_orchestrator_step_update_probe_discards_stale_result_on_concurrent_toggle(
+    tmp_path: Path,
+) -> None:
+    """Regression test (Probe 2b): unlocked step_update probe must not overwrite concurrent toggle_bridge."""
+    probe_entered = threading.Event()
+    allow_probe_return = threading.Event()
+
+    class InterleavedProbeInstaller(FakeBridgeInstaller):
+        def __init__(self) -> None:
+            super().__init__(installed=True)
+            self.block_probe = False
+
+        def is_bridge_installed(self, win64_dir: Path | str | None = None) -> bool:
+            del win64_dir
+            if self.block_probe:
+                observed = self.installed
+                probe_entered.set()
+                allow_probe_return.wait(timeout=3.0)
+                return observed
+            return self.installed
+
+    procs = [
+        FakeProcess(
+            pid=1111,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            create_time=100.0,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    ]
+    installer = InterleavedProbeInstaller()
+    settings = SettingsService(path=tmp_path / "settings.json")
+    orchestrator = AppOrchestrator(
+        detector=_make_detector_with_procs(procs),
+        rpc_manager=_make_connected_rpc()[0],
+        settings_service=settings,
+        bridge_installer=installer,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+
+    # First tick establishes installed=True
+    orchestrator.step_update()
+    assert orchestrator.is_bridge_installed() is True
+
+    # Restart process (new PID) so step_update probes again; block right after reading True
+    procs[0] = FakeProcess(
+        pid=2222,
+        name="sandfall-win64-shipping.exe",
+        is_running=True,
+        create_time=200.0,
+        exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+    )
+    installer.block_probe = True
+
+    t_step = threading.Thread(target=orchestrator.step_update, daemon=True)
+    t_step.start()
+    assert probe_entered.wait(timeout=1.0) is True
+
+    # Concurrent toggle_bridge uninstalls while step_update probe is mid-flight
+    assert orchestrator.toggle_bridge() is False
+    assert installer.installed is False
+    assert orchestrator.is_bridge_installed() is False
+
+    # Let stale probe return True -> must be discarded because _bridge_state_seq advanced
+    allow_probe_return.set()
+    t_step.join(timeout=2.0)
+    assert installer.installed is False
+    assert orchestrator.is_bridge_installed() is False
+    orchestrator.stop()
+
+
+@pytest.mark.unit
+def test_orchestrator_async_install_vs_toggle_bridge_no_stale_overwrite(tmp_path: Path) -> None:
+    """Regression test (Probe 2c): _async_install and toggle_bridge serialize via _bridge_io_lock."""
+    install_entered = threading.Event()
+    release_install = threading.Event()
+
+    class BlockingAutoInstaller(FakeBridgeInstaller):
+        def install_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            del win64_dir
+            self.install_call_count += 1
+            self.installed = True
+            install_entered.set()
+            release_install.wait(timeout=3.0)
+            return True, "Installed"
+
+    procs = [
+        FakeProcess(
+            pid=3333,
+            name="sandfall-win64-shipping.exe",
+            is_running=True,
+            exe_path="/mock/game/win64/Sandfall-Win64-Shipping.exe",
+        )
+    ]
+    installer = BlockingAutoInstaller(installed=False)
+    settings = SettingsService(path=tmp_path / "settings.json")
+    orchestrator = AppOrchestrator(
+        detector=_make_detector_with_procs(procs),
+        rpc_manager=_make_connected_rpc()[0],
+        settings_service=settings,
+        bridge_installer=installer,
+        auto_install_bridge=True,
+        sync_startup=False,
+    )
+
+    orchestrator.step_update()
+    assert install_entered.wait(timeout=1.0) is True
+
+    # Start concurrent toggle_bridge; must serialize behind _bridge_io_lock and not block stop/reads
+    toggle_done = threading.Event()
+    toggle_result: list[bool] = []
+
+    def _run_toggle() -> None:
+        toggle_result.append(orchestrator.toggle_bridge())
+        toggle_done.set()
+
+    t_toggle = threading.Thread(target=_run_toggle, daemon=True)
+    t_toggle.start()
+
+    # Non-blocking read while _bridge_io_lock is held
+    t0 = time.perf_counter()
+    assert orchestrator.is_bridge_installed() is False
+    assert time.perf_counter() - t0 < 0.25
+
+    release_install.set()
+    assert toggle_done.wait(timeout=2.0) is True
+    t_toggle.join(timeout=1.0)
+
+    # toggle_bridge ran after _async_install finished installing, so it uninstalled cleanly
+    assert toggle_result == [False]
+    assert installer.installed is False
+    assert orchestrator.is_bridge_installed() is False
+    orchestrator.stop()
+
+
+@pytest.mark.unit
+def test_orchestrator_toggle_bridge_vs_install_bridge_to_serialized(tmp_path: Path) -> None:
+    """Regression test (Probe 2d): concurrent toggle_bridge and install_bridge_to never desync."""
+    uninstall_entered = threading.Event()
+    release_uninstall = threading.Event()
+
+    class BlockingUninstallInstaller(FakeBridgeInstaller):
+        def uninstall_bridge(self, win64_dir: Path | str | None = None) -> tuple[bool, str]:
+            del win64_dir
+            uninstall_entered.set()
+            release_uninstall.wait(timeout=3.0)
+            self.installed = False
+            return True, "Uninstalled"
+
+    installer = BlockingUninstallInstaller(installed=True)
+    settings = SettingsService(path=tmp_path / "settings.json")
+    orchestrator = AppOrchestrator(
+        detector=GameDetector(bridge_provider=None, process_scanner=lambda: []),
+        rpc_manager=_make_connected_rpc()[0],
+        settings_service=settings,
+        bridge_installer=installer,
+        auto_install_bridge=False,
+        sync_startup=False,
+    )
+    # Seed cached state to True via install_bridge_to
+    assert orchestrator.install_bridge_to(tmp_path)[0] is True
+    assert orchestrator.is_bridge_installed() is True
+
+    t_toggle = threading.Thread(target=orchestrator.toggle_bridge, daemon=True)
+    t_toggle.start()
+    assert uninstall_entered.wait(timeout=1.0) is True
+
+    # is_bridge_installed() and stop() must remain non-blocking while _bridge_io_lock is held
+    t0 = time.perf_counter()
+    assert orchestrator.is_bridge_installed() is True
+    orchestrator.stop()
+    assert time.perf_counter() - t0 < 0.25
+
+    install_to_done = threading.Event()
+
+    def _run_install_to() -> None:
+        orchestrator.install_bridge_to(tmp_path)
+        install_to_done.set()
+
+    t_install_to = threading.Thread(target=_run_install_to, daemon=True)
+    t_install_to.start()
+
+    release_uninstall.set()
+    t_toggle.join(timeout=2.0)
+    assert install_to_done.wait(timeout=2.0) is True
+    t_install_to.join(timeout=1.0)
+
+    assert installer.installed is True
+    assert orchestrator.is_bridge_installed() is True
