@@ -1203,9 +1203,6 @@ def test_discord_ipc_client_evt_error_closes_real_handle_immediately_without_gc(
             self._inner = inner
             self._idx = idx
 
-        def makefile(self, mode: str, buffering: int = -1) -> Any:
-            return self._inner.makefile(mode, buffering)
-
         def read(self, n: int = -1) -> bytes:
             return bytes(self._inner.read(n))
 
@@ -1377,6 +1374,8 @@ def test_discord_rpc_manager_concurrent_connect_zero_fd_leak(
             manager.disconnect()
 
         for handle in opened_handles:
+            if getattr(handle, "closed", False):
+                continue
             if hasattr(handle, "fileno"):
                 assert handle.fileno() == -1
 
