@@ -61,6 +61,12 @@ src/expedition33_rpc/
     ├── game_data.json        # Single Source of Truth localization and entity dictionary
     ├── icon.ico              # Windows executable icon
     └── icon.png              # System tray icon
+
+bridge/scripts/
+└── main.lua                  # Source Lua mod script packaged into assets/bridge.zip
+
+tools/
+└── build_bridge_zip.py       # Deterministic packager & --check parity verifier for bridge.zip
 ```
 
 > [!NOTE]
@@ -68,15 +74,15 @@ src/expedition33_rpc/
 
 ### 2.1. Strict 6-Tier Acyclic Dependency DAG
 
-The internal module hierarchy strictly conforms to a 6-tier Directed Acyclic Graph (DAG) enforced by AST analysis in CI (`test_architectural_invariants.py`). Lower tiers never depend on higher tiers:
+The internal module hierarchy strictly conforms to a 6-tier Directed Acyclic Graph (DAG) enforced by AST analysis in CI (`test_strict_6_tier_dag_hierarchy` in `tests/ci/test_architectural_invariants.py`). Lower tiers never depend on higher tiers:
 
 | Tier | Layer Name | Modules | Responsibilities & Invariants |
 | :---: | :--- | :--- | :--- |
 | **Tier 0** | **Primitives & Platform Leaves** | `_version.py`, `core/platform.py`, `core/resources.py`, `core/settings.py`, `detection/timer_tracker.py` | Standalone primitives, OS abstraction, JSON configuration, version metadata, and zero-dependency duration tracking. Zero internal dependencies. |
 | **Tier 1** | **Static Data & Configuration** | `detection/game_data.py`, `core/startup.py`, `integrations/updater.py` | Localization catalogs, static entity dictionaries, Windows Run registry management, and GitHub update client. |
 | **Tier 2** | **Normalization & Resolvers** | `detection/normalization.py`, `detection/steam_resolver.py` | Pure zone/menu string normalization and Steam/Proton/Linux prefix path resolution. |
-| **Tier 3** | **Telemetry Ingestion & State** | `detection/detector.py`, `detection/save_reader.py` | Non-blocking telemetry ingestion (`0x7`), binary `.sav` save parsing via `mmap`, and immutable `GameState` derivation. |
-| **Tier 4** | **Wire Presence & Protocols** | `core/presence.py`, `ui/presentation.py`, `integrations/discord_rpc.py`, `integrations/bridge_installer.py` | `PresencePayload` DTO, Discord IPC binary `<II` wire framing, system tray text formatters, and UE4SS bridge mod deployment. |
+| **Tier 3** | **Telemetry Ingestion & State** | `detection/detector.py`, `detection/save_reader.py`, `core/presence.py` | Non-blocking telemetry ingestion (`0x7`), binary `.sav` save parsing via `mmap`, immutable `GameState` derivation, and `PresencePayload` DTO mapping. |
+| **Tier 4** | **Wire Presence & Protocols** | `ui/presentation.py`, `integrations/discord_rpc.py`, `integrations/bridge_installer.py` | Pure system tray text formatters (no re-export shim), Discord IPC binary `<II` wire framing, and UE4SS bridge mod deployment. |
 | **Tier 5** | **Orchestration & App Shell** | `core/orchestrator.py`, `ui/tray_app.py`, `core/smoke.py`, `core/app.py`, `__main__.py`, `__init__.py` | Headless lifecycle coordination, system tray GUI, single-instance mutex gating, startup smoke tests, and CLI entrypoint. |
 
 ---
@@ -95,9 +101,9 @@ The application runtime maintains resilient execution across host process faults
 
 ### Critical Invariants:
 1. **Discord Crash & Disconnect**:
-   - Outbound writes detect broken pipes (`BrokenPipeError`, `OSError`).
-   - The connection transitions to `DISCONNECTED` immediately.
-   - Reconnection runs with exponential backoff and jitter without interrupting the game detection worker loop.
+   - Outbound writes detect broken pipes (`BrokenPipeError`, `OSError`) and handle `evt="ERROR"` responses from Discord IPC.
+   - `DiscordFrameCodec` enforces `MAX_FRAME_LENGTH` (`1_048_576` bytes / 1 MiB) on both encode and decode to prevent unbounded memory allocation.
+   - The connection transitions to `DISCONNECTED` immediately; reconnection runs with exponential backoff and jitter without interrupting the game detection worker loop.
 2. **Game Closure / Crash**:
    - The active loop polls `cached_pid` with $O(1)$ efficiency.
    - Upon process exit, `AppOrchestrator` resets state instantly, clears `cached_pid`, transmits an empty/cleared Rich Presence frame to Discord, and drops back to the 5.0s idle cadence.
@@ -106,11 +112,12 @@ The application runtime maintains resilient execution across host process faults
    - If `abs(current_time - telemetry.timestamp) > 5.0`, telemetry is marked stale.
    - When telemetry is stale or missing, the state machine drops active combat/boss status to prevent ghost presences and falls back to zone exploration or `.sav` checkpoint inspection.
 4. **Non-Blocking Ingestion & Immediate Retry Invariants**:
-   - File reads from the bridge IPC status file via `_read_file_shared_text` execute with non-blocking Win32 `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE` (flags `0x7`).
+   - File reads from the bridge IPC status file via `_read_file_shared_text` and binary `.sav` reads in `SaveFileReader` via `open_file_shared_binary` execute with non-blocking Win32 `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE` (flags `0x7`).
    - During temporary file locks, race conditions, or partial writes by the Lua mod, retry iterations in `BridgeStateProvider` proceed immediately across up to 6 non-blocking attempts without blocking sleep delays (`time.sleep` is strictly forbidden in the ingestion hot loop).
    - If telemetry remains unreadable or empty after non-blocking attempts, ingestion yields cleanly to the orchestrator tick, preserving the strict 2.0s polling cadence without jitter.
-5. **Frame Dirty-Checking**:
+5. **Frame Dirty-Checking & Speculative Field Pruning**:
    - Presence payloads are hashed/compared against the previous broadcast frame. Identical states are not re-sent, preventing pipe saturations and Discord rate-limit throttling.
+   - Speculative multiplayer fields (`party_id`, `party_size`) and unused secondary asset fields (`small_image`, `small_text`) are permanently pruned from `PresencePayload` and outbound Discord IPC frames.
 6. **Startup & Telemetry Liveness (`has_received_telemetry` & `is_starting`)**:
    - Upon initial process detection, `has_received_telemetry` is initialized to `False`, and `is_starting` is set to `True` ("Starting... / Loading...").
    - The `is_starting` state is strictly reserved for initial launch before the first telemetry frame arrives; it remains `True` across empty reads until the first actual frame is ingested.
@@ -142,6 +149,7 @@ The application runtime maintains resilient execution across host process faults
      * Update checks run asynchronously in a dedicated background worker thread (`_worker_thread`), delayed by 3.0 seconds at startup to prioritize immediate game detection and presence publishing without network latency.
      * Network I/O, DNS resolution, and GitHub Releases API latency cannot stall `AppOrchestrator.step_update` or inject jitter into the 2.0s telemetry polling cycle.
      * Update discovery is communicated event-driven via `on_complete` callback (`on_update_check_complete`), notifying UI subscribers without busy-waiting.
+     * `AppUpdater` enforces strict `html_url` validation (`validate_release_url`) on GitHub Release metadata before exposing or opening release URLs.
      * Clean shutdown: `AppOrchestrator.stop()` cancels in-flight update requests and joins the worker thread within the cumulative monotonic shutdown deadline.
      * Deterministic testability: In unit and integration test suites, `FakeUpdater(UpdaterProtocol)` simulates all update lifecycle states offline without making external HTTP requests.
 10. **Unified Callback Lifecycle in `AppOrchestrator`**:
@@ -154,7 +162,7 @@ The application runtime maintains resilient execution across host process faults
     - Centralized SSOT in `detection/steam_resolver.py` unifying path resolution across Windows native, standard Linux, and Steam Deck Proton:
       * **Windows**: Dynamically resolves Steam installation via Windows Registry keys (`HKEY_CURRENT_USER\Software\Valve\Steam`, `HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam`, `HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam`) through `platform.winreg_read_value`.
       * **Linux & Steam Deck**: Scans canonical Steam roots (`~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, and Flatpak `~/.var/app/com.valvesoftware.Steam/.local/share/Steam`).
-      * **VDF Parser**: Efficiently parses Valve Data Format (`libraryfolders.vdf`) to discover external and secondary Steam libraries without external dependencies.
+      * **VDF Parser & Proton SD Card Support**: `get_steam_libraries()` parses Valve Data Format (`libraryfolders.vdf`) to discover external and secondary Steam libraries (including Steam Deck SD card mounts) without external dependencies.
       * **Proton / Wine Prefix Resolution**: Locates App ID `1903340` compat data prefix (`compatdata/1903340/pfx`), resolving emulated Windows paths (`drive_c/users/steamuser/AppData/Local/...`) into native POSIX host paths.
       * Serves as the sole unified resolver mapping `%TEMP%\expedition33_status.json` and save directories across all platforms.
 
@@ -165,26 +173,29 @@ The application runtime maintains resilient execution across host process faults
 These four contracts are immutable boundaries. Modifications require explicit approval and compatibility guarantees.
 
 ### 4.1. UE4SS Telemetry IPC JSON (`%TEMP%\expedition33_status.json`)
-Written atomically by the client-side UE4SS Lua mod in UTF-8:
+Written atomically by `bridge/scripts/main.lua` in UTF-8 and packaged deterministically into `assets/bridge.zip` via `tools/build_bridge_zip.py` (verified in CI with `--check`). All 12 emitted keys (including legacy fields preserved for backwards compatibility):
 ```json
 {
-  "timestamp": 1727788800.0,
-  "raw_zone": "Level_Main_OldLumiere",
-  "zone": "Level_Main_OldLumiere",
   "in_combat": true,
   "enemy_name": "Duollistes",
   "enemies": ["Duollistes", "Glaive"],
+  "zone": "Level_Main_OldLumiere",
+  "raw_zone": "Level_Main_OldLumiere",
+  "raw_level": "Level_Main_OldLumiere",
+  "world_path": "/Game/Levels/...",
   "checkpoint": "Level.SpawnPoint.Camp01",
   "floor": null,
   "tower_floor": null,
-  "tower_trial": [11, 3]
+  "tower_trial": [11, 3],
+  "timestamp": 1727788800
 }
 ```
-- `timestamp`: Float epoch time; checked against 5.0s TTL. Emitted every second as an active heartbeat during combat.
-- `raw_zone` / `zone`: UE5 internal level identifier.
+- `timestamp`: Integer Unix epoch (`os.time()`); checked against 5.0s TTL. Emitted every second as an active heartbeat during combat.
+- `zone` / `raw_zone` / `raw_level` / `world_path`: UE5 internal level and world identifiers (`zone` and `raw_level` preserved for backwards compatibility).
 - `in_combat`: Boolean state toggle.
 - `enemy_name` / `enemies`: Encounter targets.
 - `checkpoint`: Spawn tag mapped in `game_data.json` (delegated to `SaveFileReader` when empty).
+- `floor` / `tower_floor` / `tower_trial`: Endless Tower stage and trial metadata (`floor` preserved for backwards compatibility).
 
 ### 4.2. Discord Native IPC Binary Frame (`<II`)
 Discord Named Pipe (`\\.\pipe\discord-ipc-0`..`9` on Windows, UNIX socket on POSIX) packet wire format:
@@ -227,7 +238,7 @@ Manual `.spec` file generation is formally deprecated and eliminated; all compil
 
 ---
 
-## 5. Dry-Run Test Harness & 3-Tier Testing Architecture
+## 5. Dry-Run Test Harness & 4-Tier Testing Architecture
 
 The codebase decouples domain logic from OS system calls and external sockets through a unified test harness located in `tests/harness/`:
 
@@ -239,16 +250,28 @@ The codebase decouples domain logic from OS system calls and external sockets th
 - **`OrchestratorChaosHarness`**: Context manager orchestrating end-to-end chaos testing, process restarts, Discord pipe drops, and thread leak verification.
 - **`DualClockHarness`**: Controls independent monotonic and epoch time domains to deterministically test timeouts, TTL freshness, and clock decoupling invariants.
 - **`SaveFileBuilder`**: Programmatically generates synthetic binary UE5 `.sav` files for save reader mmap and checkpoint parsing validation.
-- **`FakeUpdater`, `FakeBridgeInstaller` & `FakeStartupService`**: Unified test doubles in `tests/harness/fake_services.py` simulating GitHub release checks, update flow, autostart registry, and UE4SS bridge deployments without disk or network operations.
+- **`FakeUpdater`, `FakeBridgeInstaller`, `FakeStartupService`, `FakeWinreg` & `FakeHttpOpener`**: Unified test doubles in `tests/harness/fake_services.py` simulating GitHub release checks, HTTP responses, autostart registry, and UE4SS bridge deployments without disk or network operations.
+- **`fs_audit.py` & `fuzz_generators.py`**: Filesystem mutation auditing and seeded deterministic fuzzing (`DualClockHarness` + `seed`) for telemetry/save parsers.
 
-### The 3-Tier Test Pyramid
+### The 4-Tier Test Pyramid (`tools/run_matrix.py`)
 
-To guarantee instantaneous developer iteration alongside absolute CI stability, test execution is structured into three deterministic tiers:
+To guarantee instantaneous developer iteration alongside absolute CI stability, test execution is structured into four deterministic tiers orchestrated by `tools/run_matrix.py`:
 
-| Tier | Marker | Scope & Constraints | SLA | Command |
+| Tier | Marker / Profile | Scope & Constraints | SLA | Command |
 | :--- | :--- | :--- | :---: | :--- |
-| **Tier 1: Fast Track** | `unit` | Pure in-memory unit tests; no filesystem I/O, no time delays, zero system calls. Enforces frozen dependencies (`test_frozen_dependencies.py`) and AST invariant decoupling (`test_architectural_invariants.py`). | **< 3.0s** | `uv run pytest -m unit` |
-| **Tier 2: Integration** | `integration` | High-level orchestration, state transitions, process lifecycle, filesystem mock & IPC simulation. | **< 8.0s** | `uv run pytest -m integration` |
-| **Tier 3: Strict Gatekeeper** | *(full matrix)* | Full test suite across unit, integration, and CI schema/diagram validation. | **< 15.0s** | `uv run pytest` |
+| **Tier 1: Fast Track** | `fast` (`unit`) | Ruff lint/format, Pyright, and pure in-memory unit tests (`unit < 2.0s`); no filesystem I/O, no time delays, zero system calls. | **< 2.5s** | `uv run python tools/run_matrix.py --tier fast` |
+| **Tier 2: PR Gate** | `pr` (`integration`) | `fast` + integration tests (`integration < 5.0s`) + `tools/build_bridge_zip.py --check`. | **< 8.0s** | `uv run python tools/run_matrix.py --tier pr` |
+| **Tier 3: Release Gate** | `release` (`ci`) | `pr` + CI AST/schema/diagram tests + cross-OS Pyright (Windows/Linux) + Prettier + `verify_game_data.py` + `--smoke-test`. | **< 15.0s** | `uv run python tools/run_matrix.py --tier release` |
+| **Tier 4: Soak (Opt-in)** | `soak` | Long-running soak tests and `verify_save_reader_dormancy.py`. | *Opt-in* | `uv run python tools/run_matrix.py --tier soak` |
 
 This enables sub-second, 100% deterministic end-to-end integration test execution across macOS, Linux, and Windows in CI without requiring the game or Discord to be installed.
+
+---
+
+## 6. Open Architectural Tensions & Trade-offs
+
+1. **UE4SS Binary Dependency (`dwmapi.dll` / `UE4SS.dll`)**: `assets/bridge.zip` bundles pre-compiled UE4SS binaries alongside `bridge/scripts/main.lua`. While `main.lua` is source-controlled and deterministically verified by `tools/build_bridge_zip.py --check`, the underlying UE4SS DLLs remain opaque upstream binaries.
+2. **Windows MSVCRT `rename()` Semantics in Lua**: On Windows, `os.rename()` in Lua's MSVCRT runtime fails if the destination file already exists or is momentarily held, requiring delete-then-rename or fallback overwrite patterns paired with 6 non-blocking retry reads (`0x7`) on the Python side.
+3. **Desktop Tray Scope (No Web UI)**: The application is intentionally scoped to a lightweight native system tray (`pystray`) with zero embedded HTTP server or web frontend, trading rich visual configuration for minimal memory footprint and zero port/firewall surface.
+4. **Xbox/WinGDK Discovery vs. Steam VDF**: Steam installations are resolved proactively via `SteamCompatResolver` (`libraryfolders.vdf` + Registry), whereas Xbox/WinGDK (`SandFall-WinGDK-Shipping.exe`) relies on active process detection rather than static manifest parsing.
+5. **Frozen 3+4 Dependencies Policy**: Production runtime dependencies are strictly frozen to 3 packages (`pystray`, `pillow`, `psutil`) and dev dependencies to 4 (`pyinstaller`, `ruff`, `pyright`, `pytest`), enforced by `tests/ci/test_frozen_dependencies.py`. New capabilities must be built with the Python standard library rather than adding third-party packages.

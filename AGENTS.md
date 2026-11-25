@@ -6,45 +6,37 @@ Imperative directives for LLMs and developers modifying this codebase. Zero ambi
 
 Always verify changes using [`uv`](https://github.com/astral-sh/uv). Never push unverified code.
 
-- **Fast Track (Universal Pre-commit Runner - Recommended)**:
+- **Fast Track (Pre-commit Runner - SLA < 2.5s)**:
   `uv run python tools/pre_commit.py`
-  *(Runs `ruff check`, `ruff format --check`, and `pytest -m unit` with immediate fail-fast semantics across all OS and shell environments, SLA < 3.0s)*
+  *(Runs `ruff check`, `ruff format --check`, `pyright`, and `pytest -m unit` with fail-fast semantics)*
+- **4-Tier Verification Matrix (`tools/run_matrix.py`)**:
+  - `uv run python tools/run_matrix.py --tier fast` *(SLA < 2.5s: lint, format, pyright, unit)*
+  - `uv run python tools/run_matrix.py --tier pr` *(SLA < 8.0s: fast + integration + `build_bridge_zip.py --check`)*
+  - `uv run python tools/run_matrix.py --tier release` *(SLA < 15.0s: pr + CI tests + Win/Linux pyright + prettier + game_data + smoke)*
+  - `uv run python tools/run_matrix.py --tier soak` *(Opt-in: soak tests + save reader dormancy)*
+- **Bridge Mod Parity**:
+  `uv run python tools/build_bridge_zip.py --check` *(verifies `bridge/scripts/main.lua` matches `assets/bridge.zip`)*
 
-- **Fast Track (Direct Shell)**:
-  - *Bash / PowerShell 7+*:
-    `uv run ruff check && uv run pytest -m unit` (SLA < 3.0s)
-    `uv run pytest -m integration` (SLA < 8.0s)
-  - *Windows PowerShell 5.1 (Standard)*:
-    `uv run ruff check; if ($LASTEXITCODE -eq 0) { uv run pytest -m unit }`
+## 2. Core Engineering Directives
 
-- **Full Matrix (Strict Gatekeeper - Tier 1, 2 & 3)**:
-  - *Bash / PowerShell 7+*:
-    `uv run ruff check && uv run ruff format --check && uv run pyright && uv run pytest && npx --yes prettier --check src/expedition33_rpc/assets/game_data.json` (SLA < 15.0s)
-  - *Windows PowerShell 5.1 (Standard)*:
-    `uv run ruff check; if ($LASTEXITCODE -eq 0) { uv run ruff format --check }; if ($LASTEXITCODE -eq 0) { uv run pyright }; if ($LASTEXITCODE -eq 0) { uv run pytest }; if ($LASTEXITCODE -eq 0) { npx --yes prettier --check src/expedition33_rpc/assets/game_data.json }`
-
-## 2. Core Engineering Directives for AI Agents
-
-1. **Radical Feature Parsimony (YAGNI)**: Reject speculative abstractions, unrequested config knobs, and architectural over-engineering. Solve the immediate task with minimal state and minimal code footprint.
-2. **Resource-Critical Loop Protection**: Zero unnecessary overhead in the polling engine:
-   - *Idle State* (game not detected): 5.0s sleep interval, query only process names/PIDs via `psutil`.
-   - *Active State* (game running): 2.0s polling interval with O(1) PID liveness checks on `cached_pid`.
-   - *Telemetry Ingestion*: Non-blocking Win32 `CreateFileW` with `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE` (flags `0x7`) taking < 1 ms.
-   - *Telemetry Heartbeat*: The Lua mod continuously emits heartbeat frames during combat to ensure the 5.0s TTL freshness SLA is satisfied across prolonged encounters.
-   - *Checkpoint & Save Resolution*: When bridge checkpoint data is empty, query `SaveFileReader` with O(1) `st_mtime` file caching. Never disable save reader fallback based on active telemetry alone without explicit bridge checkpoint tokens.
-   - *Startup & Ingestion Lifecycle*: Track process telemetry arrival via `has_received_telemetry`. The `is_starting` state is strictly reserved for initial launch before the first telemetry frame arrives (remains `True` until the first actual frame); never regress to `is_starting` during transient stalls or empty frames.
-   - *Clock Decoupling & Parameter Uniformity*: Strict separation of time domains. Use `time.monotonic()` for all internal timers, polling intervals, idle backoff, reconnection retries, thread join deadlines, and cooldowns. Use `time.time()` (epoch seconds) strictly for outbound Discord Rich Presence wire frames (`timestamps.start`) and telemetry timestamp freshness. Never compare or mix monotonic timestamps with epoch timestamps. Furthermore, clock injection parameters across all core classes (`BridgeStateProvider`, `GameDetector`, `AppOrchestrator`, `DiscordRPCManager`) must strictly adhere to the standardized naming conventions `monotonic_provider` and `epoch_provider` (ambiguous naming such as `time_provider` is strictly prohibited and gatekept via AST).
-   - *Update Engine Decoupling*: Decouple update checking from the polling engine via `UpdaterProtocol`. Background checks must run asynchronously in a dedicated worker thread with delayed execution (3.0s), never blocking or injecting latency into the telemetry polling loop.
-   - *Bridge Installation*: Background daemon thread with strict cooldown and retry limits.
-   - *Discord IPC*: Dirty-checking on outbound frames; never send identical presence payloads.
-3. **Dry-Run & Integration-First**: Test observable system behavior and interface contracts, not brittle private methods. Use the unified harness (`FakeProcess`, `GameSessionSimulator`, `DiscordPipeSimulator & MockDiscordServer`, `HeadlessTrayHarness`, `FakeUpdater`, `FakeBridgeInstaller`, and `FakeStartupService`) from `tests/harness/` for deterministic testing across all 3 tiers.
-4. **Hard Stop on Semi-Reversible Choices**: Never add dependencies to `pyproject.toml`, alter the external IPC status JSON schema, or mutate the Discord binary `<II` wire frame layout without explicit human approval. Production runtime dependencies are strictly frozen and enforced via `tests/ci/test_frozen_dependencies.py`: `pystray>=0.19.5`, `pillow>=10.0.0`, and `psutil>=5.9.0` (with dev dependencies limited strictly to `pyinstaller>=6.0.0`, `ruff>=0.9.0`, `pyright>=1.1.0`, and `pytest>=8.0.0`).
-5. **Zero Suppressed Warnings**: 100% strict type safety under Pyright (`typeCheckingMode = "standard"` with explicit enforcement of `reportUnknownArgumentType = true` and `reportUnknownVariableType = true` in `pyproject.toml`). Absolutely zero `type: ignore`, `# noqa`, or unjustified Ruff suppressions across the codebase.
-6. **Unified Public API & Zero Shim Invariant**: All public interfaces are exposed cleanly and directly through canonical modules without backwards-compatibility aliases or legacy shims. Direct unified imports only (e.g. `AppOrchestrator`, `SteamCompatResolver`, `ZoneTimerTracker`, `PresencePayload`); all deprecated shim references (such as `rpc`, `update`, `now`) as well as `compat_paths.py`, manual `.spec` files, and any untyped facades are definitively eliminated and statically enforced by AST gatekeepers in CI.
+1. **Radical Feature Parsimony (YAGNI)**: Reject speculative abstractions, unrequested config knobs, and speculative payload fields (`party_id`, `party_size`, `small_image`, `small_text` are permanently pruned).
+2. **6-Tier Acyclic DAG (AST-Enforced)**: Lower tiers never import higher tiers (`test_strict_6_tier_dag_hierarchy`):
+   - Tier 0: `_version`, `core/platform`, `core/resources`, `core/settings`, `detection/timer_tracker`
+   - Tier 1: `detection/game_data`, `core/startup`, `integrations/updater`
+   - Tier 2: `detection/normalization`, `detection/steam_resolver`
+   - Tier 3: `detection/detector`, `detection/save_reader`, `core/presence`
+   - Tier 4: `ui/presentation`, `integrations/discord_rpc`, `integrations/bridge_installer`
+   - Tier 5: `core/orchestrator`, `ui/tray_app`, `core/smoke`, `core/app`, `__main__`, `__init__`
+3. **Resource-Critical Loop Protection**:
+   - *Idle*: 5.0s sleep, query only process names/PIDs via `psutil`. *Active*: 2.0s poll, O(1) `cached_pid` check.
+   - *Telemetry Ingestion*: Non-blocking Win32 `0x7` (`_read_file_shared_text` / `open_file_shared_binary` in `SaveFileReader`) taking < 1 ms; 5.0s TTL freshness; `has_received_telemetry` prevents `is_starting` regression.
+   - *Clock Decoupling*: `monotonic_provider` (`time.monotonic()`) for internal timers/deadlines/cooldowns; `epoch_provider` (`time.time()`) strictly for Discord `timestamps.start` and telemetry TTL. Never mix domains.
+   - *Async Boundaries*: `UpdaterProtocol` runs in background thread (3.0s delay); `DiscordRPCManager` dirty-checks frames, caps `MAX_FRAME_LENGTH` (1 MiB), and handles `evt="ERROR"`.
+4. **Dry-Run & Integration-First**: Test observable contracts via `tests/harness/` (`FakeProcess`, `GameSessionSimulator`, `DiscordPipeSimulator`, `HeadlessTrayHarness`, `DualClockHarness`, `FakeWinreg`, `FakeHttpOpener`).
+5. **Hard Stop on Semi-Reversible Choices**: Never add dependencies to `pyproject.toml` (frozen 3 runtime + 4 dev), alter `expedition33_status.json` schema, or mutate Discord `<II` framing without explicit approval.
+6. **Zero Suppressed Warnings & Zero Shims**: 100% Pyright `standard` compliance (`reportUnknownArgumentType`, `reportUnknownVariableType`). Zero `type: ignore`, `# noqa`, `compat_paths.py`, manual `.spec`, or re-export shims.
 
 ## 3. Code Conventions
 
-- **Language Runtime**: Python 3.12+ standard syntax.
-- **Modern Typing**: PEP 695 type aliases (`type PresenceDict = dict[str, Any]`), `typing.override` on overrides, and built-in generics (`list[str]`, `dict[str, Any]`, `tuple[int, int] | None`).
-- **Control Flow**: Prefer structural pattern matching (`match ... case`) and pure functional transforms over deep conditional trees.
-- **Cross-Platform Primitives**: Route all OS-level calls (mutexes, locks, registry, file sharing) through `core/platform.py`. Never invoke raw `ctypes`, `winreg`, or POSIX locks inside domain logic.
+- **Python 3.12+**: PEP 695 `type` aliases, `@override`, built-in generics, `match ... case`.
+- **Cross-Platform Primitives**: Route all OS-level calls (`ctypes`, `winreg`, `flock`, `0x7` shared reads) through `core/platform.py`.

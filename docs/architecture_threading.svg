@@ -47,7 +47,7 @@
 
   <rect class="node" x="480" y="84" width="180" height="58" rx="11" stroke="#818cf8"/>
   <text class="main" x="570" y="108">&#9889; Shared File I/O</text>
-  <text class="sub" x="570" y="126">Win32 CreateFileW (0x7)</text>
+  <text class="sub" x="570" y="126">open_file_shared_binary (0x7)</text>
 
   <rect class="node" x="704" y="84" width="140" height="58" rx="11" stroke="#818cf8"/>
   <text class="main" x="774" y="108">&#128172; Discord Client</text>
