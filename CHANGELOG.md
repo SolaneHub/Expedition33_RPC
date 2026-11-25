@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.7.0] - 2026-11-25
+
+### Bridge Mod Source & Deterministic Packaging Parity
+- **Lua Source Tracking & Repack Tooling (`bridge/scripts/main.lua`, `tools/build_bridge_zip.py`, `tests.ci.test_bridge_zip_parity`)**:
+  - Tracked `bridge/scripts/main.lua` in-repository as the single source of truth for the UE4SS Combat Bridge mod.
+  - Introduced `tools/build_bridge_zip.py` (`--check` / `--rebuild`) to deterministically repack and verify `src/expedition33_rpc/assets/bridge.zip` with fixed timestamps and SHA-256 preservation of binary assets.
+  - Updated `bridge_installer.py` to preserve third-party UE4SS mods in `mods.txt` during installation and uninstallation.
+
+### Core, Detection & Concurrency Hardening
+- **Platform I/O & Immutable Game Data (`core.platform`, `detection.save_reader`, `detection.game_data`, `detection.detector`, `detection.steam_resolver`)**:
+  - Centralized non-blocking Win32 `0x7` shared binary file reads (`open_file_shared_binary`) and Discord pipe opening (`open_discord_pipe`) in `core.platform`.
+  - Refactored `detection.game_data` to expose frozen `MappingProxyType` snapshots with deterministic cache clearing.
+  - Hardened `core.smoke`, `core.startup`, `detection.steam_resolver`, and `detection.timer_tracker` clock/path handling.
+- **IPC Framing, Updater Security & Lock Isolation (`integrations.discord_rpc`, `integrations.updater`, `core.orchestrator`, `ui.tray_app`)**:
+  - Enforced `MAX_FRAME_LENGTH` (1 MiB), strict `<II` header validation, read timeouts, and `evt="ERROR"` handling in `DiscordIPCClient`.
+  - Added strict GitHub release URL validation (`validate_release_url`) and generation-based background cancellation in `AppUpdater`.
+  - Separated `_bridge_io_lock` and `_bridge_lock` with lock-free subscriber snapshot dispatch in `AppOrchestrator`, added `_menu_lock` in `ExpeditionTrayApp`, and pruned residual re-exports in `ui.presentation`.
+
+### 4-Tier Verification Matrix, Behavioral Tests & CI Soak Suite
+- **Verification Matrix & CI Workflows (`tools/run_matrix.py`, `tools/pre_commit.py`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`)**:
+  - Introduced the cross-OS 4-tier verification matrix (`fast`, `pr`, `release`, `soak`) with per-step timing and SLA reporting.
+  - Expanded CI with cross-OS Pyright (`Windows` and `Linux`), bridge zip parity verification, scheduled/main soak runs, and `release.yml` parity with `_version.py` and headless `PYSTRAY_BACKEND=dummy`.
+- **Behavioral, Adversarial, Fuzz & Dormancy Suites (`tests/`)**:
+  - Refactored core, integration, detection, and tray test suites to deterministic behavioral contracts via `tests/harness/` (`fs_audit.py`, `fuzz_generators.py`, chaos and adversarial IPC harnesses) and added version parity enforcement (`tests/ci/test_version_parity.py`).
+
 ## [v2.6.0] - 2026-11-22
 
 ### 6-Tier Acyclic Architecture & Domain Decoupling
