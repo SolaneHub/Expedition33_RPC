@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
+import errno
 import logging
 import os
 import sys
 import tempfile
 import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +70,13 @@ def winreg_delete_value(hkey: Any, subkey: str, value_name: str, winreg_module: 
         return False
     try:
         with reg.OpenKey(hkey, subkey, 0, getattr(reg, "KEY_SET_VALUE", 0)) as key:
-            with contextlib.suppress(FileNotFoundError, OSError):
+            try:
                 reg.DeleteValue(key, value_name)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                if getattr(exc, "winerror", None) != 2 and exc.errno != errno.ENOENT:
+                    raise
             return True
     except Exception as e:
         logger.error("[Platform] winreg_delete_value error: %s", e)
@@ -210,30 +217,17 @@ def is_already_running(
     lock_path: Path | str | None = None,
 ) -> bool:
     """Checks if another instance of Expedition 33 RPC is already running across Windows (Named Mutex) and POSIX (flock)."""
+    global _GLOBAL_SINGLE_INSTANCE_LOCK
     if sys.platform == "win32":
-        global _GLOBAL_SINGLE_INSTANCE_LOCK
         if mutex_name is not None:
             _GLOBAL_SINGLE_INSTANCE_LOCK.release()
             _GLOBAL_SINGLE_INSTANCE_LOCK = SingleInstanceLock(mutex_name=mutex_name)
         return not _GLOBAL_SINGLE_INSTANCE_LOCK.acquire()
 
-    return not acquire_posix_file_lock(lock_path=lock_path)
-
-
-def acquire_posix_file_lock(lock_path: Path | str | None = None) -> bool:
-    """Acquires an exclusive advisory file lock on POSIX systems (Linux / Steam Deck / macOS)."""
-    if sys.platform == "win32":
-        return True
-    global _GLOBAL_SINGLE_INSTANCE_LOCK
     if lock_path is not None:
         _GLOBAL_SINGLE_INSTANCE_LOCK.release()
         _GLOBAL_SINGLE_INSTANCE_LOCK = SingleInstanceLock(lock_path=lock_path)
-    return _GLOBAL_SINGLE_INSTANCE_LOCK.acquire()
-
-
-def release_posix_file_lock() -> None:
-    """Releases the POSIX advisory file lock held by the current process, if any."""
-    release_single_instance_lock()
+    return not _GLOBAL_SINGLE_INSTANCE_LOCK.acquire()
 
 
 def release_single_instance_lock() -> None:
@@ -326,19 +320,13 @@ def read_file_shared_text(path: str | Path) -> str:
             raise
 
         try:
-            chunk = os.read(fd, 65536)
-            if len(chunk) < 65536:
-                raw = chunk
-            else:
-                chunks = [chunk]
-                while True:
-                    more = os.read(fd, 65536)
-                    if not more:
-                        break
-                    chunks.append(more)
-                    if len(more) < 65536:
-                        break
-                raw = b"".join(chunks)
+            chunks: list[bytes] = []
+            while True:
+                more = os.read(fd, 65536)
+                if not more:
+                    break
+                chunks.append(more)
+            raw = b"".join(chunks)
         finally:
             os.close(fd)
 
@@ -348,7 +336,66 @@ def read_file_shared_text(path: str | Path) -> str:
         return f.read().decode("utf-8")
 
 
-def peek_named_pipe_ready(pipe_or_fd: Any, timeout: float = 0.0) -> bool:
+@contextlib.contextmanager
+def open_file_shared_binary(path: str | Path) -> Iterator[BinaryIO]:
+    """Opens a binary file allowing concurrent reads, writes, and deletions on Windows NTFS,
+
+    with graceful fallback for POSIX and standard file access.
+    """
+    path_str = str(path)
+    if sys.platform == "win32" and _kernel32 is not None and _msvcrt is not None:
+        handle = _kernel32.CreateFileW(
+            path_str,
+            _GENERIC_READ,
+            _FILE_SHARE_READ | _FILE_SHARE_WRITE | _FILE_SHARE_DELETE,
+            None,
+            _OPEN_EXISTING,
+            _FILE_ATTRIBUTE_NORMAL,
+            None,
+        )
+        if handle in (_INVALID_HANDLE_VALUE, None, 0, -1, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
+            err = ctypes.get_last_error()
+            if err in (2, 3):
+                raise FileNotFoundError(path_str)
+            raise OSError(None, ctypes.FormatError(err), path_str, err)
+        try:
+            fd = _msvcrt.open_osfhandle(handle, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        except Exception:
+            _kernel32.CloseHandle(handle)
+            raise
+
+        try:
+            f = os.fdopen(fd, "rb")
+        except Exception:
+            os.close(fd)
+            raise
+
+        with f:
+            yield f
+        return
+
+    with open(path_str, "rb") as f:
+        yield f
+
+
+def open_discord_pipe(path: str, timeout: float = 5.0) -> Any:
+    """Opens a Discord IPC named pipe (Win32) or UNIX domain socket (POSIX)."""
+    if sys.platform == "win32":
+        return open(path, "r+b", buffering=0)
+
+    import socket
+
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    sock.connect(path)
+    return sock
+
+
+def peek_named_pipe_ready(
+    pipe_or_fd: Any,
+    timeout: float = 0.0,
+    monotonic_provider: Callable[[], float] | None = None,
+) -> bool:
     """Checks whether bytes are available to read from a Win32 named pipe without blocking.
 
     On POSIX or non-Windows platforms, returns True immediately (sockets/files handled via standard I/O).
@@ -389,7 +436,8 @@ def peek_named_pipe_ready(pipe_or_fd: Any, timeout: float = 0.0) -> bool:
         return True
 
     avail = ctypes.c_ulong(0)
-    deadline = time.monotonic() + max(0.0, timeout)
+    mono = monotonic_provider if monotonic_provider is not None else time.monotonic
+    deadline = mono() + max(0.0, timeout)
 
     while True:
         res = peek_fn(handle, None, 0, None, ctypes.byref(avail), None)
@@ -397,7 +445,7 @@ def peek_named_pipe_ready(pipe_or_fd: Any, timeout: float = 0.0) -> bool:
             raise ConnectionError("Named pipe broken or closed")
         if avail.value > 0:
             return True
-        if time.monotonic() >= deadline:
+        if mono() >= deadline:
             return False
         # Sleep a minimal non-zero duration to avoid busy-spin
         time.sleep(0.001)
@@ -460,12 +508,12 @@ def prompt_folder_selection(
 
 __all__ = [
     "SingleInstanceLock",
-    "acquire_posix_file_lock",
     "is_already_running",
+    "open_discord_pipe",
+    "open_file_shared_binary",
     "peek_named_pipe_ready",
     "prompt_folder_selection",
     "read_file_shared_text",
-    "release_posix_file_lock",
     "release_single_instance_lock",
     "winreg",
     "winreg_delete_value",

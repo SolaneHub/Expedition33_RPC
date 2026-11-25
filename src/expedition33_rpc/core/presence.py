@@ -38,8 +38,6 @@ class PresencePayload:
     start_timestamp: int | None = None
     large_image: str | None = None
     large_text: str | None = None
-    small_image: str | None = None
-    small_text: str | None = None
 
 
 def get_presentation_strings(lang: str) -> dict[str, str]:

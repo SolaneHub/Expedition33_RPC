@@ -178,6 +178,55 @@ def validate_endless_tower_trials(data: dict[str, Any], errors: list[str]) -> No
         )
 
 
+def validate_target_process_names(data: dict[str, Any], errors: list[str]) -> None:
+    """Validates target_process_names is a non-empty list of lowercase .exe strings."""
+    procs = data.get("target_process_names")
+    if not isinstance(procs, list) or not procs:
+        errors.append("Missing or empty 'target_process_names' list")
+        return
+    for idx, p in enumerate(procs):
+        if not isinstance(p, str) or not p.strip() or p != p.lower() or not p.endswith(".exe"):
+            errors.append(
+                f"target_process_names[{idx}] must be a non-empty lowercase .exe string, got {p!r}"
+            )
+
+
+def validate_main_menu_tokens(data: dict[str, Any], errors: list[str]) -> None:
+    """Validates main_menu_tokens is a non-empty list of lowercase strings."""
+    tokens = data.get("main_menu_tokens")
+    if not isinstance(tokens, list) or not tokens:
+        errors.append("Missing or empty 'main_menu_tokens' list")
+        return
+    for idx, t in enumerate(tokens):
+        if not isinstance(t, str) or not t.strip() or t != t.lower():
+            errors.append(
+                f"main_menu_tokens[{idx}] must be a non-empty lowercase string, got {t!r}"
+            )
+
+
+def validate_contextual_checkpoints(data: dict[str, Any], errors: list[str]) -> None:
+    """Validates contextual_checkpoints is a non-empty list with required keys and matchers."""
+    entries = data.get("contextual_checkpoints")
+    if not isinstance(entries, list) or not entries:
+        errors.append("Missing or empty 'contextual_checkpoints' list")
+        return
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            errors.append(f"contextual_checkpoints[{idx}] must be a dict")
+            continue
+        for req_key in ("zone_keywords", "en", "it"):
+            if req_key not in entry:
+                errors.append(f"contextual_checkpoints[{idx}] missing required key '{req_key}'")
+        has_matcher = any(
+            isinstance(entry.get(k), list) and len(entry[k]) > 0
+            for k in ("suffixes", "contains", "checkpoint_keywords", "checkpoint_exact")
+        )
+        if not has_matcher:
+            errors.append(
+                f"contextual_checkpoints[{idx}] must have non-empty 'suffixes', 'contains', 'checkpoint_keywords', or 'checkpoint_exact'"
+            )
+
+
 def verify_game_data(file_path: Path | None = None) -> tuple[bool, list[str]]:
     """Runs all integrity checks on game_data.json and returns (is_valid, errors)."""
     target_path = file_path if file_path is not None else resolve_game_data_path()
@@ -198,12 +247,18 @@ def verify_game_data(file_path: Path | None = None) -> tuple[bool, list[str]]:
     # a) Localized presentation check
     validate_localized_presentation(data, errors)
 
-    # b) Overrides dictionary check
+    # b) Overrides and tower stages dictionary checks
     validate_overrides_by_lang(data, "zone_name_overrides_by_lang", errors)
     validate_overrides_by_lang(data, "checkpoint_names_by_lang", errors)
+    validate_overrides_by_lang(data, "tower_stages_by_lang", errors)
 
     # c) Endless tower trials check
     validate_endless_tower_trials(data, errors)
+
+    # d) Process names, menu tokens, and contextual checkpoints
+    validate_target_process_names(data, errors)
+    validate_main_menu_tokens(data, errors)
+    validate_contextual_checkpoints(data, errors)
 
     return len(errors) == 0, errors
 

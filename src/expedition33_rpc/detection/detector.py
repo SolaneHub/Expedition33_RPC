@@ -283,7 +283,11 @@ class BridgeStateProvider:
                     if bridge.get("floor") is not None
                     else bridge.get("tower_floor")
                 )
-                tower_floor = raw_floor if isinstance(raw_floor, int) else None
+                tower_floor = (
+                    raw_floor
+                    if isinstance(raw_floor, int) and not isinstance(raw_floor, bool)
+                    else None
+                )
 
                 raw_enemies = bridge.get("enemies")
                 enemies_list: list[str] = (
@@ -296,8 +300,11 @@ class BridgeStateProvider:
                 tower_trial: TowerTrial | None = None
                 if isinstance(raw_trial, list):
                     trial_items = cast(list[Any], raw_trial)
-                    if len(trial_items) == 2:
-                        tower_trial = (int(trial_items[0]), int(trial_items[1]))
+                    if len(trial_items) == 2 and not any(isinstance(x, bool) for x in trial_items):
+                        try:
+                            tower_trial = (int(trial_items[0]), int(trial_items[1]))
+                        except (ValueError, TypeError):
+                            tower_trial = None
                 elif isinstance(raw_trial, str) and raw_trial:
                     tower_trial = raw_trial
 
@@ -345,6 +352,7 @@ class GameDetector:
         monotonic_provider: Callable[[], float] | None = None,
         epoch_provider: Callable[[], float] | None = None,
         save_reader: SaveReaderProtocol | None = None,
+        steam_resolver: SteamCompatResolver | None = None,
     ):
         self.cached_pid: int | None = None
         self._cached_create_time: float | None = None
@@ -385,9 +393,17 @@ class GameDetector:
 
         # Telemetry Provider (Bridge IPC)
         self.bridge_provider: BridgeProviderProtocol | None = (
-            BridgeStateProvider() if bridge_provider is _DEFAULT_BRIDGE else bridge_provider
+            BridgeStateProvider(
+                epoch_provider=self.epoch_provider,
+                monotonic_provider=self.monotonic_provider,
+            )
+            if bridge_provider is _DEFAULT_BRIDGE
+            else bridge_provider
         )
         self.save_reader: SaveReaderProtocol | None = save_reader
+        self._steam_resolver: SteamCompatResolver = (
+            steam_resolver if steam_resolver is not None else SteamCompatResolver()
+        )
 
     @property
     def exe_path(self) -> str | None:
@@ -412,7 +428,7 @@ class GameDetector:
             pass
 
     def find_game_process(
-        self, now: float | None = None, force: bool = False
+        self, now_monotonic: float | None = None, force: bool = False
     ) -> ProcessLike | None:
         """Finds game process using cached PID validation or fast name-only process iteration with idle backoff."""
         # 1. Fast path: validate cached PID
@@ -444,7 +460,7 @@ class GameDetector:
             self.has_received_telemetry = False
 
         # 2. Optimized global enumeration with adaptive idle backoff
-        current_time = self.monotonic_provider() if now is None else now
+        current_time = self.monotonic_provider() if now_monotonic is None else now_monotonic
         if (
             self.cached_pid is None
             and self.process_scanner is None
@@ -481,10 +497,10 @@ class GameDetector:
         self,
         ini_path: Path | str | None = None,
         force: bool = False,
-        now: float | None = None,
+        now_monotonic: float | None = None,
     ) -> str:
         """Extracts configured UI language from GameUserSettings.ini with mtime caching and interval throttling."""
-        current_time = self.monotonic_provider() if now is None else now
+        current_time = self.monotonic_provider() if now_monotonic is None else now_monotonic
         if not force and ini_path is None and (current_time - self._last_language_check_time < 5.0):
             return self._cached_language
 
@@ -492,7 +508,7 @@ class GameDetector:
         target_ini = (
             ini_path
             or self._game_user_settings_path
-            or SteamCompatResolver().resolve_game_user_settings_path()
+            or self._steam_resolver.resolve_game_user_settings_path()
         )
         if target_ini is None:
             target_ini = os.path.expandvars(
@@ -536,7 +552,7 @@ class GameDetector:
             force: When True, bypasses idle backoff for process scanning.
         """
         current_monotonic = self.monotonic_provider() if now_monotonic is None else now_monotonic
-        proc = self.find_game_process(now=current_monotonic, force=force)
+        proc = self.find_game_process(now_monotonic=current_monotonic, force=force)
 
         if not proc:
             self.cached_pid = None
@@ -554,7 +570,7 @@ class GameDetector:
             self.timer_tracker.reset()
             return GameState(is_running=False, game_language=self._cached_language)
 
-        lang = self.get_game_language(force=force, now=current_monotonic)
+        lang = self.get_game_language(force=force, now_monotonic=current_monotonic)
 
         # Extract process creation time safely only for the matched process
         proc_create_time: float | None = None
@@ -572,6 +588,9 @@ class GameDetector:
                 self.last_raw_zone = ""
                 self.last_raw_checkpoint = ""
                 self.current_tower_trial = None
+                self.game_exe_path = None
+                self.game_win64_dir = None
+                self._resolve_and_cache_process_paths(proc)
                 if self.bridge_provider is not None:
                     self.bridge_provider.reset()
                 if self.save_reader is not None:
@@ -655,24 +674,24 @@ class GameDetector:
                 normalized_trial: tuple[int, int] | str
                 if isinstance(bridge_trial, (list, tuple)):
                     trial_seq = cast(tuple[Any, Any] | list[Any], bridge_trial)
-                    if len(trial_seq) == 2:
-                        normalized_trial = (
-                            int(trial_seq[0]),
-                            int(trial_seq[1]),
-                        )
+                    if len(trial_seq) == 2 and not any(isinstance(x, bool) for x in trial_seq):
+                        try:
+                            normalized_trial = (
+                                int(trial_seq[0]),
+                                int(trial_seq[1]),
+                            )
+                        except (ValueError, TypeError):
+                            normalized_trial = str(trial_seq)
                     else:
                         normalized_trial = str(trial_seq)
                 else:
                     normalized_trial = str(bridge_trial)
                 self.current_tower_trial = normalized_trial
-                bt_tuple = (
-                    normalized_trial if isinstance(normalized_trial, tuple) else normalized_trial
-                )
                 for stage_info, canonical_boss, _ in ENDLESS_TOWER_TRIALS:
                     st_tuple = (
                         tuple(stage_info) if isinstance(stage_info, (list, tuple)) else stage_info
                     )
-                    if st_tuple == bt_tuple and canonical_boss:
+                    if st_tuple == normalized_trial and canonical_boss:
                         effective_enemy = canonical_boss
                         break
                 if effective_enemy == raw_enemy and (raw_enemy or raw_enemies):
@@ -706,7 +725,7 @@ class GameDetector:
             in_combat=in_combat,
             is_tower=is_tower,
             current_tower_trial=self.current_tower_trial,
-            now=current_epoch,
+            now_epoch=current_epoch,
             now_monotonic=current_monotonic,
         )
 

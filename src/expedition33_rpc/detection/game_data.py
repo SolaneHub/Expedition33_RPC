@@ -5,6 +5,9 @@ import json
 import os
 import sys
 import types
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, cast
 
 from expedition33_rpc.core.resources import get_resource_path
@@ -141,82 +144,80 @@ def _build_endless_tower_trials(raw_trials: list[Any]) -> list[TrialDefinition]:
     ]
 
 
-def get_zone_name_overrides_by_lang() -> dict[str, dict[str, str]]:
-    """Returns zone name overrides mapping by language code, cached."""
-    data = get_game_data()
-    return _get_zone_name_overrides_cached(id(data))
+def _freeze_nested_str_map(
+    raw: dict[str, dict[str, str]],
+) -> Mapping[str, Mapping[str, str]]:
+    return MappingProxyType({k: MappingProxyType(dict(v)) for k, v in raw.items()})
+
+
+@dataclass(frozen=True, slots=True)
+class _GameDataSnapshot:
+    zone_name_overrides_by_lang: Mapping[str, Mapping[str, str]]
+    checkpoint_names_by_lang: Mapping[str, Mapping[str, str]]
+    tower_stages_by_lang: Mapping[str, Mapping[str, str]]
+    localized_presentation: Mapping[str, Mapping[str, str]]
+    contextual_checkpoints: tuple[Mapping[str, Any], ...]
+    endless_tower_trials: tuple[TrialDefinition, ...]
 
 
 @functools.cache
-def _get_zone_name_overrides_cached(catalog_id: int) -> dict[str, dict[str, str]]:
-    del catalog_id
+def _get_snapshot() -> _GameDataSnapshot:
     data = get_game_data()
-    return dict(data.get("zone_name_overrides_by_lang", {}))
+    return _GameDataSnapshot(
+        zone_name_overrides_by_lang=_freeze_nested_str_map(
+            data.get("zone_name_overrides_by_lang", {})
+        ),
+        checkpoint_names_by_lang=_freeze_nested_str_map(data.get("checkpoint_names_by_lang", {})),
+        tower_stages_by_lang=_freeze_nested_str_map(data.get("tower_stages_by_lang", {})),
+        localized_presentation=_freeze_nested_str_map(data.get("localized_presentation", {})),
+        contextual_checkpoints=tuple(
+            MappingProxyType(dict(item)) for item in data.get("contextual_checkpoints", [])
+        ),
+        endless_tower_trials=tuple(
+            _build_endless_tower_trials(data.get("endless_tower_trials", []))
+        ),
+    )
 
 
-def get_checkpoint_names_by_lang() -> dict[str, dict[str, str]]:
-    """Returns checkpoint names mapping by language code, cached."""
-    data = get_game_data()
-    return _get_checkpoint_names_cached(id(data))
+_orig_game_data_cache_clear = get_game_data.cache_clear
 
 
-@functools.cache
-def _get_checkpoint_names_cached(catalog_id: int) -> dict[str, dict[str, str]]:
-    del catalog_id
-    data = get_game_data()
-    return dict(data.get("checkpoint_names_by_lang", {}))
+def _clear_game_data_caches() -> None:
+    _orig_game_data_cache_clear()
+    _get_snapshot.cache_clear()
 
 
-def get_tower_stages_by_lang() -> dict[str, dict[str, str]]:
-    """Returns tower stage names mapping by language code, cached."""
-    data = get_game_data()
-    return _get_tower_stages_cached(id(data))
+get_game_data.cache_clear = _clear_game_data_caches
 
 
-@functools.cache
-def _get_tower_stages_cached(catalog_id: int) -> dict[str, dict[str, str]]:
-    del catalog_id
-    data = get_game_data()
-    return dict(data.get("tower_stages_by_lang", {}))
+def get_zone_name_overrides_by_lang() -> Mapping[str, Mapping[str, str]]:
+    """Returns zone name overrides mapping by language code, cached and immutable."""
+    return _get_snapshot().zone_name_overrides_by_lang
 
 
-def get_localized_presentation() -> dict[str, dict[str, str]]:
-    """Returns localized presentation strings mapping by language code, cached."""
-    data = get_game_data()
-    return _get_localized_presentation_cached(id(data))
+def get_checkpoint_names_by_lang() -> Mapping[str, Mapping[str, str]]:
+    """Returns checkpoint names mapping by language code, cached and immutable."""
+    return _get_snapshot().checkpoint_names_by_lang
 
 
-@functools.cache
-def _get_localized_presentation_cached(catalog_id: int) -> dict[str, dict[str, str]]:
-    del catalog_id
-    data = get_game_data()
-    return dict(data.get("localized_presentation", {}))
+def get_tower_stages_by_lang() -> Mapping[str, Mapping[str, str]]:
+    """Returns tower stage names mapping by language code, cached and immutable."""
+    return _get_snapshot().tower_stages_by_lang
 
 
-def get_contextual_checkpoints() -> list[dict[str, Any]]:
-    """Returns contextual checkpoint matchers list, cached."""
-    data = get_game_data()
-    return _get_contextual_checkpoints_cached(id(data))
+def get_localized_presentation() -> Mapping[str, Mapping[str, str]]:
+    """Returns localized presentation strings mapping by language code, cached and immutable."""
+    return _get_snapshot().localized_presentation
 
 
-@functools.cache
-def _get_contextual_checkpoints_cached(catalog_id: int) -> list[dict[str, Any]]:
-    del catalog_id
-    data = get_game_data()
-    return list(data.get("contextual_checkpoints", []))
+def get_contextual_checkpoints() -> tuple[Mapping[str, Any], ...]:
+    """Returns contextual checkpoint matchers tuple, cached and immutable."""
+    return _get_snapshot().contextual_checkpoints
 
 
-def get_endless_tower_trials() -> list[TrialDefinition]:
-    """Returns parsed endless tower trials definitions, cached."""
-    data = get_game_data()
-    return _get_endless_tower_trials_cached(id(data))
-
-
-@functools.cache
-def _get_endless_tower_trials_cached(catalog_id: int) -> list[TrialDefinition]:
-    del catalog_id
-    data = get_game_data()
-    return _build_endless_tower_trials(data.get("endless_tower_trials", []))
+def get_endless_tower_trials() -> tuple[TrialDefinition, ...]:
+    """Returns parsed endless tower trials definitions tuple, cached and immutable."""
+    return _get_snapshot().endless_tower_trials
 
 
 LAZY_ATTRIBUTES = frozenset(
@@ -245,27 +246,27 @@ class _GameDataModule(types.ModuleType):
         return get_main_menu_tokens()
 
     @property
-    def ZONE_NAME_OVERRIDES_BY_LANG(self) -> dict[str, dict[str, str]]:
+    def ZONE_NAME_OVERRIDES_BY_LANG(self) -> Mapping[str, Mapping[str, str]]:
         return get_zone_name_overrides_by_lang()
 
     @property
-    def CHECKPOINT_NAMES_BY_LANG(self) -> dict[str, dict[str, str]]:
+    def CHECKPOINT_NAMES_BY_LANG(self) -> Mapping[str, Mapping[str, str]]:
         return get_checkpoint_names_by_lang()
 
     @property
-    def TOWER_STAGES_BY_LANG(self) -> dict[str, dict[str, str]]:
+    def TOWER_STAGES_BY_LANG(self) -> Mapping[str, Mapping[str, str]]:
         return get_tower_stages_by_lang()
 
     @property
-    def LOCALIZED_PRESENTATION(self) -> dict[str, dict[str, str]]:
+    def LOCALIZED_PRESENTATION(self) -> Mapping[str, Mapping[str, str]]:
         return get_localized_presentation()
 
     @property
-    def CONTEXTUAL_CHECKPOINTS(self) -> list[dict[str, Any]]:
+    def CONTEXTUAL_CHECKPOINTS(self) -> tuple[Mapping[str, Any], ...]:
         return get_contextual_checkpoints()
 
     @property
-    def ENDLESS_TOWER_TRIALS(self) -> list[TrialDefinition]:
+    def ENDLESS_TOWER_TRIALS(self) -> tuple[TrialDefinition, ...]:
         return get_endless_tower_trials()
 
     def __dir__(self) -> list[str]:

@@ -8,6 +8,7 @@ import re
 import stat
 from pathlib import Path
 
+from expedition33_rpc.core.platform import open_file_shared_binary
 from expedition33_rpc.detection.normalization import (
     format_zone_name,
     is_continent_zone,
@@ -173,7 +174,7 @@ class SaveFileReader:
                 return res
 
             with (
-                open(sav_path, "rb") as f,
+                open_file_shared_binary(sav_path) as f,
                 mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm,
             ):
                 idx = mm.find(b"LastUsedSavePoint")

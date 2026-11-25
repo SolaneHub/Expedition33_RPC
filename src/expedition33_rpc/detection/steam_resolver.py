@@ -59,6 +59,35 @@ class SteamCompatResolver:
     def home_dir(self) -> Path:
         return self._home_dir
 
+    @staticmethod
+    def _dedupe_paths(paths: list[Path]) -> list[Path]:
+        seen: set[str] = set()
+        unique: list[Path] = []
+        for p in paths:
+            norm = os.path.normpath(str(p))
+            if norm not in seen:
+                seen.add(norm)
+                unique.append(Path(norm))
+        return unique
+
+    @staticmethod
+    def _dedupe_str_paths(paths: list[str]) -> list[str]:
+        seen: set[str] = set()
+        unique: list[str] = []
+        for p in paths:
+            norm = os.path.normpath(p)
+            if norm not in seen:
+                seen.add(norm)
+                unique.append(norm)
+        return unique
+
+    def _expand_win_env(self, template: str) -> str:
+        return re.sub(
+            r"%([^%]+)%",
+            lambda m: self._environ.get(m.group(1), m.group(0)),
+            template,
+        )
+
     def get_steam_roots(self, existing_only: bool = False) -> list[Path]:
         """Resolves root Steam installation paths across Windows registry or Linux/SteamOS roots."""
         roots: list[Path] = []
@@ -82,15 +111,7 @@ class SteamCompatResolver:
                 if not existing_only or os.path.isdir(p):
                     roots.append(p)
 
-        # De-duplicate preserving order
-        seen: set[str] = set()
-        unique: list[Path] = []
-        for r in roots:
-            norm = os.path.normpath(str(r))
-            if norm not in seen:
-                seen.add(norm)
-                unique.append(Path(norm))
-        return unique
+        return self._dedupe_paths(roots)
 
     @staticmethod
     def parse_libraryfolders_vdf(vdf_path: Path | str) -> list[Path]:
@@ -127,15 +148,7 @@ class SteamCompatResolver:
             for lib in self.parse_libraryfolders_vdf(vdf_path):
                 libraries.append(lib)
 
-        # De-duplicate preserving order
-        seen: set[str] = set()
-        unique: list[Path] = []
-        for lib in libraries:
-            norm = os.path.normpath(str(lib))
-            if norm not in seen:
-                seen.add(norm)
-                unique.append(Path(norm))
-        return unique
+        return self._dedupe_paths(libraries)
 
     def get_proton_prefixes(self) -> list[Path]:
         """Resolves Proton / Wine prefix directories (the 'pfx' folder) ordered by priority:
@@ -156,20 +169,14 @@ class SteamCompatResolver:
         if env_wine:
             prefixes.append(Path(env_wine))
 
-        # 3. Standard Linux Steam roots
+        # 3. Standard Linux Steam roots & secondary Steam libraries (e.g. SD card)
         if not self._is_windows:
             for root in self.get_steam_roots(existing_only=False):
                 prefixes.append(root / "steamapps" / "compatdata" / self.app_id / "pfx")
+            for lib in self.get_steam_libraries():
+                prefixes.append(lib / "steamapps" / "compatdata" / self.app_id / "pfx")
 
-        # De-duplicate preserving order
-        seen: set[str] = set()
-        unique: list[Path] = []
-        for p in prefixes:
-            norm = os.path.normpath(str(p))
-            if norm not in seen:
-                seen.add(norm)
-                unique.append(Path(norm))
-        return unique
+        return self._dedupe_paths(prefixes)
 
     def get_prefix_user_roots(self) -> list[Path]:
         """Returns candidate 'drive_c/users/steamuser' paths for each Proton/Wine prefix."""
@@ -179,8 +186,8 @@ class SteamCompatResolver:
         """Returns candidate paths for the expedition33_status.json / rpc_status.json telemetry files."""
         if self._is_windows:
             return [
-                os.path.expandvars(r"%TEMP%\expedition33_status.json"),
-                os.path.expandvars(r"%LOCALAPPDATA%\Sandfall\rpc_status.json"),
+                self._expand_win_env(r"%TEMP%\expedition33_status.json"),
+                self._expand_win_env(r"%LOCALAPPDATA%\Sandfall\rpc_status.json"),
             ]
 
         paths: list[str] = []
@@ -190,23 +197,16 @@ class SteamCompatResolver:
 
         paths.append("/tmp/expedition33_status.json")
 
-        seen: set[str] = set()
-        unique: list[str] = []
-        for p in paths:
-            norm = os.path.normpath(p)
-            if norm not in seen:
-                seen.add(norm)
-                unique.append(norm)
-        return unique
+        return self._dedupe_str_paths(paths)
 
     def resolve_config_candidates(self) -> list[str]:
         """Returns candidate paths for GameUserSettings.ini."""
         if self._is_windows:
             return [
-                os.path.expandvars(
+                self._expand_win_env(
                     r"%LOCALAPPDATA%\Sandfall\Saved\Config\Windows\GameUserSettings.ini"
                 ),
-                os.path.expandvars(
+                self._expand_win_env(
                     r"%LOCALAPPDATA%\Sandfall\Saved\Config\WindowsNoEditor\GameUserSettings.ini"
                 ),
             ]
@@ -229,20 +229,13 @@ class SteamCompatResolver:
             )
         )
 
-        seen: set[str] = set()
-        unique: list[str] = []
-        for p in paths:
-            norm = os.path.normpath(p)
-            if norm not in seen:
-                seen.add(norm)
-                unique.append(norm)
-        return unique
+        return self._dedupe_str_paths(paths)
 
     def resolve_save_games_candidates(self) -> list[str]:
         """Returns candidate paths for the SaveGames directory."""
         if self._is_windows:
             return [
-                os.path.expandvars(r"%LOCALAPPDATA%\Sandfall\Saved\SaveGames"),
+                self._expand_win_env(r"%LOCALAPPDATA%\Sandfall\Saved\SaveGames"),
             ]
 
         paths: list[str] = []
@@ -251,14 +244,7 @@ class SteamCompatResolver:
 
         paths.append(str(self._home_dir / ".config" / "Sandfall" / "Saved" / "SaveGames"))
 
-        seen: set[str] = set()
-        unique: list[str] = []
-        for p in paths:
-            norm = os.path.normpath(p)
-            if norm not in seen:
-                seen.add(norm)
-                unique.append(norm)
-        return unique
+        return self._dedupe_str_paths(paths)
 
     def resolve_telemetry_file_path(self, custom_path: str | None = None) -> str:
         """Finds the first existing telemetry file, or returns the most likely candidate path."""
@@ -291,7 +277,7 @@ class SteamCompatResolver:
         return (
             candidates[0]
             if candidates
-            else os.path.expandvars(r"%LOCALAPPDATA%\Sandfall\Saved\SaveGames")
+            else self._expand_win_env(r"%LOCALAPPDATA%\Sandfall\Saved\SaveGames")
         )
 
     def find_game_install_win64_directory(self, target_names: set[str] | None = None) -> str | None:

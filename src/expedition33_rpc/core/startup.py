@@ -72,9 +72,10 @@ def sync_startup_path() -> None:
 
 
 def toggle_startup() -> bool:
-    """Toggles the current Windows startup state and returns new state."""
+    """Toggles the current Windows startup state and returns the resulting state."""
     new_state = not is_startup_enabled()
-    set_startup_enabled(new_state)
+    if not set_startup_enabled(new_state):
+        return is_startup_enabled()
     return new_state
 
 
