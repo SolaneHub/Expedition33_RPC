@@ -38,6 +38,8 @@ jobs:
         run: uv sync --frozen
 
       - name: Verify Code Quality & Tests (Ruff, Pyright, Pytest, Prettier)
+        env:
+          PYSTRAY_BACKEND: dummy
         run: |
           uv run ruff check
           uv run ruff format --check
@@ -121,12 +123,12 @@ jobs:
                   except Exception as e:
                       print(f"Warning: Failed to parse pyproject.toml with tomllib: {e}", file=sys.stderr)
 
-              # Secondary fallback: src/expedition33_rpc/__init__.py
+              # Secondary fallback: src/expedition33_rpc/_version.py
               if not tag:
-                  init_path = Path("src/expedition33_rpc/__init__.py")
-                  if init_path.exists():
+                  version_path = Path("src/expedition33_rpc/_version.py")
+                  if version_path.exists():
                       try:
-                          with open(init_path, "r", encoding="utf-8") as f:
+                          with open(version_path, "r", encoding="utf-8") as f:
                               for line in f:
                                   line_clean = line.strip()
                                   if line_clean.startswith("__version__"):
@@ -135,12 +137,12 @@ jobs:
                                           tag = f"v{ver}" if not ver.startswith("v") else ver
                                           break
                       except Exception as e:
-                          print(f"[Warning] Failed reading src/expedition33_rpc/__init__.py: {e}")
+                          print(f"[Warning] Failed reading src/expedition33_rpc/_version.py: {e}")
 
           if not tag:
               sys.exit(
                   "Error: Unable to resolve release version. Neither input tag/ref, pyproject.toml, "
-                  "nor src/expedition33_rpc/__init__.py provided a valid version string."
+                  "nor src/expedition33_rpc/_version.py provided a valid version string."
               )
 
           clean_num = tag.lstrip("v")

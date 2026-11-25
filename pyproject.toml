@@ -112,10 +112,12 @@ executionEnvironments = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", ".github/scripts"]
+addopts = "-m 'not soak'"
 markers = [
-    "unit: Fast in-memory unit tests (pure logic, no heavy simulation/IO, SLA < 3.0s)",
-    "integration: High-level orchestration, state transitions, lifecycle, filesystem and IPC simulation (SLA < 8.0s)",
+    "unit: Fast in-memory unit tests (pure logic, no heavy simulation/IO, SLA < 2.0s)",
+    "integration: High-level orchestration, state transitions, lifecycle, filesystem and IPC simulation (SLA < 5.0s)",
     "ci: Slow full matrix, CI release tooling and diagrams (SLA < 15.0s)",
+    "soak: Heavy chaos, seeded fuzzing, and multi-thread soak tests (opt-in local/nightly)",
 ]
 
 

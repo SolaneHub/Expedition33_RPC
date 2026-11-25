@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
 
 jobs:
   test:
@@ -38,16 +41,27 @@ jobs:
       - name: Format Check (Prettier - game_data.json)
         run: npx prettier --check src/expedition33_rpc/assets/game_data.json
 
-      - name: Type Check (Pyright)
-        run: uv run pyright
+      - name: Type Check (Pyright - Windows)
+        run: uv run pyright --pythonplatform Windows
 
-      - name: Fast Unit Tests Fail-Fast
+      - name: Type Check (Pyright - Linux)
+        run: uv run pyright --pythonplatform Linux
+
+      - name: Verify Bridge Zip
+        run: uv run python tools/build_bridge_zip.py --check
+
+      - name: Tier 1 - Fast Unit Tests
         run: uv run pytest -m unit
         env:
           PYSTRAY_BACKEND: dummy
 
-      - name: Run Integration & E2E Tests
-        run: uv run pytest -m "not unit"
+      - name: Tier 2 - Integration Tests
+        run: uv run pytest -m integration
+        env:
+          PYSTRAY_BACKEND: dummy
+
+      - name: Tier 3 - CI Tests
+        run: uv run pytest -m ci
         env:
           PYSTRAY_BACKEND: dummy
 
@@ -74,3 +88,26 @@ jobs:
             Write-Error "Smoke test failed with exit code $($proc.ExitCode)"
             exit $proc.ExitCode
           }
+
+  soak:
+    name: Soak & Chaos Verification
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run Soak Matrix
+        run: uv run python tools/run_matrix.py --tier soak
