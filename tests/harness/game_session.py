@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
 
+from tests.harness.clock_harness import DualClockHarness
 from tests.harness.fake_process import FakeProcess
 
 from expedition33_rpc.detection.detector import (
@@ -194,6 +195,7 @@ class GameSessionSimulator:
         base_dir: str | Path | None = None,
         pid: int = 4333,
         process_name: str = "Sandfall-Win64-Shipping.exe",
+        clock: DualClockHarness | None = None,
     ) -> None:
         if base_dir is None:
             self._temp_dir_obj: tempfile.TemporaryDirectory[str] | None = (
@@ -204,12 +206,13 @@ class GameSessionSimulator:
             self._temp_dir_obj = None
             self.root_path = Path(base_dir)
 
+        self.clock = clock
         self.pid = pid
         self.process_name = process_name
         self.bridge_path = self.root_path / "expedition33_status.json"
 
         # Mock process
-        self.proc_start_time = time.time()
+        self.proc_start_time = self.clock.epoch if self.clock is not None else time.time()
         self.mock_proc = FakeProcess(
             pid=self.pid,
             name=self.process_name,
@@ -230,7 +233,14 @@ class GameSessionSimulator:
         self.current_tower_trial: Any = None
 
         # Telemetry providers and detector
-        self.bridge_provider = BridgeStateProvider(paths=[str(self.bridge_path)])
+        if self.clock is not None:
+            self.bridge_provider = BridgeStateProvider(
+                paths=[str(self.bridge_path)],
+                epoch_provider=self.clock.epoch_clock,
+                monotonic_provider=self.clock.monotonic_clock,
+            )
+        else:
+            self.bridge_provider = BridgeStateProvider(paths=[str(self.bridge_path)])
         self.timer_tracker = ZoneTimerTracker()
 
         self._detector: GameDetector | None = None
@@ -346,17 +356,27 @@ class GameSessionSimulator:
             tower_trial=self.current_tower_trial,
             checkpoint=self.current_checkpoint,
             floor=self.current_floor,
+            timestamp=self.clock.epoch if self.clock is not None else None,
         )
         self.bridge_path.write_text(json.dumps(payload), encoding="utf-8")
 
     def create_detector(self) -> GameDetector:
         """Creates or returns a GameDetector wired to this simulation session."""
         if self._detector is None:
-            self._detector = GameDetector(
-                timer_tracker=self.timer_tracker,
-                bridge_provider=self.bridge_provider,
-                process_scanner=lambda: list(self.running_procs),
-            )
+            if self.clock is not None:
+                self._detector = GameDetector(
+                    timer_tracker=self.timer_tracker,
+                    bridge_provider=self.bridge_provider,
+                    process_scanner=lambda: list(self.running_procs),
+                    epoch_provider=self.clock.epoch_clock,
+                    monotonic_provider=self.clock.monotonic_clock,
+                )
+            else:
+                self._detector = GameDetector(
+                    timer_tracker=self.timer_tracker,
+                    bridge_provider=self.bridge_provider,
+                    process_scanner=lambda: list(self.running_procs),
+                )
         return self._detector
 
     @property

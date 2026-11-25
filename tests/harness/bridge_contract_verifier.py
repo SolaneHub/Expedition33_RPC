@@ -132,3 +132,60 @@ class BridgeContractInspector:
                 errors.append("Mismatch in 'checkpoint' parsed value")
 
         return len(errors) == 0, errors
+
+    def verify_lua_structure(self, lua_content: str | None = None) -> tuple[bool, list[str]]:
+        """Performs structural safety checks on main.lua."""
+        content = lua_content if lua_content is not None else self.read_mod_script()
+        errors: list[str] = []
+
+        # 1. Check json_escape handles required characters
+        escape_match = re.search(r"local function json_escape\(s\)(.*?)\nend", content, re.DOTALL)
+        if not escape_match:
+            errors.append("Missing 'local function json_escape(s)' in main.lua")
+        else:
+            escape_body = escape_match.group(1)
+            for token in (r'"\\"', """'"'""", r'"\n"', r'"\r"', r'"\t"', r"[%z\1-\31]"):
+                if token not in escape_body:
+                    errors.append(f"json_escape is missing handling for {token}")
+
+        # 2. Check write_status cleans up tmp_path
+        write_match = re.search(r"local function write_status\((.*?)\nend", content, re.DOTALL)
+        if not write_match:
+            errors.append("Missing 'local function write_status(...)' in main.lua")
+        else:
+            write_body = write_match.group(1)
+            if "tmp_path" in write_body and "os.remove(tmp_path)" not in write_body:
+                errors.append("write_status uses tmp_path without os.remove(tmp_path) cleanup")
+
+        # 3. Check continuous heartbeat LoopAsync(1000, ...)
+        if not re.search(r"LoopAsync\(\s*1000\s*,", content):
+            errors.append("Missing continuous heartbeat LoopAsync(1000, ...) in main.lua")
+
+        # 4. Check no direct UObject queries inside LoopAsync outside ExecuteInGameThread
+        loop_match = re.search(r"LoopAsync\(\s*1000\s*,(.*)\Z", content, re.DOTALL)
+        if loop_match:
+            loop_body = loop_match.group(1)
+            stripped_exec = re.sub(
+                r"ExecuteInGameThread\(function\(\).*?\n\s*end\)",
+                "",
+                loop_body,
+                flags=re.DOTALL,
+            )
+            for unsafe_call in ("FindAllOf(", "StaticFindObject("):
+                if unsafe_call in stripped_exec:
+                    errors.append(
+                        f"Direct UObject call {unsafe_call!r} found in LoopAsync outside ExecuteInGameThread"
+                    )
+
+        # 5. Check balanced block openers vs 'end' (excluding comments and strings)
+        cleaned = re.sub(r"--[^\n]*", "", content)
+        cleaned = re.sub(r"'[^'\n]*'", "''", cleaned)
+        cleaned = re.sub(r'"[^"\n]*"', '""', cleaned)
+        openers = len(re.findall(r"\b(?:function|if|for|while)\b", cleaned))
+        closers = len(re.findall(r"\bend\b", cleaned))
+        if openers != closers:
+            errors.append(
+                f"Unbalanced Lua blocks: {openers} openers (function/if/for/while) vs {closers} 'end'"
+            )
+
+        return len(errors) == 0, errors

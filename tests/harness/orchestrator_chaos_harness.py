@@ -50,7 +50,7 @@ class OrchestratorChaosHarness:
         self.clock = DualClockHarness(initial_monotonic=1000.0, initial_epoch=1_700_000_000.0)
 
         # Game session simulation
-        self.session = GameSessionSimulator(base_dir=self.root_path)
+        self.session = GameSessionSimulator(base_dir=self.root_path, clock=self.clock)
 
         # Mock Discord Server
         self.server = MockDiscordServer(pipe_path=pipe_path)
@@ -96,7 +96,7 @@ class OrchestratorChaosHarness:
             mock_icon=mock_icon,
         )
 
-    def run_chaos_cycles(self, cycles: int = 50) -> None:
+    def run_chaos_cycles(self, cycles: int = 50, seed: int = 33) -> None:
         """Runs rapid chaos cycles executing random interleaved events:
 
         - Rapid orchestrator start() / stop()
@@ -105,6 +105,7 @@ class OrchestratorChaosHarness:
         - Simulated clock jumps (advance or NTP jitter)
         - Tray menu interaction
         """
+        rng = random.Random(seed)
         for cycle in range(cycles):
             action = cycle % 5
 
@@ -131,8 +132,8 @@ class OrchestratorChaosHarness:
                 self.orchestrator.stop()
             elif action == 3:
                 # Simulated clock jumps
-                self.clock.advance(float(random.randint(1, 100)))
-                self.clock.simulate_ntp_jump(float(random.choice([-100, 100])))
+                self.clock.advance(float(rng.randint(1, 100)))
+                self.clock.simulate_ntp_jump(float(rng.choice([-100, 100])))
                 self.orchestrator.start()
                 self.session.start_game(pid=6000 + cycle).trigger_combat("Duollistes")
                 self.orchestrator.step_update()

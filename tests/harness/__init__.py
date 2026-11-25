@@ -7,8 +7,20 @@ from tests.harness.discord_transport_mock import MockDiscordServer
 from tests.harness.fake_process import FakeProcess
 from tests.harness.fake_services import (
     FakeBridgeInstaller,
+    FakeBrowserLauncher,
+    FakeHttpOpener,
+    FakeHttpResponse,
     FakeStartupService,
     FakeUpdater,
+    FakeWinreg,
+    FakeWinregKey,
+)
+from tests.harness.fs_audit import FilesystemActivityAudit
+from tests.harness.fuzz_generators import (
+    generate_adversarial_bridge_payloads,
+    generate_adversarial_discord_frames,
+    generate_multilingual_presence_inputs,
+    generate_mutated_sav_blobs,
 )
 from tests.harness.game_session import (
     SCENARIOS,
@@ -28,9 +40,15 @@ __all__ = [
     "DiscordPipeSimulator",
     "DualClockHarness",
     "FakeBridgeInstaller",
+    "FakeBrowserLauncher",
+    "FakeHttpOpener",
+    "FakeHttpResponse",
     "FakeProcess",
     "FakeStartupService",
     "FakeUpdater",
+    "FakeWinreg",
+    "FakeWinregKey",
+    "FilesystemActivityAudit",
     "GameSessionSimulator",
     "HeadlessTrayHarness",
     "MockDiscordServer",
@@ -39,4 +57,8 @@ __all__ = [
     "StoryboardStep",
     "TelemetryContentionSimulator",
     "create_telemetry_payload",
+    "generate_adversarial_bridge_payloads",
+    "generate_adversarial_discord_frames",
+    "generate_multilingual_presence_inputs",
+    "generate_mutated_sav_blobs",
 ]
