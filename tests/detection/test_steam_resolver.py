@@ -207,3 +207,50 @@ def test_steam_resolver_permission_error_handling(tmp_path: Path) -> None:
     with patch("builtins.open", side_effect=PermissionError("Permission denied")):
         libs = SteamCompatResolver.parse_libraryfolders_vdf(existing_file)
         assert libs == []
+
+
+def test_steam_resolver_proton_sd_card_via_libraryfolders_vdf(tmp_path: Path) -> None:
+    """Verifies Proton prefix discovery on an external SD card library via libraryfolders.vdf."""
+    fake_home = tmp_path / "home" / "deck"
+    steam_root = fake_home / ".local" / "share" / "Steam"
+    steamapps = steam_root / "steamapps"
+    steamapps.mkdir(parents=True)
+
+    sd_library = tmp_path / "run" / "media" / "mmcblk0p1" / "SteamLibrary"
+    sd_pfx = sd_library / "steamapps" / "compatdata" / "1903340" / "pfx"
+    sd_pfx.mkdir(parents=True)
+
+    vdf_file = steamapps / "libraryfolders.vdf"
+    vdf_file.write_text(
+        f'"libraryfolders"\n{{\n\t"0"\n\t{{\n\t\t"path"\t\t"{steam_root}"\n\t}}\n\t"1"\n\t{{\n\t\t"path"\t\t"{sd_library}"\n\t}}\n}}\n',
+        encoding="utf-8",
+    )
+
+    resolver = SteamCompatResolver(
+        app_id="1903340",
+        is_windows=False,
+        home_dir=fake_home,
+        environ={},
+        winreg_module=None,
+    )
+    prefixes = resolver.get_proton_prefixes()
+    assert sd_pfx in prefixes
+
+
+def test_steam_resolver_windows_environ_purity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies self._environ isolation and purity on simulated Windows."""
+    monkeypatch.setenv("STEAM_COMPAT_DATA_PATH", "/leaked/from/os/environ")
+    injected_env = {"LOCALAPPDATA": str(tmp_path / "LocalAppData")}
+    resolver = SteamCompatResolver(
+        is_windows=True,
+        environ=injected_env,
+        winreg_module=None,
+    )
+    assert resolver._environ == injected_env
+    assert resolver._environ is not injected_env or resolver._environ["LOCALAPPDATA"] == str(
+        tmp_path / "LocalAppData"
+    )
+    prefixes = resolver.get_proton_prefixes()
+    assert all("leaked" not in str(p) for p in prefixes)

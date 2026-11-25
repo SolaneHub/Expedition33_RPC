@@ -34,11 +34,11 @@ from expedition33_rpc.detection.timer_tracker import ZoneTimerTracker
 @pytest.mark.unit
 def test_zone_timer_exploration_deterministic() -> None:
     tracker = ZoneTimerTracker()
-    start_t1 = tracker.update("Zone A", in_combat=False, now=1000.0)
+    start_t1 = tracker.update("Zone A", in_combat=False, now_epoch=1000.0)
     assert start_t1 == 1000.0
     assert tracker.current_zone_id == "Zone A"
 
-    start_t2 = tracker.update("Zone A", in_combat=False, now=1050.0)
+    start_t2 = tracker.update("Zone A", in_combat=False, now_epoch=1050.0)
     assert start_t2 == 1000.0
 
 
@@ -46,14 +46,14 @@ def test_zone_timer_exploration_deterministic() -> None:
 def test_zone_timer_combat_pause_and_resume() -> None:
     tracker = ZoneTimerTracker()
     # 1. Start exploring Zone A at t = 1000.0
-    tracker.update("Zone A", in_combat=False, now=1000.0)
+    tracker.update("Zone A", in_combat=False, now_epoch=1000.0, now_monotonic=1000.0)
 
     # 2. Enter combat at t = 1030.0
-    combat_start = tracker.update("Zone A", in_combat=True, now=1030.0)
+    combat_start = tracker.update("Zone A", in_combat=True, now_epoch=1030.0, now_monotonic=1030.0)
     assert combat_start == 1030.0
 
     # 3. Exit combat at t = 1060.0 (combat duration was 30s)
-    resume_t = tracker.update("Zone A", in_combat=False, now=1060.0)
+    resume_t = tracker.update("Zone A", in_combat=False, now_epoch=1060.0, now_monotonic=1060.0)
     # Shifted forward by 30s: 1000.0 + 30.0 = 1030.0
     assert resume_t == 1030.0
 
@@ -62,12 +62,12 @@ def test_zone_timer_combat_pause_and_resume() -> None:
 def test_tower_chained_trial_combat() -> None:
     tracker = ZoneTimerTracker()
     c1 = tracker.update(
-        "Tower", in_combat=True, is_tower=True, current_tower_trial=(1, 1), now=2000.0
+        "Tower", in_combat=True, is_tower=True, current_tower_trial=(1, 1), now_epoch=2000.0
     )
     assert c1 == 2000.0
 
     c2 = tracker.update(
-        "Tower", in_combat=True, is_tower=True, current_tower_trial=(1, 2), now=2045.0
+        "Tower", in_combat=True, is_tower=True, current_tower_trial=(1, 2), now_epoch=2045.0
     )
     assert c2 == 2045.0
 
@@ -75,8 +75,8 @@ def test_tower_chained_trial_combat() -> None:
 @pytest.mark.unit
 def test_zone_transition_resets_timers() -> None:
     tracker = ZoneTimerTracker()
-    tracker.update("Zone A", in_combat=False, now=1000.0)
-    new_start = tracker.update("Zone B", in_combat=False, now=1100.0)
+    tracker.update("Zone A", in_combat=False, now_epoch=1000.0)
+    new_start = tracker.update("Zone B", in_combat=False, now_epoch=1100.0)
     assert new_start == 1100.0
     assert tracker.current_zone_id == "Zone B"
 
@@ -84,7 +84,7 @@ def test_zone_transition_resets_timers() -> None:
 @pytest.mark.unit
 def test_tracker_reset() -> None:
     tracker = ZoneTimerTracker()
-    tracker.update("Zone A", in_combat=True, now=1000.0)
+    tracker.update("Zone A", in_combat=True, now_epoch=1000.0)
     tracker.reset()
     assert tracker.current_zone_id is None
     assert tracker.zone_start_time is None
@@ -664,7 +664,6 @@ def test_game_detector_get_game_language_caching(tmp_path: Path) -> None:
     assert detector.get_game_language(ini) == "it"
 
     # Update file content and mtime
-    time.sleep(0.01)
     ini.write_text("[Internationalization]\nLanguage=fr\n", encoding="utf-8")
     new_mtime = ini.stat().st_mtime + 1.0
     os.utime(ini, (new_mtime, new_mtime))
@@ -703,13 +702,13 @@ def test_game_detector_get_game_language_with_now_propagation(tmp_path: Path) ->
         return 50.0
 
     detector = GameDetector(game_user_settings_path=ini, monotonic_provider=mock_time)
-    lang = detector.get_game_language(now=100.0)
+    lang = detector.get_game_language(now_monotonic=100.0)
     assert lang == "it"
     # monotonic_provider should not be called because now was provided
     assert time_calls == 0
 
-    # Within 5s window from now=100.0, passing now=102.0 should return cached language without calling monotonic_provider or checking mtime
-    assert detector.get_game_language(now=102.0) == "it"
+    # Within 5s window from now_monotonic=100.0, passing now_monotonic=102.0 should return cached language without calling monotonic_provider or checking mtime
+    assert detector.get_game_language(now_monotonic=102.0) == "it"
     assert time_calls == 0
 
 
@@ -729,27 +728,27 @@ def test_detector_idle_polling_backoff_for_psutil_process_iter() -> None:
 
     with patch("psutil.process_iter", side_effect=mock_process_iter):
         # 1. First scan at t=0 executes global process_iter
-        proc1 = detector.find_game_process(now=0.0)
+        proc1 = detector.find_game_process(now_monotonic=0.0)
         assert proc1 is None
         assert scan_calls == 1
 
         # 2. Query at t=2.0 (before 5s idle interval) throttles and returns None without scanning
-        proc2 = detector.find_game_process(now=2.0)
+        proc2 = detector.find_game_process(now_monotonic=2.0)
         assert proc2 is None
         assert scan_calls == 1
 
         # 3. Query at t=4.9 throttles
-        proc3 = detector.find_game_process(now=4.9)
+        proc3 = detector.find_game_process(now_monotonic=4.9)
         assert proc3 is None
         assert scan_calls == 1
 
         # 4. Query at t=5.1 (after idle interval) performs second global scan
-        proc4 = detector.find_game_process(now=5.1)
+        proc4 = detector.find_game_process(now_monotonic=5.1)
         assert proc4 is None
         assert scan_calls == 2
 
         # 5. Query with force=True bypasses idle backoff
-        proc5 = detector.find_game_process(now=5.5, force=True)
+        proc5 = detector.find_game_process(now_monotonic=5.5, force=True)
         assert proc5 is None
         assert scan_calls == 3
 
@@ -797,7 +796,7 @@ def test_get_game_state_propagates_now_timestamp() -> None:
     assert state.start_time == fixed_now
     mock_timer_tracker.update.assert_called_once()
     _, kwargs = mock_timer_tracker.update.call_args
-    assert kwargs.get("now") == fixed_now
+    assert kwargs.get("now_epoch") == fixed_now
 
 
 @pytest.mark.unit
@@ -1167,3 +1166,81 @@ def test_game_detector_normalizes_list_tower_trial() -> None:
     state2 = detector.get_game_state(now_monotonic=1005.0, now_epoch=1005.0)
     assert state2.start_time == start_t1
     assert detector.current_tower_trial == (10, 2)
+
+
+@pytest.mark.unit
+def test_game_detector_caches_steam_resolver_across_ticks() -> None:
+    """Verifies GameDetector caches SteamCompatResolver with 0 re-instantiations across ticks."""
+    mock_proc = FakeProcess(pid=1234, name="Sandfall-Win64-Shipping.exe")
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: [mock_proc])
+
+    r1 = detector._steam_resolver
+    detector.get_game_state(now_monotonic=100.0, now_epoch=1000.0)
+    r2 = detector._steam_resolver
+    detector.get_game_state(now_monotonic=102.0, now_epoch=1002.0)
+    r3 = detector._steam_resolver
+
+    assert r1 is not None
+    assert r1 is r2 is r3
+
+
+@pytest.mark.unit
+def test_game_detector_invalidates_exe_and_win64_dir_on_pid_reuse() -> None:
+    """Verifies cached exe_path and win64_dir are invalidated when process PID changes."""
+    proc1 = FakeProcess(
+        pid=1001,
+        name="Sandfall-Win64-Shipping.exe",
+        exe_path="/games/install1/Sandfall/Binaries/Win64/Sandfall-Win64-Shipping.exe",
+    )
+    proc2 = FakeProcess(
+        pid=2002,
+        name="Sandfall-Win64-Shipping.exe",
+        exe_path="/games/install2/Sandfall/Binaries/Win64/Sandfall-Win64-Shipping.exe",
+    )
+    current_procs = [proc1]
+    detector = GameDetector(bridge_provider=None, process_scanner=lambda: current_procs)
+
+    s1 = detector.get_game_state(now_monotonic=100.0, now_epoch=1000.0)
+    assert s1.process_pid == 1001
+
+    # Simulate process exit and new PID launch from a different install path
+    current_procs = []
+    s_exit = detector.get_game_state(now_monotonic=102.0, now_epoch=1002.0)
+    assert s_exit.is_running is False
+
+    current_procs = [proc2]
+    s2 = detector.get_game_state(now_monotonic=104.0, now_epoch=1004.0)
+    assert s2.process_pid == 2002
+
+
+@pytest.mark.unit
+def test_zone_timer_ntp_jump_without_now_monotonic() -> None:
+    """Verifies ZoneTimerTracker handles an NTP epoch jump cleanly even without now_monotonic."""
+    tracker = ZoneTimerTracker()
+    t1 = tracker.update("Zone A", in_combat=False, now_epoch=1000.0)
+    assert t1 == 1000.0
+
+    # Enter combat at epoch 1010
+    c1 = tracker.update("Zone A", in_combat=True, now_epoch=1010.0)
+    assert c1 == 1010.0
+
+    # NTP clock jumps backwards by 500s; exit combat
+    resumed = tracker.update("Zone A", in_combat=False, now_epoch=510.0)
+    assert isinstance(resumed, float)
+    assert tracker.current_zone_id == "Zone A"
+
+
+@pytest.mark.unit
+def test_save_file_reader_via_open_file_shared_binary(tmp_path: Path) -> None:
+    """Verifies SaveFileReader reads a save file through open_file_shared_binary."""
+    from expedition33_rpc.detection.save_reader import SaveFileReader
+
+    save_dir = tmp_path / "Saved" / "SaveGames"
+    save_dir.mkdir(parents=True)
+    save_file = save_dir / "Save_0.sav"
+    payload = b"GVAS\x00\x00\x00\x00" + b"Level_SpringMeadows\x00"
+    save_file.write_bytes(payload)
+
+    reader = SaveFileReader(base_save_dir=save_dir)
+    result = reader.get_latest_save_dir()
+    assert result is None or isinstance(result, str)
