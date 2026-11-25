@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.harness.bridge_contract_verifier import BridgeContractInspector
 
 from expedition33_rpc.core.resources import get_resource_path
 from expedition33_rpc.detection.detector import BridgeStateProvider
@@ -71,67 +72,11 @@ def test_bridge_lua_script_emits_expected_json_contract() -> None:
         assert re.search(pattern, lua_content), f"main.lua does not emit required JSON key '{key}'"
 
 
-def test_bridge_lua_write_status_schema_contract_with_state_provider(tmp_path: Path) -> None:
+def test_bridge_lua_write_status_schema_contract_with_state_provider() -> None:
     """Verifies complete schema synchronization between main.lua write_status and BridgeStateProvider."""
-    bridge_zip_path = Path(get_resource_path("bridge.zip"))
-    with zipfile.ZipFile(bridge_zip_path, "r") as z:
-        lua_content = z.read("ue4ss/Mods/Expedition33RPC/scripts/main.lua").decode("utf-8")
-
-    # Extract JSON format string inside write_status in main.lua
-    match = re.search(r"local payload = string\.format\(\s*\'([^\']+)\'", lua_content)
-    assert match is not None, "Failed to extract JSON format template from write_status in main.lua"
-    format_template = match.group(1).strip()
-
-    # Verify that all keys produced by write_status format string are present
-    emitted_keys = re.findall(r'"([a-zA-Z0-9_]+)"\s*:', format_template)
-    expected_emitted_keys = {
-        "in_combat",
-        "enemy_name",
-        "enemies",
-        "zone",
-        "raw_zone",
-        "raw_level",
-        "world_path",
-        "checkpoint",
-        "floor",
-        "tower_floor",
-        "tower_trial",
-        "timestamp",
-    }
-    assert expected_emitted_keys.issubset(set(emitted_keys))
-
-    # Simulate realistic main.lua emission using extracted format keys
-    now = time.time()
-    simulated_lua_output = {
-        "in_combat": True,
-        "enemy_name": "Duollistes",
-        "enemies": ["Duollistes", "Alpha Gold Chevaliere"],
-        "zone": "Level_Main_OldLumiere",
-        "raw_zone": "Level_Main_OldLumiere",
-        "raw_level": "Level_Main_OldLumiere_P",
-        "world_path": "/Game/Maps/OldLumiere",
-        "checkpoint": "Entrance",
-        "floor": 4,
-        "tower_floor": 4,
-        "tower_trial": [2, 1],
-        "timestamp": now,
-    }
-
-    status_file = tmp_path / "expedition33_status.json"
-    status_file.write_text(json.dumps(simulated_lua_output), encoding="utf-8")
-
-    provider = BridgeStateProvider(paths=[str(status_file)], epoch_provider=lambda: now)
-    parsed_data = provider.read_game_data(min_valid_timestamp=now - 5.0)
-
-    assert parsed_data is not None
-    # Verify all expected domain fields in read_game_data output
-    assert parsed_data["raw_zone"] == simulated_lua_output["raw_zone"]
-    assert parsed_data["in_combat"] is True
-    assert parsed_data["enemy_name"] == simulated_lua_output["enemy_name"]
-    assert parsed_data["enemies"] == simulated_lua_output["enemies"]
-    assert parsed_data["checkpoint"] == simulated_lua_output["checkpoint"]
-    assert parsed_data["tower_floor"] == 4
-    assert parsed_data["tower_trial"] == (2, 1)
+    inspector = BridgeContractInspector()
+    is_valid, errors = inspector.verify_contract_with_provider()
+    assert is_valid, f"Bridge contract verification failed: {errors}"
 
 
 def test_bridge_state_provider_enforces_stale_timestamp_rejection(tmp_path: Path) -> None:
@@ -393,10 +338,8 @@ def test_find_game_win64_directory_from_wingdk_process(tmp_path: Path) -> None:
     fake_exe.touch()
 
     mock_proc = MagicMock()
-    mock_proc.info = {
-        "name": "Sandfall-WinGDK-Shipping.exe",
-        "exe": str(fake_exe),
-    }
+    mock_proc.name.return_value = "Sandfall-WinGDK-Shipping.exe"
+    mock_proc.exe.return_value = str(fake_exe)
 
     with patch("psutil.process_iter", return_value=[mock_proc]):
         res = find_game_win64_directory()
@@ -426,3 +369,96 @@ def test_install_bridge_zip_slip_prevention(tmp_path: Path) -> None:
     evil_path = tmp_path / "evil.dll"
     assert not evil_path.exists()
     assert not (fake_game_dir.parent / "evil.dll").exists()
+
+
+def test_uninstall_bridge_permission_error_on_dwmapi_returns_failure(tmp_path: Path) -> None:
+    """Verifies uninstall_bridge reports PermissionError when dwmapi.dll is locked by the running game."""
+    game_dir = tmp_path / "game_binaries"
+    game_dir.mkdir(parents=True)
+    ok, msg = install_bridge(game_dir)
+    assert ok, msg
+    dwmapi = game_dir / "dwmapi.dll"
+    assert dwmapi.is_file()
+
+    with patch(
+        "expedition33_rpc.integrations.bridge_installer.os.remove",
+        side_effect=PermissionError("WinError 32: file in use"),
+    ):
+        ok_u, msg_u = uninstall_bridge(game_dir)
+
+    assert ok_u is False
+    assert "Failed to remove" in msg_u
+    assert "Please close the game if it is running." in msg_u
+    assert dwmapi.exists()
+    assert "Expedition33RPC : 1" in (game_dir / "ue4ss" / "Mods" / "mods.txt").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_uninstall_bridge_permission_error_on_mod_dir_returns_failure(tmp_path: Path) -> None:
+    """Verifies uninstall_bridge reports OSError/PermissionError when mod_dir cannot be deleted."""
+    game_dir = tmp_path / "game_binaries"
+    mods_dir = game_dir / "ue4ss" / "Mods"
+    mods_dir.mkdir(parents=True, exist_ok=True)
+    (mods_dir / "mods.txt").write_text("OtherMod : 1\n", encoding="utf-8")
+
+    ok, msg = install_bridge(game_dir)
+    assert ok, msg
+    mod_dir = mods_dir / "Expedition33RPC"
+    assert mod_dir.is_dir()
+
+    with patch(
+        "expedition33_rpc.integrations.bridge_installer.shutil.rmtree",
+        side_effect=OSError("Directory locked"),
+    ):
+        ok_u, msg_u = uninstall_bridge(game_dir)
+
+    assert ok_u is False
+    assert "Failed to remove" in msg_u
+    assert "Please close the game if it is running." in msg_u
+    assert mod_dir.exists()
+
+
+def test_uninstall_bridge_remaining_target_on_disk_returns_failure(tmp_path: Path) -> None:
+    """Verifies uninstall_bridge fails if target remains on disk after removal attempt."""
+    game_dir = tmp_path / "game_binaries"
+    game_dir.mkdir(parents=True)
+    ok, msg = install_bridge(game_dir)
+    assert ok, msg
+
+    with patch("expedition33_rpc.integrations.bridge_installer.shutil.rmtree"):
+        ok_u, msg_u = uninstall_bridge(game_dir)
+
+    assert ok_u is False
+    assert "Failed to remove" in msg_u
+    assert "Please close the game if it is running." in msg_u
+
+
+def test_uninstall_bridge_permission_error_on_mod_dir_preserves_dwmapi_and_mods_txt(
+    tmp_path: Path,
+) -> None:
+    """Regression test for Finding 3: failed rmtree(mod_dir) without OtherMod leaves dwmapi.dll and mods.txt intact."""
+    game_dir = tmp_path / "game_binaries"
+    game_dir.mkdir(parents=True)
+    ok, msg = install_bridge(game_dir)
+    assert ok, msg
+
+    dwmapi = game_dir / "dwmapi.dll"
+    mods_txt = game_dir / "ue4ss" / "Mods" / "mods.txt"
+    mod_dir = game_dir / "ue4ss" / "Mods" / "Expedition33RPC"
+    assert dwmapi.is_file()
+    assert "Expedition33RPC : 1" in mods_txt.read_text(encoding="utf-8")
+
+    with patch(
+        "expedition33_rpc.integrations.bridge_installer.shutil.rmtree",
+        side_effect=PermissionError("Access denied on main.lua"),
+    ):
+        ok_u, msg_u = uninstall_bridge(game_dir)
+
+    assert ok_u is False
+    assert "Failed to remove" in msg_u
+    assert "Please close the game if it is running." in msg_u
+    assert dwmapi.exists()
+    assert mod_dir.exists()
+    assert "Expedition33RPC : 1" in mods_txt.read_text(encoding="utf-8")
+    assert is_bridge_installed(game_dir) is True
